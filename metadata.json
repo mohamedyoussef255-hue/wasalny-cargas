@@ -1,0 +1,6 @@
+{
+  "name": "منظومة كارجاس وبرنامج الولاء الذكي",
+  "description": "منظومة كارجاس المتكاملة لإدارة المحطات، برنامج الولاء ومكافآت السائقين، ماسح الـ QR للفنيين مع تحقق GPS، توليد أكواد المضخات والمتاجر، وإدارة أطقم العمل والمساعد الذكي مُعين.",
+  "requestFramePermissions": ["geolocation", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

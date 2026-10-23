@@ -1,0 +1,431 @@
+import React, { useEffect, useRef } from 'react';
+import L from 'leaflet';
+import { Station, NavigationState } from '../types';
+import { CARGAS_FACILITY_META, getCongestionBadge } from '../utils/companyAssets';
+import { CARGAS_LOGO_SVG } from '../utils/cargasLogo';
+import { Plus, Minus, Layers, Compass } from 'lucide-react';
+
+export type MapStyleType = 'google_streets' | 'google_hybrid' | 'google_terrain' | 'dark' | 'osm';
+
+interface MapComponentProps {
+  stations: Station[];
+  selectedStation: Station | null;
+  userLocation: [number, number];
+  onSelectStation: (station: Station) => void;
+  navigationState: NavigationState;
+  mapStyle: MapStyleType;
+  onCycleMapStyle?: () => void;
+  isAdminEditMode?: boolean;
+  globalStationLogoUrl?: string;
+  onStationPositionChange?: (stationId: string, newLat: number, newLng: number) => void;
+  onDropNewStation?: (lat: number, lng: number, data: any) => void;
+  hideOtherPOIs?: boolean;
+  isGpsActive?: boolean;
+}
+
+interface TileServerConfig {
+  url: string;
+  subdomains: string[];
+  attribution: string;
+  maxZoom: number;
+}
+
+const getTileServerConfig = (style: MapStyleType, hideOtherPOIs: boolean = true): TileServerConfig => {
+  // Suppress third-party POIs like hospitals (H), restaurants, cafes, hotels, shops
+  const poiStyle = hideOtherPOIs ? '&apistyle=s.t:3|p.v:off%2Cs.t:33|p.v:off%2Cs.t:81|p.v:off' : '';
+  const hybridPoiStyle = hideOtherPOIs ? '&apistyle=s.t:3|p.v:off%2Cs.t:33|p.v:off' : '';
+
+  switch (style) {
+    case 'google_streets':
+      return {
+        url: `https://mt{s}.google.com/vt/lyrs=m&hl=ar&gl=eg&x={x}&y={y}&z={z}${poiStyle}`,
+        subdomains: ['0', '1', '2', '3'],
+        attribution: '&copy; Google Maps (كار جاس)',
+        maxZoom: 20
+      };
+    case 'google_hybrid':
+      return {
+        url: `https://mt{s}.google.com/vt/lyrs=y&hl=ar&gl=eg&x={x}&y={y}&z={z}${hybridPoiStyle}`,
+        subdomains: ['0', '1', '2', '3'],
+        attribution: '&copy; Google Earth & Google Maps',
+        maxZoom: 20
+      };
+    case 'google_terrain':
+      return {
+        url: `https://mt{s}.google.com/vt/lyrs=p&hl=ar&gl=eg&x={x}&y={y}&z={z}${hybridPoiStyle}`,
+        subdomains: ['0', '1', '2', '3'],
+        attribution: '&copy; Google Maps Terrain',
+        maxZoom: 18
+      };
+    case 'dark':
+      return {
+        url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        subdomains: ['a', 'b', 'c', 'd'],
+        attribution: '&copy; CartoDB & OpenStreetMap',
+        maxZoom: 19
+      };
+    case 'osm':
+      return {
+        url: hideOtherPOIs 
+          ? 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png' 
+          : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        subdomains: ['a', 'b', 'c', 'd'],
+        attribution: '&copy; OpenStreetMap contributors & CARTO',
+        maxZoom: 19
+      };
+  }
+};
+
+export const MapComponent: React.FC<MapComponentProps> = ({
+  stations,
+  selectedStation,
+  userLocation,
+  onSelectStation,
+  navigationState,
+  mapStyle = 'google_streets',
+  onCycleMapStyle,
+  isAdminEditMode = false,
+  globalStationLogoUrl,
+  onStationPositionChange,
+  onDropNewStation,
+  hideOtherPOIs = true,
+  isGpsActive = false
+}) => {
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<L.Map | null>(null);
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const userMarkerRef = useRef<L.Marker | null>(null);
+  const stationMarkersRef = useRef<Map<string, L.Marker>>(new Map());
+  const routePolylineRef = useRef<L.Polyline | null>(null);
+
+  // Initialize Map
+  useEffect(() => {
+    if (!mapContainerRef.current || mapInstanceRef.current) return;
+
+    const map = L.map(mapContainerRef.current, {
+      center: userLocation,
+      zoom: 14,
+      zoomControl: false,
+      attributionControl: true,
+    });
+
+    const activeConfig = getTileServerConfig(mapStyle, hideOtherPOIs);
+    tileLayerRef.current = L.tileLayer(activeConfig.url, {
+      subdomains: activeConfig.subdomains,
+      attribution: activeConfig.attribution,
+      maxZoom: activeConfig.maxZoom,
+    }).addTo(map);
+
+    mapInstanceRef.current = map;
+
+    // Critical: Ensure Leaflet recalculates size accurately
+    const timer1 = setTimeout(() => map.invalidateSize(), 150);
+    const timer2 = setTimeout(() => map.invalidateSize(), 500);
+
+    const handleResize = () => map.invalidateSize();
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      window.removeEventListener('resize', handleResize);
+      map.remove();
+      mapInstanceRef.current = null;
+    };
+  }, []);
+
+  // Update Tile Layer when style or hideOtherPOIs changes
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+
+    if (tileLayerRef.current) {
+      map.removeLayer(tileLayerRef.current);
+    }
+    const activeConfig = getTileServerConfig(mapStyle, hideOtherPOIs);
+    tileLayerRef.current = L.tileLayer(activeConfig.url, {
+      subdomains: activeConfig.subdomains,
+      attribution: activeConfig.attribution,
+      maxZoom: activeConfig.maxZoom,
+    }).addTo(map);
+
+    map.invalidateSize();
+  }, [mapStyle, hideOtherPOIs]);
+
+  // Update User Location Marker (Google Blue Pulsing Dot)
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+
+    const userHtml = `
+      <div class="relative flex items-center justify-center w-12 h-12">
+        <div class="absolute w-12 h-12 rounded-full bg-blue-500/30 animate-ping"></div>
+        <div class="absolute w-8 h-8 rounded-full bg-blue-500/40"></div>
+        <div class="relative w-6 h-6 rounded-full bg-blue-600 border-3 border-white shadow-xl flex items-center justify-center">
+          <div class="w-2.5 h-2.5 rounded-full bg-white"></div>
+        </div>
+        <!-- Direction pointer -->
+        <div class="absolute -top-1 w-0 h-0 border-x-4 border-x-transparent border-b-6 border-b-blue-600"></div>
+      </div>
+    `;
+
+    const userIcon = L.divIcon({
+      html: userHtml,
+      className: 'user-location-marker',
+      iconSize: [48, 48],
+      iconAnchor: [24, 24],
+    });
+
+    if (userMarkerRef.current) {
+      userMarkerRef.current.setLatLng(userLocation);
+    } else {
+      userMarkerRef.current = L.marker(userLocation, {
+        icon: userIcon,
+        zIndexOffset: 1000,
+      }).addTo(map);
+    }
+
+    if (isGpsActive || navigationState.isActive) {
+      map.panTo(userLocation, { animate: true, duration: 0.8 });
+    }
+  }, [userLocation, isGpsActive, navigationState.isActive]);
+
+  // Update Station Markers
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+
+    const visibleStations = stations.filter(s => isAdminEditMode || !s.isHidden);
+    const visibleStationIds = new Set(visibleStations.map(s => s.id));
+
+    stationMarkersRef.current.forEach((marker, id) => {
+      if (!visibleStationIds.has(id)) {
+        map.removeLayer(marker);
+        stationMarkersRef.current.delete(id);
+      }
+    });
+
+    visibleStations.forEach(station => {
+      const isSelected = selectedStation?.id === station.id;
+      const isTarget = navigationState.targetStation?.id === station.id;
+      const facility = CARGAS_FACILITY_META[station.facilityType] || CARGAS_FACILITY_META.station;
+      const congestion = getCongestionBadge(station.congestionLevel, station.waitTimeMinutes);
+      const isHiddenMode = !!station.isHidden;
+      const effectiveLogo = station.customLogoUrl || globalStationLogoUrl;
+
+      // Build mini facility badges underneath Cargas emblem (Compact design)
+      const serviceBadges: string[] = [];
+      if (station.cng) {
+        serviceBadges.push(`<span style="background-color: #059669; color: white; padding: 0.5px 3px; border-radius: 9999px; font-size: 7px; font-weight: 900; display: inline-flex; align-items: center; white-space: nowrap; line-height: 1;" title="محطة غاز طبيعي مضغوط">⛽غاز</span>`);
+      }
+      if (station.conversionCenter) {
+        serviceBadges.push(`<span style="background-color: #d97706; color: white; padding: 0.5px 3px; border-radius: 9999px; font-size: 7px; font-weight: 900; display: inline-flex; align-items: center; white-space: nowrap; line-height: 1;" title="مركز تحويل وصيانة">🛠️تحويل</span>`);
+      }
+      if (station.oilCenter) {
+        serviceBadges.push(`<span style="background-color: #2563eb; color: white; padding: 0.5px 3px; border-radius: 9999px; font-size: 7px; font-weight: 900; display: inline-flex; align-items: center; white-space: nowrap; line-height: 1;" title="مركز زيوت معتمد">🛢️زيوت</span>`);
+      }
+      if (station.cylinderInspection) {
+        serviceBadges.push(`<span style="background-color: #7c3aed; color: white; padding: 0.5px 3px; border-radius: 9999px; font-size: 7px; font-weight: 900; display: inline-flex; align-items: center; white-space: nowrap; line-height: 1;" title="فحص واختبار أسطوانات">🔍فحص</span>`);
+      }
+
+      const servicesRowHtml = serviceBadges.length > 0 ? `
+        <div style="display: flex; align-items: center; justify-content: center; gap: 1.5px; margin-top: -2px; z-index: 20; background: rgba(15, 23, 42, 0.95); padding: 1px 4px; border-radius: 9999px; border: 0.5px solid rgba(16, 185, 129, 0.7); box-shadow: 0 2px 6px rgba(0,0,0,0.4); max-width: 130px; flex-wrap: nowrap; overflow: hidden; pointer-events: none;">
+          ${serviceBadges.join('')}
+        </div>
+      ` : '';
+
+      // Shorten displayed name nicely for compact view
+      const cleanShortName = station.name
+        .replace('محطة كارجاس ', '')
+        .replace('محطة ', '')
+        .replace('مركز كارجاس ', '')
+        .trim();
+
+      const markerHtml = `
+        <div class="group relative cursor-pointer transition-transform duration-200 ${
+          isSelected || isTarget ? 'scale-115 z-50' : 'hover:scale-105'
+        }" style="${isHiddenMode ? 'opacity: 0.6; filter: grayscale(50%);' : ''}">
+          ${isSelected || isTarget ? `<div class="absolute -inset-2 rounded-full bg-emerald-400/40 animate-pulse"></div>` : ''}
+          
+          <div class="relative flex flex-col items-center">
+            <!-- Compact Label Badge with Station Short Name & Crowd Dot -->
+            <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold shadow-xl border ${
+              isSelected || isTarget
+                ? 'bg-emerald-600 text-white border-emerald-300 ring-1 ring-emerald-400'
+                : 'bg-slate-900/95 text-white border-slate-700/80 backdrop-blur-md'
+            }">
+              <span class="w-1.5 h-1.5 rounded-full ${congestion.dotColor}"></span>
+              <span class="truncate max-w-[85px] font-black">${cleanShortName}</span>
+              ${isHiddenMode ? '<span class="text-[8px] bg-rose-600 px-1 py-0.2 rounded font-black text-white">مخفية</span>' : ''}
+            </div>
+
+            <!-- Station Logo Badge (Compact 34x34 with strict 1:1 circular aspect ratio) -->
+            <div style="width: 36px; height: 36px; min-width: 36px; min-height: 36px; max-width: 36px; max-height: 36px; flex-shrink: 0; aspect-ratio: 1/1;" class="shrink-0 -mt-0.5 rounded-full bg-white p-0.5 shadow-xl border-2 ${
+              isSelected || isTarget ? 'border-emerald-400 ring-2 ring-emerald-300' : 'border-emerald-600'
+            } flex items-center justify-center overflow-hidden">
+              <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+                ${effectiveLogo ? `<img src="${effectiveLogo}" alt="logo" style="width: 100%; height: 100%; object-fit: contain; aspect-ratio: 1/1;" />` : CARGAS_LOGO_SVG}
+              </div>
+            </div>
+
+            <!-- Mini Facility Badges Under the Logo -->
+            ${servicesRowHtml}
+            
+            <!-- Pin Pointer Tail -->
+            <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #008844; margin-top: -1px; flex-shrink: 0;"></div>
+          </div>
+        </div>
+      `;
+
+      const icon = L.divIcon({
+        html: markerHtml,
+        className: 'custom-station-pin',
+        iconSize: [120, 75],
+        iconAnchor: [60, 73],
+      });
+
+      let marker = stationMarkersRef.current.get(station.id);
+      if (marker) {
+        marker.setLatLng([station.lat, station.lng]);
+        marker.setIcon(icon);
+        if (isAdminEditMode) {
+          marker.dragging?.enable();
+        } else {
+          marker.dragging?.disable();
+        }
+      } else {
+        marker = L.marker([station.lat, station.lng], { 
+          icon,
+          draggable: isAdminEditMode
+        }).addTo(map);
+
+        marker.on('click', () => {
+          onSelectStation(station);
+        });
+
+        marker.on('dragend', (e: any) => {
+          const newPos = e.target.getLatLng();
+          if (onStationPositionChange) {
+            onStationPositionChange(station.id, newPos.lat, newPos.lng);
+          }
+        });
+
+        stationMarkersRef.current.set(station.id, marker);
+      }
+    });
+  }, [stations, selectedStation, navigationState.targetStation, isAdminEditMode, globalStationLogoUrl]);
+
+  // Update Route Polyline
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+
+    if (routePolylineRef.current) {
+      map.removeLayer(routePolylineRef.current);
+      routePolylineRef.current = null;
+    }
+
+    if (navigationState.isActive && navigationState.routeCoordinates.length > 0) {
+      // Google Maps Navigation blue line
+      const polyline = L.polyline(navigationState.routeCoordinates, {
+        color: '#2563eb', // Google Maps navigation blue
+        weight: 7,
+        opacity: 0.95,
+        lineCap: 'round',
+        lineJoin: 'round',
+      }).addTo(map);
+
+      routePolylineRef.current = polyline;
+
+      const bounds = polyline.getBounds();
+      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 16 });
+    }
+  }, [navigationState.isActive, navigationState.routeCoordinates]);
+
+  // Center on selected station
+  useEffect(() => {
+    if (!mapInstanceRef.current || !selectedStation) return;
+    mapInstanceRef.current.flyTo([selectedStation.lat, selectedStation.lng], 15, {
+      duration: 1.2
+    });
+  }, [selectedStation]);
+
+  // Zoom controls
+  const handleZoomIn = () => {
+    mapInstanceRef.current?.zoomIn();
+  };
+
+  const handleZoomOut = () => {
+    mapInstanceRef.current?.zoomOut();
+  };
+
+  // Handle HTML5 Drag and Drop of facility token directly onto the map
+  const handleMapDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleMapDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!mapInstanceRef.current || !onDropNewStation) return;
+
+    try {
+      const rawData = e.dataTransfer.getData('text/plain');
+      if (!rawData) return;
+      const data = JSON.parse(rawData);
+
+      // Convert mouse client coordinates to Leaflet LatLng
+      const containerRect = mapContainerRef.current?.getBoundingClientRect();
+      if (!containerRect) return;
+
+      const point = L.point(
+        e.clientX - containerRect.left,
+        e.clientY - containerRect.top
+      );
+      const latlng = mapInstanceRef.current.containerPointToLatLng(point);
+
+      onDropNewStation(latlng.lat, latlng.lng, data);
+    } catch (err) {
+      console.warn('Error dropping station onto map:', err);
+    }
+  };
+
+  return (
+    <div 
+      className="relative w-full h-full"
+      onDragOver={handleMapDragOver}
+      onDrop={handleMapDrop}
+    >
+      <div ref={mapContainerRef} className="w-full h-full z-0" />
+
+      {/* Google Maps Style Floating Zoom Controls */}
+      {!navigationState.isActive && (
+        <div className="fixed bottom-24 right-4 z-[500] flex flex-col gap-1.5 shadow-2xl">
+          <button
+            onClick={handleZoomIn}
+            className="w-11 h-11 bg-white hover:bg-slate-100 text-slate-800 rounded-xl shadow-lg border border-slate-200 flex items-center justify-center font-bold text-lg cursor-pointer transition active:scale-95"
+            title="تكبير"
+          >
+            <Plus className="w-5 h-5" />
+          </button>
+          <button
+            onClick={handleZoomOut}
+            className="w-11 h-11 bg-white hover:bg-slate-100 text-slate-800 rounded-xl shadow-lg border border-slate-200 flex items-center justify-center font-bold text-lg cursor-pointer transition active:scale-95"
+            title="تصغير"
+          >
+            <Minus className="w-5 h-5" />
+          </button>
+          {onCycleMapStyle && (
+            <button
+              onClick={onCycleMapStyle}
+              className="w-11 h-11 bg-white hover:bg-slate-100 text-slate-800 rounded-xl shadow-lg border border-slate-200 flex items-center justify-center cursor-pointer transition active:scale-95 mt-1"
+              title="تغيير نمط الخريطة (شوارع جوجل / قمر صناعي)"
+            >
+              <Layers className="w-5 h-5 text-blue-600" />
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
