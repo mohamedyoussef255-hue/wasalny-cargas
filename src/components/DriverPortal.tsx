@@ -54,15 +54,17 @@ import {
   CargasStationLocation,
   TechnicianCrewMember,
 } from '../types';
-import { generateQrDataUrl, encodeDriverQrData } from '../services/qrService';
+import { generateQrDataUrl, encodeDriverQrData, encodeRewardRedemptionQrData } from '../services/qrService';
 import {
   saveDriverProfile,
   getRedemptions,
   saveRedemptions,
   getDriverStationAndPumpFuelingCounts,
   calculateDistanceKm,
+  DEFAULT_DRIVER_SECTIONS_ORDER,
 } from '../services/storageService';
 import { CargasStationsMap } from './CargasStationsMap';
+import { CargasNavApp } from '../navigation/CargasNavApp';
 import { CustomerFeedbackModal } from './CustomerFeedbackModal';
 
 interface DriverPortalProps {
@@ -76,7 +78,7 @@ interface DriverPortalProps {
   onRefreshData: () => void;
 }
 
-export type DriverPageView = 'home' | 'map' | 'loyalty' | 'maintenance' | 'history' | 'feedback';
+export type DriverPageView = 'home' | 'map' | 'loyalty' | 'maintenance' | 'history' | 'feedback' | 'complaints';
 
 export const DriverPortal: React.FC<DriverPortalProps> = ({
   config,
@@ -97,6 +99,13 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
   const [isCustomerMenuOpen, setIsCustomerMenuOpen] = useState(false);
   const [redemptions, setRedemptions] = useState<RewardRedemption[]>([]);
   const [redeemedAlert, setRedeemedAlert] = useState<RewardRedemption | null>(null);
+
+  // Free Meters Redemption QR State
+  const [selectedRedemptionForQr, setSelectedRedemptionForQr] = useState<RewardRedemption | null>(null);
+  const [redemptionQrDataUrl, setRedemptionQrDataUrl] = useState<string>('');
+
+  // Station Navigation Modal State (Wasalny Hero Popup)
+  const [isStationNavModalOpen, setIsStationNavModalOpen] = useState(false);
 
   // GPS Auto-detected nearest station state
   const [driverGpsLocation, setDriverGpsLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -201,6 +210,30 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
     setRedemptions(getRedemptions().filter((r) => r.driverId === driver.id));
   }, [driver]);
 
+  // Generate QR for Free Meters Redemption Voucher
+  useEffect(() => {
+    if (!selectedRedemptionForQr) {
+      setRedemptionQrDataUrl('');
+      return;
+    }
+    const qrPayload = encodeRewardRedemptionQrData({
+      id: selectedRedemptionForQr.id,
+      redemptionCode: selectedRedemptionForQr.redemptionCode,
+      rewardId: selectedRedemptionForQr.rewardId,
+      rewardTitle: selectedRedemptionForQr.rewardTitle,
+      freeMeters: selectedRedemptionForQr.freeMeters || 10,
+      driverId: selectedRedemptionForQr.driverId,
+      driverName: selectedRedemptionForQr.driverName,
+      carPlate: selectedRedemptionForQr.carPlate || driver.carPlate,
+      carModel: selectedRedemptionForQr.carModel || driver.carModel,
+      pointsSpent: selectedRedemptionForQr.pointsSpent,
+    });
+
+    generateQrDataUrl(qrPayload, { width: 340 }).then((url) => {
+      setRedemptionQrDataUrl(url);
+    });
+  }, [selectedRedemptionForQr, driver]);
+
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
     const updated: DriverProfile = {
@@ -227,6 +260,11 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
       return;
     }
 
+    const isFreeMeters = reward.category === 'meters' || reward.title.includes('متر') || reward.title.includes('أمتار');
+    const freeMetersCount = reward.freeMetersEquivalent || (isFreeMeters ? Math.max(5, Math.round(reward.pointsCost / 10)) : 0);
+    const gasPrice = config.gasPricePerMeter || 13;
+    const calculatedEgp = freeMetersCount > 0 ? freeMetersCount * gasPrice : (reward.estimatedEgpValue || reward.pointsCost * 0.5);
+
     const redemptionCode = 'VOUCH-' + Math.floor(100000 + Math.random() * 900000);
     const newRedemption: RewardRedemption = {
       id: 'RED-' + Date.now(),
@@ -234,10 +272,15 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
       rewardTitle: reward.title,
       driverId: driver.id,
       driverName: driver.name,
+      carPlate: driver.carPlate,
+      carModel: driver.carModel,
       pointsSpent: reward.pointsCost,
       redemptionCode,
       createdAt: new Date().toISOString(),
       isUsed: false,
+      category: reward.category,
+      freeMeters: freeMetersCount,
+      calculatedEgpValue: calculatedEgp,
     };
 
     const updatedDriver: DriverProfile = {
@@ -252,6 +295,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
     saveRedemptions(allRedemptions);
     setRedemptions(allRedemptions.filter((r) => r.driverId === driver.id));
     setRedeemedAlert(newRedemption);
+    setSelectedRedemptionForQr(newRedemption);
 
     try {
       confetti({
@@ -345,10 +389,17 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
     },
     {
       id: 'feedback' as DriverPageView,
-      label: 'تقييم الخدمة والشكاوى',
-      sub: 'الرقم المختصر 19058',
-      icon: <Star className="w-4 h-4" />,
-      visible: v.showServiceRating || v.showComplaintsBox,
+      label: 'تقييم الفني والخدمة',
+      sub: 'حسن المعاملة وسرعة التموين ⭐',
+      icon: <Star className="w-4 h-4 text-amber-500" />,
+      visible: v.showServiceRating,
+    },
+    {
+      id: 'maintenance' as DriverPageView, // Used for routing complaints in handler
+      label: 'صندوق الشكاوى والمقترحات',
+      sub: 'تواصل مباشر مع الإدارة 19058 📨',
+      icon: <MessageSquare className="w-4 h-4 text-rose-500" />,
+      visible: v.showComplaintsBox,
     },
   ];
 
@@ -411,7 +462,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
             <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
               
               {/* Driver greeting info */}
-              <div className="space-y-2 max-w-xl">
+              <div className="space-y-2 max-w-md">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="bg-emerald-500/30 text-emerald-300 border border-emerald-400/30 text-xs px-3 py-0.5 rounded-full font-bold">
                     برنامج ولاء عملاء كارجاس CNG
@@ -431,6 +482,39 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                   {config.customTexts.welcomeDriver}
                 </p>
               </div>
+
+              {/* أيقونة برنامج وصلني في المساحة بين كلمة أهلاً بك وبين أيقونات تقييم الفني وصندوق الشكاوى */}
+              {v.showNearestStationMap && config.wasalnyConfig?.enabled !== false && (
+                <div
+                  onClick={() => setIsStationNavModalOpen(true)}
+                  className="flex items-center gap-3.5 bg-white/15 hover:bg-white/25 border-2 border-emerald-400/50 backdrop-blur-md px-4 sm:px-5 py-3 rounded-3xl cursor-pointer transition transform hover:scale-[1.03] active:scale-95 group shadow-xl shrink-0"
+                  title="اضغط هنا لتفاصيل أقرب محطة كارجاس وبدء الملاحة"
+                >
+                  <div className="relative w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-400 to-teal-300 text-slate-950 flex items-center justify-center text-2xl shadow-md shrink-0 group-hover:rotate-12 transition">
+                    <span>🚗</span>
+                    <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-400"></span>
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs sm:text-sm font-black text-white">
+                        {config.wasalnyConfig?.buttonLabel || 'وصلني لأقرب محطة'}
+                      </span>
+                      <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-md">
+                        GPS 🛰️
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-emerald-200 block font-medium mt-0.5">
+                      {activeStationName} {gpsDistanceKm !== null ? `(${gpsDistanceKm} كم)` : ''}
+                    </span>
+                    <span className="text-[10px] text-amber-300 font-bold block mt-0.5">
+                      اضغط لتفاصيل المحطة وبدء الملاحة 🗺️
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {/* Action buttons stacked on left: Clean and non-duplicated */}
               <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 w-full lg:w-auto shrink-0">
@@ -610,30 +694,33 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
       {activePage === 'map' && v.showNearestStationMap ? (
         <div className="space-y-4 animate-in fade-in">
           {/* Prominent Back Button to Return to Main Customer Dashboard */}
-          <div className="bg-white rounded-3xl p-4 border border-slate-200 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 text-white rounded-3xl p-4 sm:p-5 shadow-2xl border-2 border-emerald-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-emerald-950 flex items-center justify-center text-2xl shadow-lg font-black shrink-0">
+                🚗
+              </div>
+              <div>
+                <h2 className="text-base sm:text-lg font-black text-white">
+                  {config.wasalnyConfig?.buttonLabel || 'تطبيق الملاحة والمسارات المباشرة "وصّلني"'}
+                </h2>
+                <p className="text-xs text-emerald-100 font-light">
+                  شبكة محطات ومراكز كارجاس الوطنية CNG — الملاحة الحية وتوجيه المسار لأقرب محطة
+                </p>
+              </div>
+            </div>
+
             <button
               onClick={() => setActivePage('home')}
-              className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white text-xs font-black px-5 py-2.5 rounded-2xl transition shadow-md active:scale-95"
+              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs sm:text-sm px-5 py-2.5 rounded-2xl transition shadow-lg flex items-center gap-2 active:scale-95"
             >
               <ArrowRight className="w-4 h-4" />
               <span>الرجوع للنافذة الرئيسية للعميل ↩️</span>
             </button>
-            <div className="text-right">
-              <span className="text-xs font-black text-slate-800 block">
-                تطبيق الملاحة والمسارات المباشرة "وصّلني" 🚗
-              </span>
-              <span className="text-[11px] text-slate-500">
-                شبكة محطات ومراكز كارجاس الوطنية CNG
-              </span>
-            </div>
           </div>
 
-          <CargasStationsMap
-            config={config}
-            stations={stations}
-            isStandalone={true}
-            onBack={() => setActivePage('home')}
-          />
+          <div className="rounded-3xl overflow-hidden border-2 border-emerald-500/30 shadow-2xl bg-slate-950 min-h-[680px]">
+            <CargasNavApp onBack={() => setActivePage('home')} autoStartNearest={true} />
+          </div>
         </div>
       ) : (
         /* Main Layout with Customer Menu Icon and Full-Width Viewport */
@@ -756,164 +843,187 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                     </button>
                   </div>
 
-                  {/* Golden Card & Metrics */}
-                  <div className="md:col-span-7 space-y-4">
-                    {v.showGoldenCard && (
-                      <div className="bg-gradient-to-tr from-amber-600 via-amber-500 to-yellow-400 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden border border-amber-300">
-                        <div className="flex items-start justify-between relative z-10">
-                          <div>
-                            <span className="text-[10px] uppercase tracking-wider font-extrabold bg-black/20 px-2.5 py-1 rounded-full border border-white/30">
-                              CARGAS VIP LOYALTY CARD
+                  {/* Grand Wasalny Station Card raised to fill the space beside QR Code */}
+                  <div className="md:col-span-7 bg-gradient-to-br from-slate-900 via-slate-850 to-emerald-950 text-white rounded-3xl p-5 sm:p-6 shadow-2xl border-2 border-emerald-500/40 relative overflow-hidden flex flex-col justify-between space-y-4 group">
+                    {/* Map Graphic Preview Background */}
+                    <div
+                      className="absolute inset-0 bg-cover bg-center opacity-30 mix-blend-luminosity filter saturate-150 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
+                      style={{
+                        backgroundImage: `url('https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=1200&q=80')`,
+                      }}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-tr from-slate-950 via-slate-900/90 to-emerald-950/80 pointer-events-none" />
+
+                    {/* Header: Cargas Logo Badge + Nearest Station Specs */}
+                    <div className="relative z-10 flex items-start gap-4">
+                      <div
+                        onClick={() => setIsStationNavModalOpen(true)}
+                        className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-tr from-emerald-600 via-teal-700 to-emerald-500 p-2 border-2 border-emerald-400/60 shadow-xl flex flex-col items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition shrink-0 relative group/icon"
+                        title="اضغط لمعاينة تفاصيل المحطة وبدء الملاحة"
+                      >
+                        {config.wasalnyConfig?.logoUrl ? (
+                          <img src={config.wasalnyConfig.logoUrl} alt="شعار كارجاس" className="w-full h-full object-contain" />
+                        ) : (
+                          <div className="text-center">
+                            <span className="text-2xl sm:text-3xl block group-hover/icon:rotate-12 transition">⛽</span>
+                            <span className="text-[9px] font-black text-amber-300 font-mono tracking-tighter">CARGAS</span>
+                          </div>
+                        )}
+                        <span className="absolute -top-1 -right-1 flex h-4 w-4">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-400 border-2 border-slate-900"></span>
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5 flex-1 text-right">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                            <Compass className="w-3 h-3 text-emerald-400 animate-spin" style={{ animationDuration: '6s' }} />
+                            <span>أكبر محطة كارجاس CNG • رادار حي</span>
+                          </span>
+                          {gpsDistanceKm !== null && (
+                            <span className="bg-teal-500/20 text-teal-200 border border-teal-400/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                              على بُعد {gpsDistanceKm} كم 📍
                             </span>
-                            <p className="text-2xl font-black mt-2 tracking-tight">
-                              كارت كارجاس الذهبي
-                            </p>
-                          </div>
-                          <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-2xl shadow-inner border border-white/40">
-                            ⛽
-                          </div>
-                        </div>
-
-                        <div className="mt-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4 relative z-10">
-                          <div>
-                            <p className="text-xs text-amber-100 font-medium">
-                              {config.customTexts.pointsBannerTitle}
-                            </p>
-                            <div className="flex items-baseline gap-2 mt-0.5">
-                              <span className="text-4xl sm:text-5xl font-black tracking-tight text-white drop-shadow-sm">
-                                {driver.points}
-                              </span>
-                              <span className="text-sm font-bold text-amber-100">نقطة كارجاس</span>
-                            </div>
-                          </div>
-
-                          <div className="bg-black/20 backdrop-blur-md rounded-2xl p-3 border border-white/20 text-right">
-                            <span className="text-[10px] text-amber-100 block">القيمة التقديرية:</span>
-                            <span className="text-base font-extrabold text-white">
-                              تعادل {(driver.points * 1.3).toFixed(0)} جنيه
+                          )}
+                          {activeDetectedStation?.crowdLevel && (
+                            <span className="bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                              الزحام: {activeDetectedStation.crowdLevel} 🟢
                             </span>
-                          </div>
+                          )}
                         </div>
 
-                        <div className="mt-5 pt-4 border-t border-white/20 flex items-center justify-between text-xs text-amber-100 font-medium relative z-10">
-                          <span>كود العميل: {driver.id}</span>
-                          <button
-                            onClick={() => setActivePage('loyalty')}
-                            className="bg-black/20 hover:bg-black/30 text-white font-bold px-3 py-1 rounded-xl transition text-[11px]"
-                          >
-                            استبدال الهدايا ←
-                          </button>
-                        </div>
+                        <h3 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
+                          <span>{config.wasalnyConfig?.buttonLabel || 'وصلني لأقرب محطة'}:</span>
+                          <span className="text-emerald-300">{activeStationName}</span>
+                        </h3>
+                        <p className="text-xs text-slate-300 font-light flex items-center gap-1.5">
+                          <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>{activeDetectedStation?.address || 'مصر — شبكة محطات كارجاس CNG الوطنية'}</span>
+                          {activeDetectedStation?.city && <span className="text-slate-400">({activeDetectedStation.city})</span>}
+                        </p>
                       </div>
-                    )}
+                    </div>
 
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs text-center space-y-1">
-                        <span className="text-xs text-slate-500 font-medium block">إجمالي الغاز المُمون</span>
-                        <span className="text-lg sm:text-xl font-black text-slate-900 font-mono">
-                          {driver.totalMetersFueled.toLocaleString()}
-                        </span>
-                        <span className="text-[10px] text-emerald-600 font-bold block">متر مكعب m³</span>
-                      </div>
+                    {/* Services Strip */}
+                    <div className="relative z-10 flex flex-wrap items-center gap-2 pt-2 border-t border-slate-700/80 text-[11px] text-emerald-200">
+                      <span className="bg-white/10 px-2.5 py-1 rounded-xl">تموين غاز سريع ⚡</span>
+                      <span className="bg-white/10 px-2.5 py-1 rounded-xl">زيوت معتمدة 🛢️</span>
+                      <span className="bg-white/10 px-2.5 py-1 rounded-xl">فحص الأسطوانات 🛡️</span>
+                      <span className="bg-white/10 px-2.5 py-1 rounded-xl">خدمة 24/7 ⏱️</span>
+                    </div>
 
-                      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs text-center space-y-1">
-                        <span className="text-xs text-slate-500 font-medium block">إجمالي الإنفاق</span>
-                        <span className="text-lg sm:text-xl font-black text-slate-900 font-mono">
-                          {driver.totalSpentEgp.toLocaleString()}
-                        </span>
-                        <span className="text-[10px] text-slate-500 font-bold block">جنيه مصري</span>
-                      </div>
+                    {/* Actions */}
+                    <div className="relative z-10 flex flex-wrap items-center gap-2.5 pt-2">
+                      {config.wasalnyConfig?.voiceGuidance !== 'silent' && (
+                        <button
+                          type="button"
+                          onClick={handlePlayWadahGuidance}
+                          className="flex items-center gap-1.5 bg-amber-400/20 hover:bg-amber-400/30 text-amber-200 border border-amber-400/40 text-xs font-bold px-3 py-2.5 rounded-2xl transition active:scale-95"
+                          title="استمع لإرشاد وضاح الصوتي باللهجة المصرية"
+                        >
+                          <Volume2 className="w-4 h-4 text-amber-300" />
+                          <span>صوت وضاح 🗣️</span>
+                        </button>
+                      )}
 
-                      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs text-center space-y-1">
-                        <span className="text-xs text-slate-500 font-medium block">الوفورات المحققة</span>
-                        <span className="text-lg sm:text-xl font-black text-emerald-600 font-mono">
-                          ~{(driver.totalMetersFueled * 6.5).toLocaleString()}
-                        </span>
-                        <span className="text-[10px] text-emerald-700 font-bold block">جنيه وفر!</span>
-                      </div>
+                      <button
+                        onClick={() => setIsStationNavModalOpen(true)}
+                        className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs sm:text-sm px-4 py-2.5 rounded-2xl transition-all shadow-xl active:scale-95 group/btn"
+                      >
+                        <Navigation className="w-4 h-4 text-slate-950 group-hover/btn:translate-x-1 transition" />
+                        <span>ابدأ الملاحة وتفاصيل المحطة 🗺️</span>
+                      </button>
+
+                      <button
+                        onClick={() => setActivePage('map')}
+                        className="bg-white/15 hover:bg-white/25 text-white border border-white/20 text-xs font-bold px-3 py-2.5 rounded-2xl transition active:scale-95 flex items-center gap-1.5"
+                        title="تكبير الخريطة وفتح تطبيق وصّلني"
+                      >
+                        <Maximize2 className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">تكبير الخريطة ⛶</span>
+                      </button>
                     </div>
                   </div>
                 </div>
 
-                {/* 3. بطاقة وأيقونة خريطة "وصّلني" الذكية التفاعلية (Wasalny Interactive Map Radar Card) */}
-                {v.showNearestStationMap && config.wasalnyConfig?.enabled !== false && (
-                  <div className="bg-gradient-to-br from-slate-900 via-slate-850 to-emerald-950 text-white rounded-3xl p-5 sm:p-6 shadow-2xl border-2 border-emerald-500/30 relative overflow-hidden group">
-                    {/* Ambient Glow */}
-                    <div className="absolute top-0 left-0 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none -ml-20 -mt-20"></div>
-                    <div className="absolute bottom-0 right-0 w-72 h-72 bg-teal-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mb-20"></div>
-
-                    <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5">
-                      {/* Left: Interactive Radar Icon & Nearest Station Live Specs */}
-                      <div className="flex items-start sm:items-center gap-4">
-                        {/* Interactive Map Animated Radar Icon - Clicking expands map */}
-                        <div
-                          onClick={() => setActivePage('map')}
-                          className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-3xl bg-gradient-to-tr from-emerald-600 via-teal-600 to-emerald-500 flex items-center justify-center text-3xl sm:text-4xl shadow-xl shadow-emerald-600/40 cursor-pointer hover:scale-105 transition transform active:scale-95 shrink-0 group/icon border border-emerald-400/50"
-                          title="اضغط لتكبير الخريطة وفتح تطبيق وصّلني ⛶"
-                        >
-                          <span className="group-hover/icon:rotate-12 transition transform">🚗</span>
-                          <span className="absolute -top-1 -right-1 flex h-4 w-4">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-400 border-2 border-slate-900"></span>
+                {/* Golden Card & Metrics directly below the top QR + Wasalny row */}
+                <div className="space-y-4">
+                  {v.showGoldenCard && (
+                    <div className="bg-gradient-to-tr from-amber-600 via-amber-500 to-yellow-400 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden border border-amber-300">
+                      <div className="flex items-start justify-between relative z-10">
+                        <div>
+                          <span className="text-[10px] uppercase tracking-wider font-extrabold bg-black/20 px-2.5 py-1 rounded-full border border-white/30">
+                            CARGAS VIP LOYALTY CARD
                           </span>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                              <Compass className="w-3 h-3 text-emerald-400 animate-spin" style={{ animationDuration: '6s' }} />
-                              <span>رادار كارجاس الذكي • GPS حي</span>
-                            </span>
-                            {gpsDistanceKm !== null && (
-                              <span className="bg-teal-500/20 text-teal-200 border border-teal-400/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                                تبعد عنك {gpsDistanceKm} كم 📍
-                              </span>
-                            )}
-                            {config.wasalnyConfig?.showCrowdStatus !== false && activeDetectedStation?.crowdLevel && (
-                              <span className="bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                                الزحام: {activeDetectedStation.crowdLevel} 🟢
-                              </span>
-                            )}
-                          </div>
-
-                          <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
-                            <span>{config.wasalnyConfig?.buttonLabel || 'أقرب محطة كارجاس (وصّلني)'}:</span>
-                            <span className="text-emerald-300">{activeStationName}</span>
-                          </h3>
-                          <p className="text-xs text-slate-300 font-light flex items-center gap-1.5">
-                            <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                            <span>{activeDetectedStation?.address || 'مصر — شبكة محطات كارجاس CNG'}</span>
-                            {activeDetectedStation?.city && <span className="text-slate-400">({activeDetectedStation.city})</span>}
+                          <p className="text-2xl font-black mt-2 tracking-tight">
+                            كارت كارجاس الذهبي
                           </p>
+                        </div>
+                        <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-2xl shadow-inner border border-white/40">
+                          ⛽
                         </div>
                       </div>
 
-                      {/* Right: Expand Map Action & Voice Guide */}
-                      <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-end">
-                        {config.wasalnyConfig?.voiceGuidance !== 'silent' && (
-                          <button
-                            type="button"
-                            onClick={handlePlayWadahGuidance}
-                            className="flex items-center gap-1.5 bg-amber-400/20 hover:bg-amber-400/30 text-amber-200 border border-amber-400/40 text-xs font-bold px-3.5 py-2.5 rounded-2xl transition active:scale-95"
-                            title="استمع لإرشاد وضاح الصوتي باللهجة المصرية"
-                          >
-                            <Volume2 className="w-4 h-4 text-amber-300" />
-                            <span>صوت وضاح 🗣️</span>
-                          </button>
-                        )}
+                      <div className="mt-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4 relative z-10">
+                        <div>
+                          <p className="text-xs text-amber-100 font-medium">
+                            {config.customTexts.pointsBannerTitle}
+                          </p>
+                          <div className="flex items-baseline gap-2 mt-0.5">
+                            <span className="text-4xl sm:text-5xl font-black tracking-tight text-white drop-shadow-sm">
+                              {driver.points}
+                            </span>
+                            <span className="text-sm font-bold text-amber-100">نقطة كارجاس</span>
+                          </div>
+                        </div>
 
-                        {/* Primary Expand Button */}
+                        <div className="bg-black/20 backdrop-blur-md rounded-2xl p-3 border border-white/20 text-right">
+                          <span className="text-[10px] text-amber-100 block">القيمة التقديرية:</span>
+                          <span className="text-base font-extrabold text-white">
+                            تعادل {(driver.points * 1.3).toFixed(0)} جنيه
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 pt-4 border-t border-white/20 flex items-center justify-between text-xs text-amber-100 font-medium relative z-10">
+                        <span>كود العميل: {driver.id}</span>
                         <button
-                          onClick={() => setActivePage('map')}
-                          className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-white hover:to-white text-emerald-950 hover:text-emerald-950 font-black text-xs sm:text-sm px-5 py-2.5 rounded-2xl transition-all shadow-xl active:scale-95 group/btn"
+                          onClick={() => setActivePage('loyalty')}
+                          className="bg-black/20 hover:bg-black/30 text-white font-bold px-3 py-1 rounded-xl transition text-[11px]"
                         >
-                          <Maximize2 className="w-4 h-4 text-emerald-950 group-hover/btn:scale-125 transition" />
-                          <span>تكبير الخريطة وفتح تطبيق وصّلني ⛶</span>
+                          استبدال الهدايا ←
                         </button>
                       </div>
                     </div>
+                  )}
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs text-center space-y-1">
+                      <span className="text-xs text-slate-500 font-medium block">إجمالي الغاز المُمون</span>
+                      <span className="text-lg sm:text-xl font-black text-slate-900 font-mono">
+                        {driver.totalMetersFueled.toLocaleString()}
+                      </span>
+                      <span className="text-[10px] text-emerald-600 font-bold block">متر مكعب m³</span>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs text-center space-y-1">
+                      <span className="text-xs text-slate-500 font-medium block">إجمالي الإنفاق</span>
+                      <span className="text-lg sm:text-xl font-black text-slate-900 font-mono">
+                        {driver.totalSpentEgp.toLocaleString()}
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-bold block">جنيه مصري</span>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs text-center space-y-1">
+                      <span className="text-xs text-slate-500 font-medium block">الوفورات المحققة</span>
+                      <span className="text-lg sm:text-xl font-black text-emerald-600 font-mono">
+                        ~{(driver.totalMetersFueled * 6.5).toLocaleString()}
+                      </span>
+                      <span className="text-[10px] text-emerald-700 font-bold block">جنيه وفر!</span>
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
             )}
 
@@ -998,6 +1108,84 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                       </div>
                     );
                   })}
+                </div>
+
+                {/* Active Vouchers & Free Meters Redemption QR Codes */}
+                <div className="pt-6 border-t border-slate-100 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-black text-sm text-slate-900 flex items-center gap-2">
+                      <Gift className="w-4 h-4 text-emerald-600" />
+                      <span>قسائم الهدايا والأمتار المجانية الخاصة بك (كود الصرف لدى فني التموين)</span>
+                    </h4>
+                    <span className="text-[11px] text-slate-500 font-medium">
+                      إجمالي القسائم: {redemptions.length}
+                    </span>
+                  </div>
+
+                  {redemptions.length === 0 ? (
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center text-xs text-slate-500">
+                      لم تقم باستبدال أي قسائم بعد. عندما تجمع نقاطاً وتستبدلها بأمتار مجانية ستظهر قسيمتك هنا مع كود الـ QR الخاص بالصرف.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                      {redemptions.map((red) => {
+                        return (
+                          <div
+                            key={red.id}
+                            className={`p-4 rounded-2xl border transition flex flex-col justify-between gap-3 ${
+                              red.isUsed
+                                ? 'bg-slate-50/70 border-slate-200 opacity-75'
+                                : 'bg-gradient-to-tr from-emerald-50/60 to-teal-50/40 border-emerald-300 shadow-xs'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-black text-sm text-slate-900">{red.rewardTitle}</span>
+                                  {red.freeMeters ? (
+                                    <span className="bg-emerald-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+                                      {red.freeMeters} م³ مجاناً ⛽
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <span className="font-mono text-xs font-bold text-slate-600 mt-1 block">
+                                  كود القسيمة: <span className="text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">{red.redemptionCode}</span>
+                                </span>
+                              </div>
+                              <span
+                                className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${
+                                  red.isUsed
+                                    ? 'bg-slate-100 text-slate-600 border-slate-200'
+                                    : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                }`}
+                              >
+                                {red.isUsed ? 'تم الصرف ✓' : 'جاهزة للصرف ⚡'}
+                              </span>
+                            </div>
+
+                            <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-xs">
+                              <span className="text-slate-500 text-[11px]">
+                                {red.isUsed && red.usedAt
+                                  ? `صُرفت في ${red.usedAtStation || 'المحطة'} (${red.dispensedByTechnicianName || 'الفني'})`
+                                  : `خصم ${red.pointsSpent} نقطة`}
+                              </span>
+
+                              {!red.isUsed && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedRedemptionForQr(red)}
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 shadow-xs active:scale-95"
+                                >
+                                  <QrCode className="w-3.5 h-3.5" />
+                                  <span>عرض QR الصرف للفني 📱</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1143,12 +1331,31 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                           <td className="p-3 font-bold text-slate-800">
                             {tx.stationName} <span className="text-emerald-700">(مضخة #{tx.pumpNumber})</span>
                           </td>
-                          <td className="p-3 font-mono font-bold text-slate-900">{tx.metersQuantity} م³</td>
-                          <td className="p-3 font-mono font-bold text-slate-900">{tx.totalAmountEgp} ج</td>
+                          <td className="p-3 font-mono font-bold text-slate-900">
+                            {tx.metersQuantity} م³
+                            {tx.isRewardRedemption && (
+                              <span className="block text-[10px] text-emerald-600 font-bold">هدية ولاء مجانية</span>
+                            )}
+                          </td>
+                          <td className="p-3 font-mono font-bold">
+                            {tx.isRewardRedemption ? (
+                              <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full text-[10px] font-black">
+                                0 ج (استبدال نقاط) 🎁
+                              </span>
+                            ) : (
+                              <span className="text-slate-900">{tx.totalAmountEgp} ج</span>
+                            )}
+                          </td>
                           <td className="p-3">
-                            <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                              +{tx.pointsEarned} نقطة
-                            </span>
+                            {tx.isRewardRedemption ? (
+                              <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                                هدية منصرفة
+                              </span>
+                            ) : (
+                              <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                +{tx.pointsEarned} نقطة
+                              </span>
+                            )}
                           </td>
                           <td className="p-3">
                             {v.showFuelingCountStats ? (
@@ -1168,69 +1375,6 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                     </tbody>
                   </table>
                 </div>
-              </div>
-            )}
-
-            {/* View 5: Wasalny Dedicated Enlarged Map View */}
-            {activePage === 'map' && (
-              <div className="space-y-4 animate-in fade-in duration-200">
-                {/* Header Bar with Back / Collapse button */}
-                <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 text-white rounded-3xl p-5 shadow-2xl border-2 border-emerald-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3.5">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-emerald-950 flex items-center justify-center text-2xl shadow-lg font-black shrink-0">
-                      🚗
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-lg sm:text-xl font-black text-white">
-                          {config.wasalnyConfig?.buttonLabel || 'تطبيق "وصّلني" كارجاس الذكي'}
-                        </h2>
-                        <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                          <Compass className="w-3 h-3 text-emerald-400 animate-spin" style={{ animationDuration: '6s' }} />
-                          <span>عرض مكبّر ومباشر</span>
-                        </span>
-                        {gpsDistanceKm !== null && (
-                          <span className="bg-teal-500/20 text-teal-200 border border-teal-400/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                            أقرب محطة تبعد {gpsDistanceKm} كم
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-emerald-100 font-light mt-1">
-                        {config.wasalnyConfig?.customWelcomeMessage || 'ابحث بالميكروفون، شاهد حالة الزحام، وتوجه مباشرة لأقرب محطة غاز طبيعي في جمهورية مصر العربية'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                    {config.wasalnyConfig?.voiceGuidance !== 'silent' && (
-                      <button
-                        type="button"
-                        onClick={handlePlayWadahGuidance}
-                        className="bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm active:scale-95"
-                        title="إرشاد صوتي بصوت وضاح"
-                      >
-                        <Volume2 className="w-4 h-4 fill-slate-950" />
-                        <span>صوت وضاح 🗣️</span>
-                      </button>
-                    )}
-
-                    <button
-                      onClick={() => setActivePage('home')}
-                      className="bg-white hover:bg-emerald-50 text-emerald-950 font-black text-xs sm:text-sm px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl transition shadow-lg flex items-center gap-2 active:scale-95 group"
-                    >
-                      <ArrowRight className="w-4 h-4 group-hover:-translate-x-1 transition" />
-                      <span>تصغير الخريطة والرجوع للرئيسية ↩️</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Standalone Interactive Map */}
-                <CargasStationsMap
-                  config={config}
-                  stations={stations}
-                  isStandalone={true}
-                  onBack={() => setActivePage('home')}
-                />
               </div>
             )}
           </div>
@@ -1443,6 +1587,9 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                         if (item.id === 'feedback') {
                           setFeedbackInitialTab('rating');
                           setIsFeedbackModalOpen(true);
+                        } else if (item.id === 'complaints') {
+                          setFeedbackInitialTab('complaint');
+                          setIsFeedbackModalOpen(true);
                         } else {
                           setActivePage(item.id);
                         }
@@ -1527,33 +1674,6 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                   <ChevronLeft className="w-4 h-4 text-slate-400 group-hover:text-blue-600 group-hover:-translate-x-1 transition shrink-0" />
                 </button>
               )}
-
-              {/* Extra Icon: Complaints Box */}
-              {v.showComplaintsBox && (
-                <button
-                  onClick={() => {
-                    setFeedbackInitialTab('complaint');
-                    setIsCustomerMenuOpen(false);
-                    setIsFeedbackModalOpen(true);
-                  }}
-                  className="text-right p-3.5 sm:p-4 rounded-2xl font-bold transition flex items-center justify-between gap-3.5 border bg-slate-50 hover:bg-rose-50 border-slate-200/90 hover:border-rose-300 text-slate-800 transform active:scale-95 group"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-2xl bg-white text-rose-500 border border-slate-200 flex items-center justify-center text-lg transition group-hover:scale-110 shadow-xs shrink-0">
-                      <MessageSquare className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <span className="block font-black text-xs sm:text-sm leading-tight">
-                        صندوق الشكاوى والمقترحات 📨
-                      </span>
-                      <span className="text-[10px] sm:text-[11px] block leading-tight font-light text-slate-500 mt-0.5">
-                        التواصل المباشر مع إدارة كارجاس
-                      </span>
-                    </div>
-                  </div>
-                  <ChevronLeft className="w-4 h-4 text-slate-400 group-hover:text-rose-500 group-hover:-translate-x-1 transition shrink-0" />
-                </button>
-              )}
             </div>
 
             {/* Bottom Dismiss Bar */}
@@ -1592,6 +1712,227 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
           </span>
         </button>
       </div>
+
+      {/* Free Meters Reward Redemption QR Modal */}
+      {selectedRedemptionForQr && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl relative border-2 border-emerald-500">
+            <button
+              onClick={() => setSelectedRedemptionForQr(null)}
+              className="absolute top-4 left-4 p-2 text-slate-400 hover:text-slate-700 rounded-full"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-12 h-12 bg-emerald-100 text-emerald-700 rounded-2xl mx-auto flex items-center justify-center text-2xl font-black">
+              🎁
+            </div>
+
+            <div>
+              <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-black px-2.5 py-0.5 rounded-full">
+                كود صرف معتمد — برنامج ولاء كارجاس
+              </span>
+              <h3 className="text-lg font-black text-slate-900 mt-1.5">
+                {selectedRedemptionForQr.rewardTitle}
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                أظهر هذا الكود لفني التموين ليقوم بمسحه من كاميرا الطلمبة وصرف الأمتار فوراً
+              </p>
+            </div>
+
+            <div className="p-3 bg-gradient-to-tr from-emerald-50 via-teal-50 to-slate-50 rounded-2xl border-2 border-dashed border-emerald-400 flex items-center justify-center">
+              {redemptionQrDataUrl ? (
+                <img
+                  src={redemptionQrDataUrl}
+                  alt="كود كيو آر للاستبدال"
+                  className="w-56 h-56 rounded-xl shadow-xs"
+                />
+              ) : (
+                <div className="w-56 h-56 flex items-center justify-center text-slate-400 text-xs">
+                  جارٍ التوليد...
+                </div>
+              )}
+            </div>
+
+            <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200 text-xs space-y-1.5 text-right">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">كود القسيمة:</span>
+                <span className="font-mono font-black text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-300">
+                  {selectedRedemptionForQr.redemptionCode}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">الكمية المستحقة:</span>
+                <span className="font-bold text-emerald-700 font-mono">
+                  {selectedRedemptionForQr.freeMeters || 10} متر مكعب m³ مجاني
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">المبلغ المطلوب من العميل:</span>
+                <span className="font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
+                  0 جنيه (مجاني بالكامل)
+                </span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setSelectedRedemptionForQr(null)}
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-2.5 rounded-xl transition"
+            >
+              تم وإغلاق النافذة
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Station Navigation Modal ("وصّلني" — تفاصيل المحطة وبدء الملاحة المدمجة أو جوجل ماب) */}
+      {isStationNavModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200 no-print">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl border border-slate-200 space-y-5 text-right relative">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3.5">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 via-teal-600 to-emerald-500 text-white flex items-center justify-center text-2xl shadow-md shrink-0">
+                  ⛽
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full">
+                      تطبيق وصّلني — رادار كارجاس CNG
+                    </span>
+                    {gpsDistanceKm !== null && (
+                      <span className="bg-teal-50 text-teal-800 border border-teal-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                        {gpsDistanceKm} كم من موقعك
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="font-black text-base sm:text-lg text-slate-900 mt-1">
+                    {activeStationName} {activeDetectedStation?.city ? `(${activeDetectedStation.city})` : ''}
+                  </h3>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsStationNavModalOpen(false)}
+                className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition"
+                title="إغلاق"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Station Specs */}
+            <div className="space-y-2.5 bg-slate-50 rounded-2xl p-4 border border-slate-200 text-xs">
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-slate-500 font-medium shrink-0">العنوان الدقيق:</span>
+                <span className="font-bold text-slate-900 text-left">
+                  {activeDetectedStation?.address || 'جمهورية مصر العربية — شبكة كارجاس الوطنية'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-medium">المسافة الحالية عنك:</span>
+                <span className="font-black font-mono text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200">
+                  {gpsDistanceKm !== null ? `${gpsDistanceKm} كم` : 'تم الرصد عبر GPS 🛰️'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-medium">حالة الزحام الآن:</span>
+                <span className="font-bold text-slate-800 bg-amber-50 text-amber-900 px-2.5 py-0.5 rounded-lg border border-amber-200">
+                  {activeDetectedStation?.crowdLevel || 'هادئ ومتاح للتموين الفوري 🟢'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-medium">ساعات العمل:</span>
+                <span className="font-bold text-slate-800">خدمة مستمرة 24 ساعة على مدار اليوم ⏱️</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-medium">الخدمات المتوفرة:</span>
+                <span className="font-bold text-emerald-800">
+                  تموين غاز CNG • زيوت معتمدة • فحص وصيانة أسطوانات
+                </span>
+              </div>
+            </div>
+
+            {/* Navigation Options - In-App vs Google Maps vs Hotline */}
+            <div className="space-y-2.5 pt-1">
+              {/* Option 1: In-App Cargas Navigation (وصلني المدمجة المجانية) */}
+              <button
+                onClick={() => {
+                  setIsStationNavModalOpen(false);
+                  setActivePage('map');
+                }}
+                className="w-full flex items-center justify-between p-3.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-2xl font-black text-xs sm:text-sm shadow-md transition active:scale-98 group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-lg">
+                    🗺️
+                  </div>
+                  <div className="text-right">
+                    <span>الملاحة بخرائط التطبيق المجانية (وصّلني المدمجة)</span>
+                    <span className="block text-[10px] text-emerald-100 font-normal">
+                      توجيه حي ومباشر بدون استهلاك باقة الإنترنت أو مغادرة التطبيق
+                    </span>
+                  </div>
+                </div>
+                <ChevronLeft className="w-5 h-5 text-emerald-200 group-hover:-translate-x-1 transition" />
+              </button>
+
+              {/* Option 2: Google Maps External */}
+              <a
+                href={`https://www.google.com/maps/dir/?api=1&destination=${activeDetectedStation?.latitude || 30.0444},${activeDetectedStation?.longitude || 31.2357}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full flex items-center justify-between p-3.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-black text-xs sm:text-sm shadow-md transition active:scale-98 group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-lg">
+                    🌐
+                  </div>
+                  <div className="text-right">
+                    <span>التوجه إلى خرائط جوجل (Google Maps)</span>
+                    <span className="block text-[10px] text-slate-300 font-normal">
+                      فتح تطبيق خرائط جوجل وتوجيه القيادة خطوة بخطوة بالصوت
+                    </span>
+                  </div>
+                </div>
+                <ChevronLeft className="w-5 h-5 text-slate-400 group-hover:-translate-x-1 transition" />
+              </a>
+
+              {/* Option 3: Hotline Call 19058 */}
+              <a
+                href="tel:19058"
+                className="w-full flex items-center justify-between p-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-2xl font-bold text-xs transition"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Phone className="w-4 h-4 text-emerald-600" />
+                  <span>الاتصال بالخط الساخن كارجاس (19058) 📞</span>
+                </div>
+                <span className="text-[11px] font-mono font-bold text-slate-600">خدمة العملاء 24/7</span>
+              </a>
+            </div>
+
+            {/* Wadah Voice & Dismiss */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+              {config.wasalnyConfig?.voiceGuidance !== 'silent' && (
+                <button
+                  type="button"
+                  onClick={handlePlayWadahGuidance}
+                  className="flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 px-3 py-1.5 rounded-xl transition"
+                >
+                  <Volume2 className="w-3.5 h-3.5 text-amber-600" />
+                  <span>استمع لإرشاد وضاح الصوتي 🗣️</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => setIsStationNavModalOpen(false)}
+                className="mr-auto px-4 py-2 text-xs text-slate-500 hover:text-slate-800 font-bold"
+              >
+                إغلاق النافذة
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Customer Feedback & Rating Modal */}
       <CustomerFeedbackModal

@@ -82,6 +82,8 @@ export interface TechnicianCrewMember {
   averageOverallRating: number;    // التقييم العام (من 5)
   rankTitle: string;               // لقب التميز (مثال: بطل مبيعات الوردية، سفير الابتسامة)
   incentiveBonusEgp: number;       // الحافز المالي المستحق بالجنية
+  welcomePointsQuota?: number;     // رصيد النقاط الترحيبية المتاح في يد الفني لتوزيعه على العملاء لربطهم بالمحطة
+  welcomePointsDistributed?: number;// كمية النقاط الترحيبية التي وزعها الفني
 }
 
 export interface PumpQrInfo {
@@ -114,6 +116,10 @@ export interface FuelingTransaction {
   // إحصائيات التكرار
   driverStationFuelingCount?: number; // رقم تفويلة السائق من هذه المحطة
   driverPumpFuelingCount?: number;    // رقم تفويلة السائق من هذه الطلمبة
+  // تموين استبدال نقاط الولاء وهدايا الأمتار المجانية
+  isRewardRedemption?: boolean;       // تفويلة مستبدلة من نقاط الولاء
+  rewardRedemptionId?: string;        // معرف كود الاستبدال
+  rewardTitle?: string;               // اسم المكافأة المستبدلة
 }
 
 export interface RewardItem {
@@ -150,10 +156,21 @@ export interface RewardRedemption {
   rewardTitle: string;
   driverId: string;
   driverName: string;
+  carPlate?: string;
+  carModel?: string;
   pointsSpent: number;
   redemptionCode: string;
   createdAt: string;
   isUsed: boolean;
+  category?: 'meters' | 'oil' | 'spark_plugs' | 'car_wash' | 'discount' | 'merchandise' | 'service';
+  freeMeters?: number;                // عدد الأمتار المجانية المعتمدة (مثال 5 م³ أو 15 م³)
+  calculatedEgpValue?: number;        // القيمة بالجنيه (freeMeters * gasPrice)
+  usedAt?: string;                    // تاريخ ووقت الصرف لدى الفني
+  usedAtStation?: string;             // اسم المحطة التي تم الصرف بها
+  dispensedByTechnicianId?: string;   // كود فني التموين الذي نفذ العملية
+  dispensedByTechnicianName?: string; // اسم فني التموين
+  pumpNumber?: number;                // رقم الطلمبة التي تم التموين منها
+  fuelingTransactionId?: string;      // رقم إيصال التفويلة المرتبط
 }
 
 export interface AntiFraudLog {
@@ -370,6 +387,31 @@ export interface AppConfig {
   ideasBank?: IdeaBankItem[];
   // إعدادات وتحكم مدير النظام في تطبيق وصّلني والملاحة
   wasalnyConfig?: WasalnyConfig;
+  // المعادلة المعتمدة والشاملة لاحتساب نقاط الولاء
+  pointsFormula?: PointsFormulaConfig;
+  // ترتيب وتنسيق عناصر وصفحات العميل والفني
+  layoutSettings?: PageLayoutSettings;
+}
+
+// إعدادات ترتيب ومواضع عناصر صفحات العميل والفني
+export interface PageLayoutSettings {
+  driverSectionsOrder: string[];
+  technicianSectionsOrder: string[];
+}
+
+
+// المعادلة المعتمدة والشاملة لاحتساب نقاط الولاء في كافة أرجاء التطبيق
+export interface PointsFormulaConfig {
+  basePointsPerMeter: number;        // معدل النقاط الأساسي لكل متر (افتراضياً 1)
+  gasPricePerMeter: number;          // سعر متر الغاز المعتمد (13 ج)
+  calculationBasis: 'meters' | 'egp';// الحساب بناء على كمية الأمتار أم القيمة بالجنيه
+  tierBronzeMultiplier: number;      // مضاعف الشريحة البرونزية / العادية (1.0x)
+  tierSilverMultiplier: number;      // مضاعف الشريحة الفضية (1.5x)
+  tierGoldMultiplier: number;        // مضاعف الشريحة الذهبية (2.0x)
+  volumeBonusThresholdM3: number;    // كمية التموين التي تمنح بونص حجم إضافي (مثلاً 30 م³)
+  volumeBonusPoints: number;         // بونص النقاط عند تجاوز الحد (مثلاً 10 نقاط)
+  technicianWelcomePointsPerShift: number; // رصيد النقاط الترحيبية المتاح للفني في الوردية لتوزيعه (مثلاً 350 نقطة)
+  pointsToEgpRedemptionRatio: number;// القيمة التقديرية للنقطة بالجنيه (0.35 ج)
 }
 
 // إعدادات وتحكم مدير النظام الشاملة في تطبيق "وصّلني" والملاحة
@@ -383,7 +425,11 @@ export interface WasalnyConfig {
   arrivalAlertDistanceMeters: number;     // مسافة التنبيه عند الاقتراب من المحطة (بالمتر)
   customWelcomeMessage?: string;         // رسالة أو توجيهات وصّلني المخصصة التي تظهر للسائق
   showCrowdStatus: boolean;              // إظهار حالة زحام المحطة المرصودة بالكاميرات
-  buttonLabel: string;                   // مسمى الزر في واجهة العميل
+  buttonLabel: string;                   // مسمى الزر في واجهة العميل (مثال: وصلني لأقرب محطة)
+  subtitle?: string;                     // نص توضيحي يظهر تحت العنوان
+  mapCoverImageUrl?: string;             // رابط أو صورة خلفية الخريطة المخصصة
+  cargasLogoBadgeUrl?: string;           // لوجو كارجاس المخصص على بطاقة الخريطة
+  cardLayout?: 'banner_top' | 'radar_compact';
 }
 
 export interface VersionSnapshot {

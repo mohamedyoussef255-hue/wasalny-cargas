@@ -23,6 +23,8 @@ import {
   IdeaBankItem,
   RawSalesSheetData,
   WasalnyConfig,
+  PointsFormulaConfig,
+  PageLayoutSettings,
 } from '../types';
 
 const CONFIG_KEY = 'cargas_app_config';
@@ -293,7 +295,86 @@ export const DEFAULT_WASALNY_CONFIG: WasalnyConfig = {
   arrivalAlertDistanceMeters: 150,
   customWelcomeMessage: 'أهلاً بك يا كابتن في تطبيق وصّلني! تم تحديد أقرب محطة كارجاس لموقعك مع توفر تموين الغاز والزيوت أسفل المظلة بدون انتظار.',
   showCrowdStatus: true,
-  buttonLabel: 'أقرب محطة كارجاس (وصّلني) 📍',
+  buttonLabel: 'وصلني لأقرب محطة كارجاس ⛽',
+  subtitle: 'توجيه ذكي وملاحة فورية لأقرب محطة تموين كارجاس CNG مجهزة وسريعة',
+  cardLayout: 'banner_top',
+};
+
+// المعادلة النموذجية المعتمدة لاحتساب نقاط الولاء
+export const DEFAULT_POINTS_FORMULA: PointsFormulaConfig = {
+  basePointsPerMeter: 1,
+  gasPricePerMeter: 13,
+  calculationBasis: 'meters',
+  tierBronzeMultiplier: 1.0,
+  tierSilverMultiplier: 1.5,
+  tierGoldMultiplier: 2.0,
+  volumeBonusThresholdM3: 30,
+  volumeBonusPoints: 10,
+  technicianWelcomePointsPerShift: 350,
+  pointsToEgpRedemptionRatio: 0.35,
+};
+
+// المعادلة المعتمدة والموحدة لحساب النقاط في كافة صفحات وعمليات التطبيق
+export function calculateFuelingPoints(
+  meters: number,
+  config: AppConfig,
+  stationMultiplier: number = 1.0,
+  driverTier: 'bronze' | 'silver' | 'gold' = 'bronze'
+): number {
+  const formula = config.pointsFormula || DEFAULT_POINTS_FORMULA;
+  const baseRate = formula.basePointsPerMeter ?? 1;
+  const tierMul =
+    driverTier === 'gold'
+      ? (formula.tierGoldMultiplier ?? 2.0)
+      : driverTier === 'silver'
+      ? (formula.tierSilverMultiplier ?? 1.5)
+      : (formula.tierBronzeMultiplier ?? 1.0);
+
+  const totalMul = (stationMultiplier || 1.0) * tierMul;
+  let points = 0;
+
+  if (formula.calculationBasis === 'egp') {
+    const gasPrice = formula.gasPricePerMeter || config.gasPricePerMeter || 13;
+    const egpValue = meters * gasPrice;
+    points = Math.floor((egpValue / gasPrice) * baseRate * totalMul);
+  } else {
+    points = Math.floor(meters * baseRate * totalMul);
+  }
+
+  // Bonus for large fueling volume (e.g. +10 points for fueling 30 m3 or more)
+  if (formula.volumeBonusThresholdM3 > 0 && meters >= formula.volumeBonusThresholdM3) {
+    points += formula.volumeBonusPoints || 0;
+  }
+
+  return Math.max(0, points);
+}
+
+// الترتيب الافتراضي لعناصر وصفحات العميل والفني لتمكين مدير النظام من التحريك والنقل والترتيب
+export const DEFAULT_DRIVER_SECTIONS_ORDER = [
+  'wasalny_hero',
+  'promotional_banner',
+  'golden_card',
+  'rewards_bank',
+  'fueling_count_stats',
+  'maintenance_schedule',
+  'fueling_history',
+  'service_rating',
+  'complaints_box',
+];
+
+export const DEFAULT_TECHNICIAN_SECTIONS_ORDER = [
+  'shift_stats',
+  'welcome_bonus',
+  'camera_scanner',
+  'manual_entry',
+  'fueling_form',
+  'gps_radar',
+  'technician_incentives',
+];
+
+export const DEFAULT_LAYOUT_SETTINGS: PageLayoutSettings = {
+  driverSectionsOrder: DEFAULT_DRIVER_SECTIONS_ORDER,
+  technicianSectionsOrder: DEFAULT_TECHNICIAN_SECTIONS_ORDER,
 };
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -351,7 +432,10 @@ export const DEFAULT_CONFIG: AppConfig = {
   promotionalCampaigns: DEFAULT_PROMOTIONAL_CAMPAIGNS,
   ideasBank: DEFAULT_IDEAS_BANK,
   wasalnyConfig: DEFAULT_WASALNY_CONFIG,
+  pointsFormula: DEFAULT_POINTS_FORMULA,
+  layoutSettings: DEFAULT_LAYOUT_SETTINGS,
 };
+
 
 export const DEFAULT_MAINTENANCE_ITEMS: MaintenanceItem[] = [
   {

@@ -42,7 +42,11 @@ import {
   saveStationCrew,
   addFraudLog,
   getDriverStationAndPumpFuelingCounts,
+  getRedemptions,
+  saveRedemptions,
+  calculateFuelingPoints,
 } from '../services/storageService';
+
 
 interface TechnicianPortalProps {
   config: AppConfig;
@@ -163,6 +167,28 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
     };
   }, []);
 
+  // Check URL parameters for direct WhatsApp login
+  useEffect(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const techIdFromUrl = urlParams.get('techId');
+      const pinFromUrl = urlParams.get('pin');
+      if (techIdFromUrl && pinFromUrl && stationCrew.length > 0 && !activeTechnician) {
+        const tech = stationCrew.find(
+          (c) => c.id === techIdFromUrl || c.phone.replace(/\D/g, '') === techIdFromUrl.replace(/\D/g, '')
+        );
+        if (tech && pinFromUrl.trim() === tech.dailyPin.trim()) {
+          const updatedCrew = stationCrew.map((c) =>
+            c.id === tech.id ? { ...c, isShiftActive: true } : c
+          );
+          setActiveTechnician({ ...tech, isShiftActive: true });
+          onUpdateCrew(updatedCrew);
+          saveStationCrew(updatedCrew);
+        }
+      }
+    } catch {}
+  }, [stationCrew]);
+
   // Handle Technician Shift Login
   const handleShiftLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -253,6 +279,9 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
     const parsed = parseDriverQrData(text);
     if (parsed.isValid) {
       setScannedDriver(parsed);
+      if (parsed.isRewardRedemption && parsed.freeMeters) {
+        setGasMetersInput(String(parsed.freeMeters));
+      }
       setOdometerInput(String(parsed.odometer || currentDriver.odometerKm));
       setManualCodeInput('');
       stopCamera();
@@ -261,12 +290,74 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
     }
   };
 
+  // Grant Technician Welcome Bonus Points to Customer
+  const handleGrantWelcomePoints = (points: number) => {
+    if (!activeTechnician) return;
+    const targetDriver = scannedDriver?.isValid ? scannedDriver : currentDriver;
+    const availableQuota =
+      activeTechnician.welcomePointsQuota !== undefined
+        ? activeTechnician.welcomePointsQuota
+        : (config.pointsFormula?.technicianWelcomePointsPerShift || 350);
+
+    if (availableQuota < points) {
+      alert(`رصيد النقاط الترحيبية المتاح لك في الوردية (${availableQuota} نقطة) لا يكفي لمنح ${points} نقطة.`);
+      return;
+    }
+
+    const newQuota = availableQuota - points;
+    const newDistributed = (activeTechnician.welcomePointsDistributed || 0) + points;
+
+    const updatedCrew = stationCrew.map((c) =>
+      c.id === activeTechnician.id
+        ? {
+            ...c,
+            welcomePointsQuota: newQuota,
+            welcomePointsDistributed: newDistributed,
+            technicianPoints: (c.technicianPoints || 300) + 10,
+          }
+        : c
+    );
+
+    const nextTech = {
+      ...activeTechnician,
+      welcomePointsQuota: newQuota,
+      welcomePointsDistributed: newDistributed,
+      technicianPoints: (activeTechnician.technicianPoints || 300) + 10,
+    };
+
+    setActiveTechnician(nextTech);
+    onUpdateCrew(updatedCrew);
+    saveStationCrew(updatedCrew);
+
+    const updatedDriver: DriverProfile = {
+      ...currentDriver,
+      points: currentDriver.points + points,
+    };
+    onUpdateDriver(updatedDriver);
+    saveDriverProfile(updatedDriver);
+
+    try {
+      confetti({
+        particleCount: 75,
+        spread: 60,
+        origin: { y: 0.6 },
+        colors: ['#f59e0b', '#10b981', '#3b82f6'],
+      });
+    } catch {}
+
+    alert(
+      `🎉 تم بنجاح إهداء ${points} نقطة ترحيبية للعميل ${targetDriver.name || currentDriver.name} بمحفظته الإلكترونية!\n` +
+      `• رصيدك المتبقي من حصة الوردية: ${newQuota} نقطة.\n` +
+      `• تم إضافة +10 نقاط تقييم امتياز لرصيدك الفني تقديراً لخدمتك الممتازة!`
+    );
+  };
+
   // Execute Fueling Transaction
   const handleExecuteFueling = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeTechnician) return;
     if (!scannedDriver) {
-      alert('يرجى أولاً مسح كود الـ QR الخاص بسيارة السائق!');
+      alert('يرجى أولاً مسح كود الـ QR الخاص بسيارة السائق أو كود استبدال الهدية!');
       return;
     }
 
@@ -275,14 +366,18 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
       return;
     }
 
-    const meters = parseFloat(gasMetersInput);
+    const isRedemption = Boolean(scannedDriver.isRewardRedemption);
+    const meters = isRedemption
+      ? (Number(scannedDriver.freeMeters) || parseFloat(gasMetersInput) || 10)
+      : parseFloat(gasMetersInput);
+
     if (isNaN(meters) || meters <= 0) {
       alert('يرجى إدخال كمية غاز صحيحة بالمتر المكعب');
       return;
     }
 
     const maxSafeMeters = (scannedDriver.capacity || 70) * 0.45;
-    if (meters > maxSafeMeters) {
+    if (!isRedemption && meters > maxSafeMeters) {
       const warn = `تنبيه أمان: الكمية المدخلة (${meters} م³) تتجاوز السعة القصوى لأسطوانة السيارة (${scannedDriver.capacity} لتر)!`;
       setFraudWarning(warn);
       addFraudLog({
@@ -298,10 +393,13 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
       setFraudWarning('');
     }
 
-    const currentOdo = parseInt(odometerInput) || scannedDriver.odometer || 0;
+    const currentOdo = odometerInput.trim() ? parseInt(odometerInput, 10) : (scannedDriver.odometer || currentDriver.odometerKm || 0);
     const pricePerMeter = config.gasPricePerMeter || 13;
-    const totalAmount = parseFloat((meters * pricePerMeter).toFixed(2));
-    const pointsEarned = Math.floor(meters * (config.pointsPerMeter || 1));
+    // For free meters redemption: Driver pays 0 EGP, full value calculated for technician & station credit
+    const totalAmount = isRedemption ? 0 : parseFloat((meters * pricePerMeter).toFixed(2));
+    const calculatedCreditEgp = parseFloat((meters * pricePerMeter).toFixed(2));
+    const pointsEarned = isRedemption ? 0 : calculateFuelingPoints(meters, config, 1.0, currentDriver.tier || 'bronze');
+
 
     // Calculate Driver Fueling Frequency for Station and Pump
     const { stationCount, pumpCount } = getDriverStationAndPumpFuelingCounts(
@@ -311,7 +409,7 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
       selectedPump
     );
 
-    const receiptNo = 'CRG-' + new Date().getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000);
+    const receiptNo = (isRedemption ? 'GIFT-' : 'CRG-') + new Date().getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000);
     const newTx: FuelingTransaction = {
       id: 'TX-' + Date.now(),
       receiptNumber: receiptNo,
@@ -333,27 +431,56 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
       verifiedGps: true,
       driverStationFuelingCount: stationCount + 1,
       driverPumpFuelingCount: pumpCount + 1,
+      isRewardRedemption: isRedemption,
+      rewardRedemptionId: scannedDriver.redemptionId || scannedDriver.redemptionCode,
+      rewardTitle: scannedDriver.rewardTitle,
     };
+
+    // If free meters redemption, mark the voucher as used in storage
+    if (isRedemption) {
+      const allReds = getRedemptions();
+      const updatedReds = allReds.map((r) => {
+        if (
+          (scannedDriver.redemptionId && r.id === scannedDriver.redemptionId) ||
+          (scannedDriver.redemptionCode && r.redemptionCode === scannedDriver.redemptionCode)
+        ) {
+          return {
+            ...r,
+            isUsed: true,
+            usedAt: new Date().toISOString(),
+            usedAtStation: config.stationName,
+            dispensedByTechnicianId: activeTechnician.id,
+            dispensedByTechnicianName: activeTechnician.name,
+            pumpNumber: selectedPump,
+            fuelingTransactionId: newTx.id,
+          };
+        }
+        return r;
+      });
+      saveRedemptions(updatedReds);
+    }
 
     // Update transactions list
     const updatedTxs = [newTx, ...transactions];
     onUpdateTransactions(updatedTxs);
     saveTransactions(updatedTxs);
 
-    // Update Driver Profile Points & Maintenance
-    const updatedMaintenance = currentDriver.maintenanceSchedule.map((item) => {
-      const nextDue = item.nextDueKm;
-      const kmRemaining = nextDue - currentOdo;
-      let status: 'ok' | 'due_soon' | 'overdue' = 'ok';
-      if (kmRemaining <= 0) status = 'overdue';
-      else if (kmRemaining <= 1000) status = 'due_soon';
-      return { ...item, status };
-    });
+    // Update Driver Profile Points & Maintenance (only adjust maintenance if odometer was explicitly provided)
+    const updatedMaintenance = odometerInput.trim() && currentOdo > 0
+      ? currentDriver.maintenanceSchedule.map((item) => {
+          const nextDue = item.nextDueKm;
+          const kmRemaining = nextDue - currentOdo;
+          let status: 'ok' | 'due_soon' | 'overdue' = 'ok';
+          if (kmRemaining <= 0) status = 'overdue';
+          else if (kmRemaining <= 1000) status = 'due_soon';
+          return { ...item, status };
+        })
+      : currentDriver.maintenanceSchedule;
 
     const updatedDriver: DriverProfile = {
       ...currentDriver,
-      odometerKm: Math.max(currentDriver.odometerKm, currentOdo),
-      points: currentDriver.points + pointsEarned,
+      odometerKm: odometerInput.trim() && currentOdo > 0 ? Math.max(currentDriver.odometerKm, currentOdo) : currentDriver.odometerKm,
+      points: isRedemption ? currentDriver.points : currentDriver.points + pointsEarned,
       totalMetersFueled: currentDriver.totalMetersFueled + meters,
       totalSpentEgp: currentDriver.totalSpentEgp + totalAmount,
       maintenanceSchedule: updatedMaintenance,
@@ -362,8 +489,8 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
     saveDriverProfile(updatedDriver);
 
     // Update Technician shift totals AND Technician Loyalty / Incentive Points
-    const techPointsToAdd = Math.floor(meters * 0.5) + 5; // نقاط حافز مبيعات للفني
-    const incentiveCashToAdd = meters >= 15 ? 10 : 5;
+    const techPointsToAdd = isRedemption ? 20 : (Math.floor(meters * 0.5) + 5);
+    const incentiveCashToAdd = isRedemption ? 15 : (meters >= 15 ? 10 : 5);
 
     const updatedCrew = stationCrew.map((c) => {
       if (c.id === activeTechnician.id) {
@@ -371,7 +498,7 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
           ...c,
           totalFuelingsToday: c.totalFuelingsToday + 1,
           totalMetersToday: c.totalMetersToday + meters,
-          totalAmountToday: c.totalAmountToday + totalAmount,
+          totalAmountToday: c.totalAmountToday + (isRedemption ? calculatedCreditEgp : totalAmount),
           technicianPoints: (c.technicianPoints || 300) + techPointsToAdd,
           totalCustomersServed: (c.totalCustomersServed || 0) + 1,
           incentiveBonusEgp: (c.incentiveBonusEgp || 0) + incentiveCashToAdd,
@@ -384,7 +511,7 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
       ...activeTechnician,
       totalFuelingsToday: activeTechnician.totalFuelingsToday + 1,
       totalMetersToday: activeTechnician.totalMetersToday + meters,
-      totalAmountToday: activeTechnician.totalAmountToday + totalAmount,
+      totalAmountToday: activeTechnician.totalAmountToday + (isRedemption ? calculatedCreditEgp : totalAmount),
       technicianPoints: (activeTechnician.technicianPoints || 300) + techPointsToAdd,
       totalCustomersServed: (activeTechnician.totalCustomersServed || 0) + 1,
       incentiveBonusEgp: (activeTechnician.incentiveBonusEgp || 0) + incentiveCashToAdd,
@@ -605,7 +732,82 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
         </div>
       )}
 
+      {/* Technician Shift Welcome Bonus Points Quota (رصيد نقاط ترحيبية في يد الفني يوزعها على العميل) */}
+      {(() => {
+        const availableQuota =
+          activeTechnician.welcomePointsQuota !== undefined
+            ? activeTechnician.welcomePointsQuota
+            : (config.pointsFormula?.technicianWelcomePointsPerShift || 350);
+        const distributed = activeTechnician.welcomePointsDistributed || 0;
+        const targetDriverName = scannedDriver?.name || currentDriver.name;
+
+        return (
+          <div className="bg-gradient-to-r from-blue-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-5 shadow-lg border border-blue-800/60 space-y-3">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-400/20 text-amber-300 flex items-center justify-center text-2xl font-black shrink-0 border border-amber-400/30">
+                  🎁
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded-full uppercase">
+                      حصة الفني الترحيبية
+                    </span>
+                    <span className="text-xs text-blue-200 font-bold">
+                      بناء الارتباط والولاء مع السائق والمحطة
+                    </span>
+                  </div>
+                  <h3 className="text-sm font-black text-white mt-0.5">
+                    رصيد النقاط الترحيبية المتاح لك في الوردية: <span className="font-mono text-amber-300 text-base">{availableQuota} نقطة</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-300">
+                    يمكنك إهداء نقاط ترحيبية مباشرة للعميل {targetDriverName} لتشجيعه على تكرار التموين بمحطتك
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 bg-white/10 backdrop-blur-xs px-3 py-2 rounded-2xl border border-white/10 text-center">
+                <div>
+                  <span className="text-[10px] text-slate-300 block">تم توزيعه اليوم</span>
+                  <span className="font-mono font-black text-emerald-300 text-sm">{distributed} نقطة</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Grant Buttons */}
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/10">
+              <span className="text-[11px] font-bold text-slate-300 ml-1">إهداء نقاط ترحيبية فورية:</span>
+              <button
+                type="button"
+                onClick={() => handleGrantWelcomePoints(25)}
+                disabled={availableQuota < 25}
+                className="bg-amber-400 hover:bg-amber-500 disabled:opacity-40 text-slate-950 font-black text-xs px-3.5 py-1.5 rounded-xl transition shadow-xs flex items-center gap-1 active:scale-95"
+              >
+                <span>+25 نقطة ترحيبية ⭐</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleGrantWelcomePoints(50)}
+                disabled={availableQuota < 50}
+                className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white font-black text-xs px-3.5 py-1.5 rounded-xl transition shadow-xs flex items-center gap-1 active:scale-95"
+              >
+                <span>+50 نقطة كارجاس 🎁</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleGrantWelcomePoints(100)}
+                disabled={availableQuota < 100}
+                className="bg-blue-500 hover:bg-blue-600 disabled:opacity-40 text-white font-black text-xs px-3.5 py-1.5 rounded-xl transition shadow-xs flex items-center gap-1 active:scale-95"
+              >
+                <span>+100 نقطة بونص عالي 🚀</span>
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Main Grid: QR Scanner / Vehicle Identification + Fueling & Billing Entry */}
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* Step 1: Vehicle & Customer QR Scan (5 cols) */}
@@ -709,37 +911,70 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
 
           {/* Scanned Vehicle Card */}
           {scannedDriver && (
-            <div className="p-4 bg-emerald-50/70 border-2 border-emerald-400 rounded-2xl space-y-2 animate-in fade-in">
-              <div className="flex items-center justify-between border-b border-emerald-200/60 pb-2">
-                <span className="text-[10px] font-bold bg-emerald-600 text-white px-2 py-0.5 rounded-md">
-                  تم التعرف على السيارة بنجاح ✓
+            <div className={`p-4 rounded-2xl space-y-2 animate-in fade-in border-2 ${
+              scannedDriver.isRewardRedemption
+                ? 'bg-amber-50/90 border-amber-400'
+                : 'bg-emerald-50/70 border-emerald-400'
+            }`}>
+              <div className="flex items-center justify-between border-b pb-2 border-inherit">
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                  scannedDriver.isRewardRedemption
+                    ? 'bg-amber-500 text-slate-950 font-black'
+                    : 'bg-emerald-600 text-white'
+                }`}>
+                  {scannedDriver.isRewardRedemption ? '🎁 قسيمة أمتار مجانية (ولاء كارجاس) ✓' : 'تم التعرف على السيارة بنجاح ✓'}
                 </span>
-                <span className="font-mono text-xs font-bold text-emerald-900">
-                  {scannedDriver.driverId}
+                <span className="font-mono text-xs font-bold text-slate-900">
+                  {scannedDriver.redemptionCode || scannedDriver.driverId}
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div>
-                  <span className="text-slate-500 block text-[10px]">اسم السائق:</span>
-                  <span className="font-bold text-slate-900">{scannedDriver.name}</span>
+
+              {scannedDriver.isRewardRedemption ? (
+                <div className="space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-600 font-bold">اسم المكافأة:</span>
+                    <span className="font-black text-slate-900">{scannedDriver.rewardTitle}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-600 font-bold">كمية الأمتار المصرح بها:</span>
+                    <span className="font-mono font-black text-emerald-800 text-sm bg-white px-2 py-0.5 rounded border border-amber-300">
+                      {scannedDriver.freeMeters} م³ مجاني
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-600 font-bold">المطلوب تحصيله:</span>
+                    <span className="font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                      0 جنيه (مجاني بالكامل للعميل)
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-emerald-800 font-light pt-1 border-t border-amber-200">
+                    💡 سيتم احتساب قيمة الأمتار كاملة ({(scannedDriver.freeMeters * config.gasPricePerMeter).toFixed(0)} ج) في مبيعات ورديتك، وستحصل على +20 نقطة حافز تميز.
+                  </p>
                 </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px]">رقم اللوحة:</span>
-                  <span className="font-black text-slate-900 font-mono bg-white px-2 py-0.5 rounded border border-emerald-200">
-                    {scannedDriver.carPlate}
-                  </span>
+              ) : (
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">اسم السائق:</span>
+                    <span className="font-bold text-slate-900">{scannedDriver.name}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">رقم اللوحة:</span>
+                    <span className="font-black text-slate-900 font-mono bg-white px-2 py-0.5 rounded border border-emerald-200">
+                      {scannedDriver.carPlate}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">نوع السيارة:</span>
+                    <span className="font-medium text-slate-800">{scannedDriver.carModel}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">سعة الأسطوانة:</span>
+                    <span className="font-bold text-emerald-800 font-mono">
+                      {scannedDriver.capacity} لتر (~{(scannedDriver.capacity * 0.23).toFixed(1)} م³)
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px]">نوع السيارة:</span>
-                  <span className="font-medium text-slate-800">{scannedDriver.carModel}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px]">سعة الأسطوانة:</span>
-                  <span className="font-bold text-emerald-800 font-mono">
-                    {scannedDriver.capacity} لتر (~{(scannedDriver.capacity * 0.23).toFixed(1)} م³)
-                  </span>
-                </div>
-              </div>
+              )}
             </div>
           )}
         </div>
@@ -750,7 +985,11 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
             <div>
               <h3 className="font-black text-sm text-slate-900 flex items-center gap-2">
                 <Fuel className="w-4 h-4 text-emerald-600" />
-                الخطوة 2: تسجيل كمية الغاز وحساب القيمة والنقاط
+                <span>
+                  {scannedDriver?.isRewardRedemption
+                    ? 'الخطوة 2: تأكيد صرف الأمتار المجانية واحتساب مبيعات الوردية'
+                    : 'الخطوة 2: تسجيل كمية الغاز وحساب القيمة والنقاط'}
+                </span>
               </h3>
               <p className="text-[11px] text-slate-500">
                 سعر المتر الحالي: <span className="font-bold text-emerald-700">{config.gasPricePerMeter} جنيه مصري</span>
@@ -786,7 +1025,7 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  كمية الغاز المباعة (متر مكعب m³)
+                  {scannedDriver?.isRewardRedemption ? 'كمية الأمتار المجانية المستحقة (م³)' : 'كمية الغاز المباعة (متر مكعب m³)'}
                 </label>
                 <div className="relative">
                   <input
@@ -806,16 +1045,17 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  قراءة عداد السيارة الحالي (كم)
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                  <span>قراءة عداد السيارة الحالي (كم)</span>
+                  <span className="text-[10px] text-slate-400 font-normal">اختياري - غير إلزامي</span>
                 </label>
                 <div className="relative">
                   <input
                     type="number"
-                    required
                     value={odometerInput}
                     onChange={(e) => setOdometerInput(e.target.value)}
-                    className="w-full bg-slate-50 border-2 border-slate-200 focus:border-emerald-600 rounded-2xl py-3 px-4 text-xl font-black font-mono outline-none transition"
+                    placeholder="اختياري (أو يُترك فارغاً)"
+                    className="w-full bg-slate-50 border-2 border-slate-200 focus:border-emerald-600 rounded-2xl py-3 px-4 text-xl font-black font-mono outline-none transition placeholder:text-xs placeholder:font-normal placeholder:text-slate-400"
                   />
                   <span className="absolute left-3 top-3.5 text-xs font-bold text-slate-400">
                     كم
@@ -836,21 +1076,54 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
               <div className="flex items-baseline justify-between pt-2 border-t border-slate-700">
                 <div>
                   <span className="text-[11px] text-emerald-400 block font-bold">
-                    المبلغ المطلوب تحصيله:
+                    المبلغ المطلوب تحصيله من العميل:
                   </span>
-                  <span className="text-3xl sm:text-4xl font-black font-mono text-white">
-                    {((parseFloat(gasMetersInput) || 0) * config.gasPricePerMeter).toFixed(2)}
-                  </span>
-                  <span className="text-sm font-bold text-slate-300 mr-2">جنيه مصري</span>
+                  {scannedDriver?.isRewardRedemption ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-3xl sm:text-4xl font-black font-mono text-emerald-400">
+                        0.00
+                      </span>
+                      <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-400/30">
+                        هدية ولاء مجانية 🎁
+                      </span>
+                    </div>
+                  ) : (
+                    <div>
+                      <span className="text-3xl sm:text-4xl font-black font-mono text-white">
+                        {((parseFloat(gasMetersInput) || 0) * config.gasPricePerMeter).toFixed(2)}
+                      </span>
+                      <span className="text-sm font-bold text-slate-300 mr-2">جنيه مصري</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="text-left bg-emerald-950/80 px-3 py-2 rounded-xl border border-emerald-500/40">
-                  <span className="text-[10px] text-emerald-300 block">نقاط الولاء للسائق:</span>
-                  <span className="text-lg font-black text-emerald-400 font-mono">
-                    +{Math.floor((parseFloat(gasMetersInput) || 0) * (config.pointsPerMeter || 1))} نقطة
-                  </span>
+                  {scannedDriver?.isRewardRedemption ? (
+                    <div>
+                      <span className="text-[10px] text-amber-300 block">حافز إضافي لورديتك:</span>
+                      <span className="text-base font-black text-amber-400 font-mono">
+                        +20 نقطة تميز 🌟
+                      </span>
+                    </div>
+                  ) : (
+                    <div>
+                      <span className="text-[10px] text-emerald-300 block">نقاط الولاء للسائق:</span>
+                      <span className="text-lg font-black text-emerald-400 font-mono">
+                        +{Math.floor((parseFloat(gasMetersInput) || 0) * (config.pointsPerMeter || 1))} نقطة
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {scannedDriver?.isRewardRedemption && (
+                <div className="pt-2 border-t border-slate-700/60 text-[11px] text-emerald-300 flex items-center justify-between">
+                  <span>المبلغ المحسوب في مبيعات ورديتك:</span>
+                  <span className="font-mono font-black text-white">
+                    {((parseFloat(gasMetersInput) || 0) * config.gasPricePerMeter).toFixed(2)} جنيه
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Anti-Fraud Warning Pill if any */}
@@ -865,10 +1138,18 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
             <button
               type="submit"
               disabled={!scannedDriver}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black py-4 rounded-2xl transition shadow-xl shadow-emerald-600/20 text-base active:scale-98 flex items-center justify-center gap-2"
+              className={`w-full text-white font-black py-4 rounded-2xl transition shadow-xl text-base active:scale-98 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                scannedDriver?.isRewardRedemption
+                  ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
+                  : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
+              }`}
             >
               <Check className="w-5 h-5" />
-              <span>تأكيد التموين واحتساب حافز الفني ونقاط السائق</span>
+              <span>
+                {scannedDriver?.isRewardRedemption
+                  ? 'تأكيد صرف الأمتار المجانية (0 جنيه) واحتساب المبيعات والحافز للفني ✓'
+                  : 'تأكيد التموين واحتساب حافز الفني ونقاط السائق'}
+              </span>
             </button>
           </form>
 

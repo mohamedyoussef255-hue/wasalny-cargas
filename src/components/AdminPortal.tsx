@@ -53,6 +53,8 @@ import {
   Navigation,
   Volume2,
   Compass,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import {
   AppConfig,
@@ -73,6 +75,8 @@ import {
   IdeaBankItem,
   RawSalesSheetData,
   WasalnyConfig,
+  PointsFormulaConfig,
+  PageLayoutSettings,
 } from '../types';
 import { generateQrDataUrl } from '../services/qrService';
 import {
@@ -120,6 +124,10 @@ import {
   aiAuditAndGenerateReward,
   AiAuditRewardResult,
   DEFAULT_WASALNY_CONFIG,
+  DEFAULT_POINTS_FORMULA,
+  DEFAULT_DRIVER_SECTIONS_ORDER,
+  DEFAULT_TECHNICIAN_SECTIONS_ORDER,
+  DEFAULT_LAYOUT_SETTINGS,
 } from '../services/storageService';
 
 interface AdminPortalProps {
@@ -276,8 +284,104 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   );
   const [wasalnyShowCrowd, setWasalnyShowCrowd] = useState(defaultWasalny.showCrowdStatus);
   const [wasalnyBtnLabel, setWasalnyBtnLabel] = useState(
-    defaultWasalny.buttonLabel || 'أقرب محطة كارجاس (وصّلني) 📍'
+    defaultWasalny.buttonLabel || 'وصلني لأقرب محطة كارجاس ⛽'
   );
+  const [wasalnySubtitle, setWasalnySubtitle] = useState(
+    defaultWasalny.subtitle || 'توجيه ذكي وملاحة فورية لأقرب محطة تموين كارجاس CNG مجهزة وسريعة'
+  );
+  const [wasalnyCoverImage, setWasalnyCoverImage] = useState(defaultWasalny.mapCoverImageUrl || '');
+  const [wasalnyLogoBadge, setWasalnyLogoBadge] = useState(defaultWasalny.cargasLogoBadgeUrl || '');
+
+  const handleWasalnyCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressed = await compressImageFile(file, 800, 0.85);
+      setWasalnyCoverImage(compressed);
+    } catch {
+      const reader = new FileReader();
+      reader.onload = (ev) => setWasalnyCoverImage(ev.target?.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleWasalnyLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressed = await compressImageFile(file, 200, 0.9);
+      setWasalnyLogoBadge(compressed);
+    } catch {
+      const reader = new FileReader();
+      reader.onload = (ev) => setWasalnyLogoBadge(ev.target?.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleUploadStationsSheetForWasalny = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      if (file.name.endsWith('.json')) {
+        const text = await file.text();
+        const json = JSON.parse(text);
+        if (Array.isArray(json) && json.length > 0) {
+          const formatted: CargasStationLocation[] = json.map((item: any, idx: number) => ({
+            id: item.id || `ST-MAP-${idx + 1}`,
+            name: item.name || item['اسم المحطة'] || item['اسم المركز'] || `محطة كارجاس ${idx + 1}`,
+            city: item.city || item['المحافظة'] || item['المدينة'] || 'القاهرة',
+            address: item.address || item['العنوان'] || 'مصر',
+            latitude: Number(item.latitude || item.lat || item['خط العرض'] || 30.0884),
+            longitude: Number(item.longitude || item.lng || item['خط الطول'] || 31.2468),
+            operatingHours: item.operatingHours || item['مواعيد العمل'] || '24 ساعة',
+            pumpsCount: Number(item.pumpsCount || item['عدد الطلمبات'] || 8),
+            crowdLevel: item.crowdLevel || 'خفيف',
+            supportedVehicles: ['تاكسي', 'ميكروباص', 'ملاكي', 'نقل'],
+            activities: ['تموين غاز طبيعي', 'زيوت كارجاس'],
+          }));
+          onUpdateStations(formatted);
+          saveStationLocations(formatted);
+          alert(`✅ تم استيراد وتحديث ${formatted.length} محطة على خريطة وصّلني وتطبيق الملاحة بنجاح!`);
+        }
+      } else {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonRows: any[] = XLSX.utils.sheet_to_json(worksheet);
+        if (jsonRows.length === 0) {
+          alert('الملف فارغ أو لا يحتوي على صفوف بيانات صالحة.');
+          return;
+        }
+        const parsedStations: CargasStationLocation[] = jsonRows.map((r, idx) => {
+          const name = r['اسم المركز (المحطة)'] || r['اسم المحطة'] || r['المحطة'] || r.name || `محطة كارجاس ${idx + 1}`;
+          const city = r['المحافظة'] || r['المدينة'] || r.city || 'القاهرة';
+          const address = r['العنوان'] || r.address || 'مصر';
+          const lat = parseFloat(r['الإحداثيات Y'] || r['خط العرض'] || r.latitude || r.lat || 30.0884);
+          const lng = parseFloat(r['الإحداثيات X'] || r['خط الطول'] || r.longitude || r.lng || 31.2468);
+          return {
+            id: `ST-XLS-${idx + 1}`,
+            name,
+            city,
+            address,
+            latitude: isNaN(lat) ? 30.0884 : lat,
+            longitude: isNaN(lng) ? 31.2468 : lng,
+            operatingHours: r['مواعيد العمل'] || '24 ساعة',
+            pumpsCount: parseInt(r['عدد الطلمبات'] || 8, 10),
+            crowdLevel: 'خفيف',
+            supportedVehicles: ['تاكسي', 'ميكروباص', 'ملاكي', 'نقل'],
+            activities: ['تموين غاز طبيعي', 'زيوت كارجاس'],
+          };
+        });
+        onUpdateStations(parsedStations);
+        saveStationLocations(parsedStations);
+        alert(`✅ تم قراءة وتحديث ${parsedStations.length} موقع ومحطة على خريطة وصلني وتطبيق الملاحة بنجاح!`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('حدث خطأ أثناء قراءة ملف المحطات. تأكد من صحة الملف.');
+    }
+  };
 
   const handleSaveWasalnySettings = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -291,7 +395,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       arrivalAlertDistanceMeters: Number(wasalnyAlertDistance),
       customWelcomeMessage: wasalnyWelcomeMsg.trim(),
       showCrowdStatus: wasalnyShowCrowd,
-      buttonLabel: wasalnyBtnLabel.trim() || 'أقرب محطة كارجاس (وصّلني) 📍',
+      buttonLabel: wasalnyBtnLabel.trim() || 'وصلني لأقرب محطة كارجاس ⛽',
+      subtitle: wasalnySubtitle.trim() || 'توجيه ذكي وملاحة فورية لأقرب محطة تموين كارجاس CNG مجهزة وسريعة',
+      mapCoverImageUrl: wasalnyCoverImage,
+      cargasLogoBadgeUrl: wasalnyLogoBadge,
+      cardLayout: 'banner_top',
     };
     const updatedConfig: AppConfig = {
       ...config,
@@ -299,7 +407,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     };
     onUpdateConfig(updatedConfig);
     saveAppConfig(updatedConfig);
-    alert('✅ تم حفظ كافة إعدادات وتحكم تطبيق "وصّلني" وتحديث خيارات الملاحة والتوجيه الصوتي فوراً!');
+    alert('✅ تم حفظ كافة إعدادات وتحكم تطبيق "وصّلني" وتحديث خيارات الملاحة والتوجيه الصوتي وصور الواجهة فوراً!');
   };
 
   const handleTestWadahVoice = () => {
@@ -320,14 +428,34 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     window.speechSynthesis.speak(utterance);
   };
 
-  // Visibility Matrix State
+  // Visibility Matrix State & Layout Reorder Mode
   const [driverVis, setDriverVis] = useState(config.visibility.driver);
   const [techVis, setTechVis] = useState(config.visibility.technician);
+  const [visibilitySubTab, setVisibilitySubTab] = useState<'reorder_layout' | 'checkboxes'>('reorder_layout');
+
 
   // Loyalty Model & Budget State
   const [loyaltyModel, setLoyaltyModel] = useState(config.loyaltyCostModel);
   const [salesRecords, setSalesRecords] = useState<StationSalesRecord[]>(getSalesRecords);
   const [rawSheetData, setRawSheetData] = useState<RawSalesSheetData | null>(getRawSalesSheet);
+
+  // Promotions Studio Sub-Tabs State (دمج استوديو العروض وبنك الهدايا والأفكار والحاسبة)
+  const [promoSubTab, setPromoSubTab] = useState<'campaigns' | 'calculator' | 'rewards' | 'ideas'>('campaigns');
+
+  // Loyalty Points Calculator State (طبقا لمعادلات كارجاس وحاسبة نقاط الولاء.html)
+  const [calcFuelMeters, setCalcFuelMeters] = useState<number>(1200);
+  const [calcMultiplier, setCalcMultiplier] = useState<number>(1.0);
+  const [calcGasPrice, setCalcGasPrice] = useState<number>(config.gasPricePerMeter || 13.0);
+  const [calcCostPerPoint, setCalcCostPerPoint] = useState<number>(config.loyaltyCostModel?.costPerPointEgp || 0.35);
+  const [calcGasolineSavingsPerMeter, setCalcGasolineSavingsPerMeter] = useState<number>(10.5);
+  const [calcPresetType, setCalcPresetType] = useState<'taxi' | 'microbus' | 'centennial' | 'fleet' | 'station' | 'custom'>('taxi');
+
+  // Sales Analytical Columns Toggles (لإضافة الخانات التحليلية المفيدة في قراءة الشيت المرفوع)
+  const [showSalesAchievementCol, setShowSalesAchievementCol] = useState(true);
+  const [showSalesMonthlyAvgCol, setShowSalesMonthlyAvgCol] = useState(true);
+  const [showSalesRevenueCol, setShowSalesRevenueCol] = useState(true);
+  const [showSalesVarianceCol, setShowSalesVarianceCol] = useState(true);
+  const [showSalesGradeCol, setShowSalesGradeCol] = useState(true);
 
   // زر مسح بيانات تجريبية أو مرفوعة سابقاً لتصفير الشيت
   const handleClearSalesData = () => {
@@ -400,9 +528,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [campaignBudgetItemEgp, setCampaignBudgetItemEgp] = useState<number>(20000);
   const [campaignTargetDrivers, setCampaignTargetDrivers] = useState<number>(500);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
-  const [aiDraftCampaign, setAiDraftCampaign] = useState<Partial<PromotionalCampaign> | null>(null);
+  // Promotional Campaigns Editing State
+  const [editingCampaign, setEditingCampaign] = useState<PromotionalCampaign | null>(null);
+
+  // Master Points Formula & Budget Criteria State
+  const [pointsFormula, setPointsFormula] = useState<PointsFormulaConfig>(
+    config.pointsFormula || DEFAULT_POINTS_FORMULA
+  );
+
+  // Dynamic Layout Reordering State for Driver and Technician Pages
+  const [driverSectionsOrder, setDriverSectionsOrder] = useState<string[]>(
+    config.layoutSettings?.driverSectionsOrder || DEFAULT_DRIVER_SECTIONS_ORDER
+  );
+  const [techSectionsOrder, setTechSectionsOrder] = useState<string[]>(
+    config.layoutSettings?.technicianSectionsOrder || DEFAULT_TECHNICIAN_SECTIONS_ORDER
+  );
 
   // Handlers for Custom Columns
+
   const handleAddCustomColumn = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newColName.trim()) {
@@ -630,7 +773,77 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const updated = campaigns.filter((c) => c.id !== id);
     setCampaigns(updated);
     deletePromotionalCampaign(id);
+  };
+
+  // Campaign Edit Handlers
+  const handleStartEditCampaign = (camp: PromotionalCampaign) => {
+    setEditingCampaign({ ...camp });
+  };
+
+  const handleSaveEditedCampaign = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCampaign) return;
+    const updated = campaigns.map((c) => (c.id === editingCampaign.id ? editingCampaign : c));
+    setCampaigns(updated);
+    savePromotionalCampaign(editingCampaign);
     onUpdateConfig({ ...config, promotionalCampaigns: updated });
+    alert(`✅ تم تحديث وحفظ بيانات الحملة/المسابقة "${editingCampaign.title}" بنجاح!`);
+    setEditingCampaign(null);
+  };
+
+  // Layout Reordering Handlers for Driver & Technician Pages
+  const moveDriverSection = (index: number, direction: 'up' | 'down') => {
+    const newOrder = [...driverSectionsOrder];
+    const targetIdx = direction === 'up' ? index - 1 : index + 1;
+    if (targetIdx < 0 || targetIdx >= newOrder.length) return;
+    const temp = newOrder[index];
+    newOrder[index] = newOrder[targetIdx];
+    newOrder[targetIdx] = temp;
+    setDriverSectionsOrder(newOrder);
+  };
+
+  const moveTechSection = (index: number, direction: 'up' | 'down') => {
+    const newOrder = [...techSectionsOrder];
+    const targetIdx = direction === 'up' ? index - 1 : index + 1;
+    if (targetIdx < 0 || targetIdx >= newOrder.length) return;
+    const temp = newOrder[index];
+    newOrder[index] = newOrder[targetIdx];
+    newOrder[targetIdx] = temp;
+    setTechSectionsOrder(newOrder);
+  };
+
+  const handleResetLayoutToDefault = () => {
+    if (!confirm('هل ترغب في استعادة الترتيب النموذجي الافتراضي لكافة عناصر صفحات العميل والفني؟')) return;
+    setDriverSectionsOrder(DEFAULT_DRIVER_SECTIONS_ORDER);
+    setTechSectionsOrder(DEFAULT_TECHNICIAN_SECTIONS_ORDER);
+    const updatedConfig: AppConfig = {
+      ...config,
+      layoutSettings: {
+        driverSectionsOrder: DEFAULT_DRIVER_SECTIONS_ORDER,
+        technicianSectionsOrder: DEFAULT_TECHNICIAN_SECTIONS_ORDER,
+      },
+    };
+    onUpdateConfig(updatedConfig);
+    saveAppConfig(updatedConfig);
+    alert('✅ تمت استعادة الترتيب النموذجي بنجاح!');
+  };
+
+  const handleSaveLayoutSettings = () => {
+    const updatedLayout: PageLayoutSettings = {
+      driverSectionsOrder,
+      technicianSectionsOrder: techSectionsOrder,
+    };
+    const updatedConfig: AppConfig = {
+      ...config,
+      layoutSettings: updatedLayout,
+      visibility: {
+        driver: driverVis,
+        technician: techVis,
+      },
+    };
+    onUpdateConfig(updatedConfig);
+    saveAppConfig(updatedConfig);
+    alert('✅ تم حفظ ترتيب ومواضع عناصر وبنرات ومساحات صفحتي العميل والفني بنجاح!');
   };
 
   // Moen Config State
@@ -1081,9 +1294,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const sendPinViaWhatsApp = (member: TechnicianCrewMember) => {
     const cleanPhone = member.phone.replace(/\D/g, '');
-    const message = `مرحباً زميلنا ${member.name} (${member.role}) في ${config.stationName}.\nكود الـ PIN السري الخاص بك لتفعيل وردية اليوم هو: [ ${member.dailyPin} ].\nيرجى فتح التطبيق والتحقق من التواجد في محيط المحطة لبدء الوردية.\nمنظومة كارجاس وعزوتي - م. محمد عبد الرحمن يوسف.`;
+    const techLoginUrl = `${window.location.origin}${window.location.pathname}?role=technician&techId=${member.id}&pin=${member.dailyPin}`;
+    const message = `مرحباً يا بطل كارجاس ${member.name} (${member.role}) ⛽\nتم إرسال رابط الدخول وتفعيل ورديتك في منظومة كارجاس للولاء:\n\n• كود الفني: ${member.id}\n• رقم الـ PIN السري لليوم: [ ${member.dailyPin} ]\n• المحطة: ${config.stationName}\n\n👇 اضغط على الرابط التالي للدخول فوراً وبدء الوردية وتسجيل التموينات واستبدال الأمتار المجانية:\n${techLoginUrl}\n\nمنظومة كارجاس وعزوتي للبرمجيات وتكنولوجيا المعلومات - م. محمد عبد الرحمن يوسف.`;
     const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
     window.open(whatsappUrl, '_blank');
+  };
+
+  const copyTechnicianLoginLink = (member: TechnicianCrewMember) => {
+    const techLoginUrl = `${window.location.origin}${window.location.pathname}?role=technician&techId=${member.id}&pin=${member.dailyPin}`;
+    navigator.clipboard.writeText(techLoginUrl);
+    alert(`✅ تم نسخ رابط دخول الفني ${member.name} إلى الحافظة بنجاح:\n${techLoginUrl}`);
   };
 
   const regenerateAllDailyPins = () => {
@@ -1164,11 +1384,36 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       assistantEnabled: moenEnabled,
       assistantOnlyAdmin: moenOnlyAdmin,
       assistantAllowedTopics: moenAllowedTopics,
+      wasalnyConfig: {
+        enabled: wasalnyEnabled,
+        voiceGuidance: wasalnyVoice,
+        autoVoiceOnOpen: wasalnyAutoVoice,
+        navigationProvider: wasalnyProvider,
+        targetStationMode: wasalnyTargetMode,
+        featuredStationId: wasalnyFeaturedStationId,
+        arrivalAlertDistanceMeters: Number(wasalnyAlertDistance),
+        customWelcomeMessage: wasalnyWelcomeMsg.trim(),
+        showCrowdStatus: wasalnyShowCrowd,
+        buttonLabel: wasalnyBtnLabel.trim() || 'وصلني لأقرب محطة كارجاس ⛽',
+        subtitle: wasalnySubtitle.trim() || 'توجيه ذكي وملاحة فورية لأقرب محطة تموين كارجاس CNG مجهزة وسريعة',
+        mapCoverImageUrl: wasalnyCoverImage,
+        cargasLogoBadgeUrl: wasalnyLogoBadge,
+        cardLayout: 'banner_top',
+      },
+      layoutSettings: {
+        driverSectionsOrder,
+        technicianSectionsOrder: techSectionsOrder,
+      },
+      pointsFormula: {
+        ...pointsFormula,
+        pointsToEgpRedemptionRatio: Number(loyaltyModel.costPerPointEgp),
+      },
     };
 
     onUpdateConfig(updatedConfig);
     saveAppConfig(updatedConfig);
-    alert('تم حفظ وتحديث كافة إعدادات المنظومة ومصفوفة الظهور وتكلفة النقاط بنجاح!');
+    alert('✅ تم حفظ وتحديث كافة إعدادات المنظومة وترتيب الواجهات ومصفوفة الظهور وتطبيق وصّلني وتكلفة النقاط بنجاح!');
+
   };
 
   const handlePrintCard = (item: { title: string; qrUrl: string; sub: string }) => {
@@ -1287,31 +1532,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             }`}
           >
             <DollarSign className="w-4 h-4 text-blue-600" />
-            <span>مبيعات المحطات والخانات الحسابية</span>
+            <span>شيت مبيعات المحطات والإحداثيات والتحليل 📊</span>
           </button>
 
           <button
             onClick={() => setActiveTab('promotions_studio')}
             className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition whitespace-nowrap ${
-              activeTab === 'promotions_studio'
-                ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-sm font-black'
+              activeTab === 'promotions_studio' || activeTab === 'rewards' || activeTab === 'ideas_bank'
+                ? 'bg-gradient-to-r from-amber-500 via-amber-600 to-amber-700 text-slate-950 shadow-sm font-black'
                 : 'text-amber-800 hover:text-amber-950 bg-amber-50/70 border border-amber-200'
             }`}
           >
             <Sparkles className="w-4 h-4 text-amber-600" />
-            <span>استوديو العروض والذكاء الاصطناعي ({campaigns.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('ideas_bank')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition whitespace-nowrap ${
-              activeTab === 'ideas_bank'
-                ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-sm font-black'
-                : 'text-violet-700 hover:text-violet-950 bg-violet-50/70 border border-violet-200'
-            }`}
-          >
-            <Lightbulb className="w-4 h-4 text-violet-500" />
-            <span>بنك الأفكار 💡 ({ideasBank.length})</span>
+            <span>استوديو العروض والذكاء الاصطناعي وبنك الهدايا والأفكار والحاسبة 🤖</span>
           </button>
 
           <button
@@ -1322,16 +1555,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           >
             <FileSpreadsheet className="w-4 h-4 text-indigo-600" />
             <span>طاقم العمل والواتساب ({stationCrew.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('rewards')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition whitespace-nowrap ${
-              activeTab === 'rewards' ? 'bg-white text-amber-700 shadow-sm border border-slate-200' : 'text-slate-600'
-            }`}
-          >
-            <Coins className="w-4 h-4 text-amber-600" />
-            <span>بنك الهدايا والمكافآت ({rewards.length})</span>
           </button>
 
           <button
@@ -1367,11 +1590,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           <button
             onClick={() => setActiveTab('rollback')}
             className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition whitespace-nowrap ${
-              activeTab === 'rollback' ? 'bg-rose-50 text-rose-800 border border-rose-200' : 'text-rose-600'
+              activeTab === 'rollback' ? 'bg-rose-600 text-white shadow-sm' : 'text-rose-700 bg-rose-50 border border-rose-200'
             }`}
           >
             <RotateCcw className="w-4 h-4 text-rose-600" />
-            <span>العودة للنسخة الأصلية</span>
+            <span>استعادة النسخة والنسخ الاحتياطي 🔄</span>
           </button>
         </div>
 
@@ -2030,15 +2253,142 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
                   <div className="space-y-1">
                     <label className="block font-bold text-slate-700 text-[11px]">
-                      مسمى أيقونة وصّلني في واجهة العميل:
+                      مسمى أيقونة وبطاقة وصّلني في واجهة العميل:
                     </label>
                     <input
                       type="text"
                       value={wasalnyBtnLabel}
                       onChange={(e) => setWasalnyBtnLabel(e.target.value)}
-                      placeholder="أقرب محطة كارجاس (وصّلني) 📍"
+                      placeholder="وصلني لأقرب محطة كارجاس ⛽"
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-900"
                     />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block font-bold text-slate-700 text-[11px]">
+                      النص التوضيحي تحت "وصلني لأقرب محطة":
+                    </label>
+                    <input
+                      type="text"
+                      value={wasalnySubtitle}
+                      onChange={(e) => setWasalnySubtitle(e.target.value)}
+                      placeholder="توجيه ذكي وملاحة فورية لأقرب محطة تموين كارجاس CNG مجهزة وسريعة"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium text-slate-800"
+                    />
+                  </div>
+
+                  {/* Logo & Cover Image Customization */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                    {/* Cargas Logo on Map */}
+                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-800 text-[11px]">شعار كارجاس على الخريطة:</span>
+                        {wasalnyLogoBadge && (
+                          <button
+                            type="button"
+                            onClick={() => setWasalnyLogoBadge('')}
+                            className="text-[10px] text-rose-600 font-bold hover:underline"
+                          >
+                            إزالة
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shrink-0">
+                          {wasalnyLogoBadge ? (
+                            <img src={wasalnyLogoBadge} alt="Cargas Badge" className="w-full h-full object-contain" />
+                          ) : (
+                            <span className="text-lg">⛽</span>
+                          )}
+                        </div>
+                        <input
+                          type="file"
+                          id="wasalnyLogoInput"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleWasalnyLogoUpload}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => document.getElementById('wasalnyLogoInput')?.click()}
+                          className="flex-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 py-1.5 px-2 rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1"
+                        >
+                          <Upload className="w-3 h-3 text-emerald-600" />
+                          <span>رفع لوجو كارجاس</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Map Background Image */}
+                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-800 text-[11px]">صورة خلفية بطاقة الخريطة:</span>
+                        {wasalnyCoverImage && (
+                          <button
+                            type="button"
+                            onClick={() => setWasalnyCoverImage('')}
+                            className="text-[10px] text-rose-600 font-bold hover:underline"
+                          >
+                            استعادة الافتراضية
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-200 flex items-center justify-center overflow-hidden shrink-0">
+                          {wasalnyCoverImage ? (
+                            <img src={wasalnyCoverImage} alt="Cover" className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-lg">🗺️</span>
+                          )}
+                        </div>
+                        <input
+                          type="file"
+                          id="wasalnyCoverInput"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleWasalnyCoverUpload}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => document.getElementById('wasalnyCoverInput')?.click()}
+                          className="flex-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 py-1.5 px-2 rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1"
+                        >
+                          <Upload className="w-3 h-3 text-blue-600" />
+                          <span>رفع خلفية الخريطة</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Upload Stations Locations File (Excel/JSON) */}
+                  <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-emerald-950 text-xs flex items-center gap-1.5">
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                        <span>تغذية وتحديث محطات كارجاس والخريطة:</span>
+                      </span>
+                      <span className="text-[10px] bg-emerald-200 text-emerald-900 font-bold px-2 py-0.5 rounded-full">
+                        {stations.length} محطة مسجلة
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-emerald-800 leading-relaxed">
+                      ارفع ملف إكسيل (.xlsx) أو JSON يحتوي على أسماء المحطات والإحداثيات (خط العرض وخط الطول) لتحديث قاعدة بيانات الملاحة وخريطة وصّلني فوراً!
+                    </p>
+                    <input
+                      type="file"
+                      id="wasalnyStationsSheetInput"
+                      accept=".xlsx, .xls, .json"
+                      className="hidden"
+                      onChange={handleUploadStationsSheetForWasalny}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => document.getElementById('wasalnyStationsSheetInput')?.click()}
+                      className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-xs"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>رفع شيت إكسيل أو JSON لمحطات كارجاس 📍</span>
+                    </button>
                   </div>
 
                   <label className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-200 cursor-pointer">
@@ -2247,226 +2597,525 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
         )}
 
-        {/* Tab: Visibility Matrix Control (Show/Hide in Driver & Tech pages) */}
-        {activeTab === 'visibility' && (
-          <div className="p-6 space-y-6">
-            <div className="border-b border-slate-200 pb-3">
-              <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                <Sliders className="w-5 h-5 text-purple-600" />
-                التحكم الشامل في ظهور وإخفاء محتويات صفحتي العميل والفني
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                يمكنك إخفاء أو إظهار أي عنصر في صفحات المستخدمين بنقرة زر (مثال: إخفاء أيقونة تعديل بيانات السيارة)
-              </p>
-            </div>
+        {/* Tab: Visibility & Layout Reordering Control (ترتيب ومواضع عناصر صفحتي العميل والفني) */}
+        {activeTab === 'visibility' && (() => {
+          const DRIVER_SECTION_META: Record<string, { title: string; icon: string; desc: string; visKey?: keyof typeof driverVis }> = {
+            wasalny_hero: { title: 'بطاقة تطبيق وصّلني وملاحة أقرب محطة (في صدر الصفحة)', icon: '🚗', desc: 'ملاحة فورية، زر التوجيه الصوتي، واختيار خرائط كارجاس أو جوجل' },
+            promotional_banner: { title: 'بانر العروض والمسابقات وشرح برنامج الولاء', icon: '✨', desc: 'بانر العروض الترويجية والمسابقات وصياغة الذكاء الاصطناعي (معين)', visKey: 'showPromotionalBanner' },
+            golden_card: { title: 'كارت كارجاس الذهبي والباركود ونقاط الولاء', icon: '💳', desc: 'بطاقة العضوية والـ QR للتموين ورصيد النقاط والشريحة', visKey: 'showGoldenCard' },
+            rewards_bank: { title: 'بنك الهدايا والمكافآت واستبدال الأمتار المجانية', icon: '🎁', desc: 'استبدال النقاط بأمتار غاز وزيوت وكوبونات مع كود الـ QR للفني', visKey: 'showRewardsBank' },
+            fueling_count_stats: { title: 'إحصائيات التردد وعدد مرات التموين', icon: '⛽', desc: 'عدد مرات التموين من المحطة ومن الطلمبة لبناء الارتباط', visKey: 'showFuelingCountStats' },
+            maintenance_schedule: { title: 'جدول الصيانة الدورية الذكي للسيارة', icon: '🔧', desc: 'متابعة مواعيد غيار الزيت والبوجيهات وفلاتر الغاز الطبيعي', visKey: 'showMaintenanceSchedule' },
+            fueling_history: { title: 'سجل التموينات السابقة والإيصالات', icon: '📜', desc: 'سجل العمليات السابقة مع تفاصيل التاريخ والكمية والنقاط', visKey: 'showFuelingHistory' },
+            service_rating: { title: 'تقييم الخدمة ومعاملة الفني', icon: '⭐', desc: 'تقييم النجوم والسرعة والسلوك ونموذج الشكاوى', visKey: 'showServiceRating' },
+            complaints_box: { title: 'صندوق الشكاوى والمقترحات المباشرة', icon: '📨', desc: 'إرسال مقترح أو شكوى مباشرة لإدارة كارجاس', visKey: 'showComplaintsBox' },
+          };
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Driver Portal Controls */}
-              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3 text-xs">
-                <h4 className="font-black text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-200">
-                  <span>🚗 محتويات صفحة العميل (السائق):</span>
-                </h4>
+          const TECH_SECTION_META: Record<string, { title: string; icon: string; desc: string; visKey?: keyof typeof techVis }> = {
+            shift_stats: { title: 'بطاقة الوردية وإحصائيات المبيعات والأمتار اليومية', icon: '📊', desc: 'إجمالي الأمتار والمبيعات والعمليات المنفذة في وردية الفني', visKey: 'showShiftStats' },
+            welcome_bonus: { title: 'بنك النقاط الترحيبية المتاح للفني لتوزيعه (+25, +50, +100)', icon: '🎁', desc: 'حصة الوردية من النقاط الترحيبية لبناء ولاء العميل للفني والمحطة' },
+            camera_scanner: { title: 'كاميرا مسح كود الـ QR لسيارة العميل واستبدال الهدايا', icon: '📷', desc: 'الماسح الضوئي الذكي لقراءة بيانات السائق أو كود الأمتار المجانية', visKey: 'showCameraScanner' },
+            manual_entry: { title: 'حقل الإدخال اليدوي لرقم اللوحة أو كود الاستبدال', icon: '🔢', desc: 'إمكانية إدخال رقم لوحة السيارة يدوياً في حال تعذر المسح', visKey: 'showManualEntry' },
+            fueling_form: { title: 'نموذج تنفيذ التموين (الطلمبة، الأمتار، العداد الاختياري)', icon: '⛽', desc: 'اختيار رقم الطلمبة وإدخال كمية الأمتار وإتمام التموين أو الاستبدال' },
+            gps_radar: { title: 'رادار فحص نطاق الـ 10 أمتار للـ GPS', icon: '📍', desc: 'التحقق الصارم من التواجد الفعلي داخل المحطة لمنع التلاعب', visKey: 'showGpsRadar' },
+            technician_incentives: { title: 'نظام حوافز ومكافآت ونقاط الفني والدرجات', icon: '🏅', desc: 'حافز التموين ومكافآت السلوك الممتاز', visKey: 'showTechnicianIncentives' },
+          };
 
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">أيقونة تعديل بيانات السيارة والملف</span>
-                    <span className="text-[10px] text-slate-500">مطلوب افتراضياً إخفاؤها لمنع تعديل السائق لبياناته</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showEditProfile}
-                    onChange={(e) => setDriverVis({ ...driverVis, showEditProfile: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
+          return (
+            <div className="p-6 space-y-6">
+              {/* Header */}
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                    <Sliders className="w-5 h-5 text-purple-600" />
+                    التحكم في ترتيب ومواضع عناصر وبنرات ومساحات صفحة العميل والفني ومصفوفة الظهور 📱
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    تحكم كامل لمدير النظام: نقل وتحريك العناصر للأعلى والأسفل وتحديد الترتيب الدقيق لكل مساحة وبانر في التطبيق
+                  </p>
+                </div>
 
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">خريطة وأيقونة أقرب محطة كارجاس</span>
-                    <span className="text-[10px] text-slate-500">إظهار الخريطة ومحدد أقرب محطة وتوجيه GPS</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showNearestStationMap}
-                    onChange={(e) => setDriverVis({ ...driverVis, showNearestStationMap: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">كارت الولاء الذهبي والرصيد</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showGoldenCard}
-                    onChange={(e) => setDriverVis({ ...driverVis, showGoldenCard: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">بنك الهدايا واستبدال النقاط</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showRewardsBank}
-                    onChange={(e) => setDriverVis({ ...driverVis, showRewardsBank: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">جدول الصيانة الدورية الذكي</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showMaintenanceSchedule}
-                    onChange={(e) => setDriverVis({ ...driverVis, showMaintenanceSchedule: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">سجل التموينات السابقة</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showFuelingHistory}
-                    onChange={(e) => setDriverVis({ ...driverVis, showFuelingHistory: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">تقييم الخدمة ومعاملة الفني وقسم الشكاوى</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showServiceRating}
-                    onChange={(e) => setDriverVis({ ...driverVis, showServiceRating: e.target.checked, showComplaintsBox: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">رقم مرات التموين من المحطة ومن الطلمبة</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showFuelingCountStats}
-                    onChange={(e) => setDriverVis({ ...driverVis, showFuelingCountStats: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">بانر العروض والمسابقات وشرح برنامج الولاء للعملاء</span>
-                    <span className="text-[10px] text-slate-500">إظهار البانر التفاعلي أعلى شاشة السائق بالعروض المصاغة بالذكاء الاصطناعي</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showPromotionalBanner}
-                    onChange={(e) => setDriverVis({ ...driverVis, showPromotionalBanner: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => setVisibilitySubTab('reorder_layout')}
+                    className={`py-2 px-4 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                      visibilitySubTab === 'reorder_layout'
+                        ? 'bg-purple-600 text-white shadow-xs'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <span>🎯 ترتيب ومواضع العناصر (تحريك ونقل)</span>
+                  </button>
+                  <button
+                    onClick={() => setVisibilitySubTab('checkboxes')}
+                    className={`py-2 px-4 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                      visibilitySubTab === 'checkboxes'
+                        ? 'bg-purple-600 text-white shadow-xs'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <span>👁️ مصفوفة الإظهار والإخفاء السريعة</span>
+                  </button>
+                </div>
               </div>
 
-              {/* Technician Portal Controls */}
-              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3 text-xs">
-                <h4 className="font-black text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-200">
-                  <span>👷‍♂️ محتويات صفحة فني التموين (الوردية):</span>
-                </h4>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">كاميرا مسح باركود السيارات المباشرة</span>
+              {/* Sub-tab 1: Visual Reordering & Layout Manager */}
+              {visibilitySubTab === 'reorder_layout' && (
+                <div className="space-y-6 animate-in fade-in">
+                  <div className="bg-purple-50 border border-purple-200 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold text-sm">
+                        ↕️
+                      </span>
+                      <div>
+                        <span className="font-bold text-purple-950 block">
+                          لوحة تحريك ونقل ترتيب العناصر في الموبايل
+                        </span>
+                        <span className="text-[11px] text-purple-700">
+                          استخدم أسهم (▲ تحريك لأعلى) و (▼ تحريك لأسفل) لتغيير موضع أي قسم وبانر كما تراه مناسباً
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={handleResetLayoutToDefault}
+                        className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1"
+                        title="استعادة الترتيب النموذجي الافتراضي"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                        <span>استعادة الترتيب النموذجي</span>
+                      </button>
+                      <button
+                        onClick={handleSaveLayoutSettings}
+                        className="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-1.5 rounded-xl transition shadow-xs flex items-center gap-1"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        <span>حفظ الترتيب 💾</span>
+                      </button>
+                    </div>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={techVis.showCameraScanner}
-                    onChange={(e) => setTechVis({ ...techVis, showCameraScanner: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
 
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">حقل الإدخال اليدوي لرقم اللوحة</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={techVis.showManualEntry}
-                    onChange={(e) => setTechVis({ ...techVis, showManualEntry: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Driver Portal Section Reorder */}
+                    <div className="bg-slate-50 p-5 rounded-3xl border border-slate-200 space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl">🚗</span>
+                          <div>
+                            <h4 className="font-black text-slate-900 text-sm">
+                              ترتيب عناصر صفحة العميل (السائق)
+                            </h4>
+                            <span className="text-[11px] text-slate-500 font-mono">
+                              ({driverSectionsOrder.length} عناصر مرتبة من الأعلى للأسفل)
+                            </span>
+                          </div>
+                        </div>
+                      </div>
 
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">نظام حوافز ومكافآت ونقاط الفني</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={techVis.showTechnicianIncentives}
-                    onChange={(e) => setTechVis({ ...techVis, showTechnicianIncentives: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
+                      <div className="space-y-2.5">
+                        {driverSectionsOrder.map((sectionKey, index) => {
+                          const meta = DRIVER_SECTION_META[sectionKey] || {
+                            title: sectionKey,
+                            icon: '📦',
+                            desc: 'قسم مخصص',
+                          };
+                          const isVis = meta.visKey ? driverVis[meta.visKey] : true;
 
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">رادار فحص نطاق الـ 10 أمتار للـ GPS</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={techVis.showGpsRadar}
-                    onChange={(e) => setTechVis({ ...techVis, showGpsRadar: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
+                          return (
+                            <div
+                              key={sectionKey}
+                              className={`bg-white p-3 rounded-2xl border transition shadow-2xs flex items-center justify-between gap-3 ${
+                                isVis ? 'border-slate-200' : 'border-slate-200/60 opacity-60 bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                                <span className="w-6 h-6 rounded-full bg-purple-100 text-purple-900 font-mono font-black text-xs flex items-center justify-center shrink-0">
+                                  {index + 1}
+                                </span>
+                                <span className="text-base shrink-0">{meta.icon}</span>
+                                <div className="truncate">
+                                  <span className="font-bold text-slate-900 text-xs block truncate">
+                                    {meta.title}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 block truncate">
+                                    {meta.desc}
+                                  </span>
+                                </div>
+                              </div>
 
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">إحصائيات إنجاز الوردية وإجمالي المبيعات</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={techVis.showShiftStats}
-                    onChange={(e) => setTechVis({ ...techVis, showShiftStats: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {meta.visKey && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setDriverVis({
+                                        ...driverVis,
+                                        [meta.visKey!]: !isVis,
+                                      })
+                                    }
+                                    className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition ${
+                                      isVis
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                        : 'bg-slate-100 text-slate-500 border-slate-200'
+                                    }`}
+                                    title={isVis ? 'ظاهر للعميل' : 'مخفي عن العميل'}
+                                  >
+                                    {isVis ? 'ظاهر' : 'مخفي'}
+                                  </button>
+                                )}
 
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">رقم مرات التموين من المحطة ومن الطلمبة</span>
+                                <div className="flex flex-col gap-0.5">
+                                  <button
+                                    type="button"
+                                    disabled={index === 0}
+                                    onClick={() => moveDriverSection(index, 'up')}
+                                    className="p-1 rounded bg-slate-100 hover:bg-purple-100 text-slate-700 disabled:opacity-30 disabled:hover:bg-slate-100 transition"
+                                    title="تحريك لأعلى"
+                                  >
+                                    <ArrowUp className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={index === driverSectionsOrder.length - 1}
+                                    onClick={() => moveDriverSection(index, 'down')}
+                                    className="p-1 rounded bg-slate-100 hover:bg-purple-100 text-slate-700 disabled:opacity-30 disabled:hover:bg-slate-100 transition"
+                                    title="تحريك لأسفل"
+                                  >
+                                    <ArrowDown className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Technician Portal Section Reorder */}
+                    <div className="bg-slate-50 p-5 rounded-3xl border border-slate-200 space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl">👷‍♂️</span>
+                          <div>
+                            <h4 className="font-black text-slate-900 text-sm">
+                              ترتيب عناصر صفحة فني التموين (الوردية)
+                            </h4>
+                            <span className="text-[11px] text-slate-500 font-mono">
+                              ({techSectionsOrder.length} عناصر مرتبة من الأعلى للأسفل)
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        {techSectionsOrder.map((sectionKey, index) => {
+                          const meta = TECH_SECTION_META[sectionKey] || {
+                            title: sectionKey,
+                            icon: '📦',
+                            desc: 'قسم مخصص',
+                          };
+                          const isVis = meta.visKey ? techVis[meta.visKey] : true;
+
+                          return (
+                            <div
+                              key={sectionKey}
+                              className={`bg-white p-3 rounded-2xl border transition shadow-2xs flex items-center justify-between gap-3 ${
+                                isVis ? 'border-slate-200' : 'border-slate-200/60 opacity-60 bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                                <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-900 font-mono font-black text-xs flex items-center justify-center shrink-0">
+                                  {index + 1}
+                                </span>
+                                <span className="text-base shrink-0">{meta.icon}</span>
+                                <div className="truncate">
+                                  <span className="font-bold text-slate-900 text-xs block truncate">
+                                    {meta.title}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 block truncate">
+                                    {meta.desc}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {meta.visKey && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setTechVis({
+                                        ...techVis,
+                                        [meta.visKey!]: !isVis,
+                                      })
+                                    }
+                                    className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition ${
+                                      isVis
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                        : 'bg-slate-100 text-slate-500 border-slate-200'
+                                    }`}
+                                    title={isVis ? 'ظاهر للفني' : 'مخفي عن الفني'}
+                                  >
+                                    {isVis ? 'ظاهر' : 'مخفي'}
+                                  </button>
+                                )}
+
+                                <div className="flex flex-col gap-0.5">
+                                  <button
+                                    type="button"
+                                    disabled={index === 0}
+                                    onClick={() => moveTechSection(index, 'up')}
+                                    className="p-1 rounded bg-slate-100 hover:bg-purple-100 text-slate-700 disabled:opacity-30 disabled:hover:bg-slate-100 transition"
+                                    title="تحريك لأعلى"
+                                  >
+                                    <ArrowUp className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={index === techSectionsOrder.length - 1}
+                                    onClick={() => moveTechSection(index, 'down')}
+                                    className="p-1 rounded bg-slate-100 hover:bg-purple-100 text-slate-700 disabled:opacity-30 disabled:hover:bg-slate-100 transition"
+                                    title="تحريك لأسفل"
+                                  >
+                                    <ArrowDown className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={techVis.showFuelingCountStats}
-                    onChange={(e) => setTechVis({ ...techVis, showFuelingCountStats: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-              </div>
+
+                  <div className="flex items-center justify-between pt-3 border-t border-slate-200">
+                    <span className="text-xs text-slate-500">
+                      يتم حفظ ترتيب العناصر فورياً وتطبيقه في واجهات العميل والفني بالموبايل
+                    </span>
+                    <button
+                      onClick={handleSaveLayoutSettings}
+                      className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 px-6 rounded-2xl text-xs transition shadow-md flex items-center gap-1.5"
+                    >
+                      <Save className="w-4 h-4" />
+                      <span>حفظ ترتيب ومواضع الواجهات فوراً 💾</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Sub-tab 2: Checkboxes Grid (مصفوفة الإظهار والإخفاء) */}
+              {visibilitySubTab === 'checkboxes' && (
+                <div className="space-y-6 animate-in fade-in">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Driver Portal Controls */}
+                    <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3 text-xs">
+                      <h4 className="font-black text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-200">
+                        <span>🚗 محتويات صفحة العميل (السائق):</span>
+                      </h4>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">أيقونة تعديل بيانات السيارة والملف</span>
+                          <span className="text-[10px] text-slate-500">مطلوب افتراضياً إخفاؤها لمنع تعديل السائق لبياناته</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={driverVis.showEditProfile}
+                          onChange={(e) => setDriverVis({ ...driverVis, showEditProfile: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">خريطة وأيقونة أقرب محطة كارجاس</span>
+                          <span className="text-[10px] text-slate-500">إظهار الخريطة ومحدد أقرب محطة وتوجيه GPS</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={driverVis.showNearestStationMap}
+                          onChange={(e) => setDriverVis({ ...driverVis, showNearestStationMap: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">كارت الولاء الذهبي والرصيد</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={driverVis.showGoldenCard}
+                          onChange={(e) => setDriverVis({ ...driverVis, showGoldenCard: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">بنك الهدايا واستبدال النقاط</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={driverVis.showRewardsBank}
+                          onChange={(e) => setDriverVis({ ...driverVis, showRewardsBank: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">جدول الصيانة الدورية الذكي</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={driverVis.showMaintenanceSchedule}
+                          onChange={(e) => setDriverVis({ ...driverVis, showMaintenanceSchedule: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">سجل التموينات السابقة</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={driverVis.showFuelingHistory}
+                          onChange={(e) => setDriverVis({ ...driverVis, showFuelingHistory: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">تقييم الخدمة ومعاملة الفني وقسم الشكاوى</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={driverVis.showServiceRating}
+                          onChange={(e) => setDriverVis({ ...driverVis, showServiceRating: e.target.checked, showComplaintsBox: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">رقم مرات التموين من المحطة ومن الطلمبة</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={driverVis.showFuelingCountStats}
+                          onChange={(e) => setDriverVis({ ...driverVis, showFuelingCountStats: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">بانر العروض والمسابقات وشرح برنامج الولاء للعملاء</span>
+                          <span className="text-[10px] text-slate-500">إظهار البانر التفاعلي أعلى شاشة السائق بالعروض المصاغة بالذكاء الاصطناعي</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={driverVis.showPromotionalBanner}
+                          onChange={(e) => setDriverVis({ ...driverVis, showPromotionalBanner: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+                    </div>
+
+                    {/* Technician Portal Controls */}
+                    <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3 text-xs">
+                      <h4 className="font-black text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-200">
+                        <span>👷‍♂️ محتويات صفحة فني التموين (الوردية):</span>
+                      </h4>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">كاميرا مسح باركود السيارات المباشرة</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={techVis.showCameraScanner}
+                          onChange={(e) => setTechVis({ ...techVis, showCameraScanner: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">حقل الإدخال اليدوي لرقم اللوحة</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={techVis.showManualEntry}
+                          onChange={(e) => setTechVis({ ...techVis, showManualEntry: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">نظام حوافز ومكافآت ونقاط الفني</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={techVis.showTechnicianIncentives}
+                          onChange={(e) => setTechVis({ ...techVis, showTechnicianIncentives: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">رادار فحص نطاق الـ 10 أمتار للـ GPS</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={techVis.showGpsRadar}
+                          onChange={(e) => setTechVis({ ...techVis, showGpsRadar: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">إحصائيات إنجاز الوردية وإجمالي المبيعات</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={techVis.showShiftStats}
+                          onChange={(e) => setTechVis({ ...techVis, showShiftStats: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                        <div>
+                          <span className="font-bold text-slate-900 block">رقم مرات التموين من المحطة ومن الطلمبة</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={techVis.showFuelingCountStats}
+                          onChange={(e) => setTechVis({ ...techVis, showFuelingCountStats: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => handleSaveAllSettings()}
+                    className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-2xl text-xs transition shadow-md"
+                  >
+                    حفظ مصفوفة الظهور والإخفاء فوراً 💾
+                  </button>
+                </div>
+              )}
             </div>
+          );
+        })()}
 
-            <button
-              onClick={() => handleSaveAllSettings()}
-              className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-2xl text-xs transition shadow-md"
-            >
-              حفظ مصفوفة الظهور والإخفاء فوراً 💾
-            </button>
-          </div>
-        )}
 
         {/* Tab: Station Sales, ROI, & Promotion Budget Allocation */}
         {activeTab === 'sales_budget' && (() => {
@@ -2550,18 +3199,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
                 <div className="flex flex-wrap items-center gap-2">
                   <button
-                    onClick={() => setIsAddColumnModalOpen(true)}
-                    className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold py-2 px-3.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
-                    title="إضافة عمود أو خانة حسابية جديدة بخواص الجمع أو الضرب أو القسمة أو النسبة المئوية"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>إضافة خانة مخصصة (+ - * / %)</span>
-                  </button>
-
-                  <button
                     onClick={() => exportSalesMatrixExcel(salesRecords, customColumns)}
                     className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 px-3.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
-                    title="تحميل مصفوفة الشهور والانحرافات السنوية والخانات المخصصة كملف إكسيل كامل"
+                    title="تحميل مصفوفة الشهور والانحرافات السنوية كملف إكسيل كامل"
                   >
                     <Download className="w-4 h-4" />
                     <span>تصدير مصفوفة المبيعات (.xlsx)</span>
@@ -2679,58 +3319,83 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     </button>
                   </div>
 
-                  {/* Quick Preset Buttons Bar */}
-                  <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-wrap items-center justify-between gap-2 text-xs">
+                  {/* Analytical Columns Toggle Bar & Search */}
+                  <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-bold text-slate-700 flex items-center gap-1">
-                        <Calculator className="w-4 h-4 text-purple-600" />
-                        <span>إضافة سريعة لخانة حسابية:</span>
+                      <span className="font-black text-slate-800 flex items-center gap-1.5 ml-1">
+                        <Sparkles className="w-4 h-4 text-emerald-600" />
+                        <span>أعمدة التحليل المالي الذكي (إظهار/إخفاء):</span>
                       </span>
+
                       <button
-                        onClick={() => handleQuickAddPreset('variance')}
-                        className="bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 px-2.5 py-1.5 rounded-xl font-bold transition flex items-center gap-1 shadow-2xs"
+                        type="button"
+                        onClick={() => setShowSalesAchievementCol(!showSalesAchievementCol)}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 border ${
+                          showSalesAchievementCol
+                            ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
                       >
-                        <span>➕ الانحراف (+/-)</span>
+                        <span>{showSalesAchievementCol ? '✓' : '○'} نسبة التحقيق %</span>
                       </button>
+
                       <button
-                        onClick={() => handleQuickAddPreset('achievement')}
-                        className="bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 px-2.5 py-1.5 rounded-xl font-bold transition flex items-center gap-1 shadow-2xs"
+                        type="button"
+                        onClick={() => setShowSalesMonthlyAvgCol(!showSalesMonthlyAvgCol)}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 border ${
+                          showSalesMonthlyAvgCol
+                            ? 'bg-blue-600 text-white border-blue-700 shadow-2xs'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
                       >
-                        <span>➕ معدل الإنجاز %</span>
+                        <span>{showSalesMonthlyAvgCol ? '✓' : '○'} المتوسط الشهري (م³)</span>
                       </button>
+
                       <button
-                        onClick={() => handleQuickAddPreset('revenue')}
-                        className="bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 px-2.5 py-1.5 rounded-xl font-bold transition flex items-center gap-1 shadow-2xs"
+                        type="button"
+                        onClick={() => setShowSalesRevenueCol(!showSalesRevenueCol)}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 border ${
+                          showSalesRevenueCol
+                            ? 'bg-purple-600 text-white border-purple-700 shadow-2xs'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
                       >
-                        <span>➕ القيمة بالجنيه (13 ج)</span>
+                        <span>{showSalesRevenueCol ? '✓' : '○'} القيمة بالجنيه (13 ج/م³)</span>
                       </button>
+
                       <button
-                        onClick={() => handleQuickAddPreset('monthly_avg')}
-                        className="bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 px-2.5 py-1.5 rounded-xl font-bold transition flex items-center gap-1 shadow-2xs"
+                        type="button"
+                        onClick={() => setShowSalesVarianceCol(!showSalesVarianceCol)}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 border ${
+                          showSalesVarianceCol
+                            ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
                       >
-                        <span>➕ المتوسط الشهري (÷12)</span>
+                        <span>{showSalesVarianceCol ? '✓' : '○'} الانحراف (+/-)</span>
                       </button>
+
                       <button
-                        onClick={() => {
-                          setEditingColumnId(null);
-                          setNewColName('');
-                          setIsAddColumnModalOpen(true);
-                        }}
-                        className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 shadow-xs"
+                        type="button"
+                        onClick={() => setShowSalesGradeCol(!showSalesGradeCol)}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 border ${
+                          showSalesGradeCol
+                            ? 'bg-teal-600 text-white border-teal-700 shadow-2xs'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
                       >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>خانة حسابية مخصصة...</span>
+                        <span>{showSalesGradeCol ? '✓' : '○'} تصنيف الأداء (أ/ب/ج)</span>
                       </button>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <span className="text-slate-500 font-bold text-[11px]">بحث في الشيت:</span>
+                    <div className="flex items-center gap-2 w-full md:w-auto">
+                      <span className="text-slate-500 font-bold text-[11px] whitespace-nowrap">بحث في الشيت:</span>
                       <input
                         type="text"
                         value={salesSearchQuery}
                         onChange={(e) => setSalesSearchQuery(e.target.value)}
-                        placeholder="ابحث بأي بيان أو كلمة في الشيت..."
-                        className="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1 text-xs w-56 font-sans"
+                        placeholder="ابحث بأي مركز أو محافظة أو كلمة..."
+                        className="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1 text-xs w-full md:w-56 font-sans"
                       />
                     </div>
                   </div>
@@ -2803,61 +3468,47 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                                   {headerName}
                                 </th>
                               ))}
-                              {/* Custom Computed Columns */}
-                              {customColumns.map((col) => {
-                                const opSign =
-                                  col.operation === 'add'
-                                    ? '+'
-                                    : col.operation === 'subtract'
-                                    ? '-'
-                                    : col.operation === 'multiply'
-                                    ? '×'
-                                    : col.operation === 'divide'
-                                    ? '÷'
-                                    : '%';
-                                return (
-                                  <th
-                                    key={col.id}
-                                    className="p-2.5 border-l border-purple-200 min-w-[130px] text-center bg-purple-50 font-black text-purple-950"
-                                  >
-                                    <div className="flex items-center justify-between gap-1">
-                                      <span>{col.name}</span>
-                                      <div className="flex items-center gap-1">
-                                        <button
-                                          onClick={() => handleStartEditColumn(col)}
-                                          title="تعديل الخانة"
-                                          className="text-purple-600 hover:text-purple-900 font-bold text-[10px]"
-                                        >
-                                          ✏️
-                                        </button>
-                                        <button
-                                          onClick={() => handleDeleteCustomColumn(col.id)}
-                                          title="حذف الخانة"
-                                          className="text-rose-500 hover:text-rose-800 font-bold text-xs"
-                                        >
-                                          ✕
-                                        </button>
-                                      </div>
-                                    </div>
-                                    <div className="text-[9px] font-mono text-purple-700 font-normal mt-0.5">
-                                      ({opSign} {col.operand2Type === 'constant' ? col.operand2Constant : col.operand2Label || col.operand2Key})
-                                    </div>
-                                  </th>
-                                );
-                              })}
-                              <th className="p-2.5 min-w-[80px] text-center bg-slate-50">
-                                <button
-                                  onClick={() => {
-                                    setEditingColumnId(null);
-                                    setNewColName('');
-                                    setIsAddColumnModalOpen(true);
-                                  }}
-                                  className="text-purple-700 hover:text-purple-900 font-black text-xs flex items-center justify-center gap-1 mx-auto"
-                                >
-                                  <Plus className="w-3.5 h-3.5" />
-                                  <span>خانة</span>
-                                </button>
-                              </th>
+                              {/* Analytical Columns Headers */}
+                              {showSalesAchievementCol && (
+                                <th className="p-2.5 border-l border-emerald-200 min-w-[110px] text-center bg-emerald-50 font-black text-emerald-950">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <span>نسبة التحقيق</span>
+                                    <span className="text-[9px] bg-emerald-200 text-emerald-900 px-1 rounded">تحليلي</span>
+                                  </div>
+                                </th>
+                              )}
+                              {showSalesMonthlyAvgCol && (
+                                <th className="p-2.5 border-l border-blue-200 min-w-[110px] text-center bg-blue-50 font-black text-blue-950">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <span>المتوسط الشهري</span>
+                                    <span className="text-[9px] bg-blue-200 text-blue-900 px-1 rounded">تحليلي</span>
+                                  </div>
+                                </th>
+                              )}
+                              {showSalesRevenueCol && (
+                                <th className="p-2.5 border-l border-purple-200 min-w-[120px] text-center bg-purple-50 font-black text-purple-950">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <span>القيمة بالجنيه</span>
+                                    <span className="text-[9px] bg-purple-200 text-purple-900 px-1 rounded">13 ج/م³</span>
+                                  </div>
+                                </th>
+                              )}
+                              {showSalesVarianceCol && (
+                                <th className="p-2.5 border-l border-amber-200 min-w-[110px] text-center bg-amber-50 font-black text-amber-950">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <span>الانحراف (+/-)</span>
+                                    <span className="text-[9px] bg-amber-200 text-amber-900 px-1 rounded">تحليلي</span>
+                                  </div>
+                                </th>
+                              )}
+                              {showSalesGradeCol && (
+                                <th className="p-2.5 min-w-[120px] text-center bg-teal-50 font-black text-teal-950">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <span>تصنيف المركز</span>
+                                    <span className="text-[9px] bg-teal-200 text-teal-900 px-1 rounded">أ/ب/ج</span>
+                                  </div>
+                                </th>
+                              )}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 bg-white">
@@ -2874,7 +3525,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                                 return (
                                   <tr>
                                     <td
-                                      colSpan={rawSheetData.headers.length + customColumns.length + 2}
+                                      colSpan={rawSheetData.headers.length + 6}
                                       className="p-8 text-center text-slate-400 font-bold"
                                     >
                                       لا توجد صفوف مطابقة لبحثك "{salesSearchQuery}"
@@ -2885,6 +3536,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
                               return filteredRawRows.map((row, rIdx) => {
                                 const matchingRecord = salesRecords[rIdx];
+                                const act = matchingRecord?.annualActualM3 || matchingRecord?.currentSalesM3 || 0;
+                                const tgt = matchingRecord?.annualTargetM3 || matchingRecord?.targetSalesM3 || 0;
+                                const achPct = tgt > 0 ? Number(((act / tgt) * 100).toFixed(1)) : 100;
+                                const monthlyAvg = Number((act / 12).toFixed(0));
+                                const revenueEgp = act * 13;
+                                const variance = act - tgt;
+
                                 return (
                                   <tr key={rIdx} className="hover:bg-slate-50/80 transition">
                                     <td className="p-2.5 text-center font-mono text-slate-400 border-l border-slate-200">
@@ -2923,31 +3581,48 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                                       );
                                     })}
 
-                                    {/* Custom Computed Columns Cells */}
-                                    {customColumns.map((col) => {
-                                      const computed = matchingRecord
-                                        ? computeCustomColumnValue(col, matchingRecord)
-                                        : { rawValue: 0, formattedText: '—', isPositive: true };
-                                      return (
-                                        <td
-                                          key={col.id}
-                                          className="p-2.5 text-center font-mono font-bold border-l border-purple-100 bg-purple-50/20 whitespace-nowrap"
-                                        >
-                                          <span
-                                            className={
-                                              col.displayFormat === 'signed'
-                                                ? computed.isPositive
-                                                  ? 'text-emerald-700 font-bold'
-                                                  : 'text-rose-700 font-bold'
-                                                : 'text-purple-950'
-                                            }
-                                          >
-                                            {computed.formattedText}
+                                    {/* Analytical Columns Cells */}
+                                    {showSalesAchievementCol && (
+                                      <td className="p-2.5 text-center font-mono font-bold border-l border-emerald-100 bg-emerald-50/20 whitespace-nowrap">
+                                        <span className={`px-2 py-0.5 rounded-full text-xs font-black ${achPct >= 100 ? 'bg-emerald-100 text-emerald-800' : achPct >= 80 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'}`}>
+                                          %{achPct}
+                                        </span>
+                                      </td>
+                                    )}
+                                    {showSalesMonthlyAvgCol && (
+                                      <td className="p-2.5 text-center font-mono font-bold border-l border-blue-100 bg-blue-50/20 whitespace-nowrap text-blue-900">
+                                        {monthlyAvg.toLocaleString()} م³
+                                      </td>
+                                    )}
+                                    {showSalesRevenueCol && (
+                                      <td className="p-2.5 text-center font-mono font-bold border-l border-purple-100 bg-purple-50/20 whitespace-nowrap text-purple-900">
+                                        {revenueEgp.toLocaleString()} ج
+                                      </td>
+                                    )}
+                                    {showSalesVarianceCol && (
+                                      <td className="p-2.5 text-center font-mono font-bold border-l border-amber-100 bg-amber-50/20 whitespace-nowrap">
+                                        <span className={variance >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                                          {variance >= 0 ? '+' : ''}{variance.toLocaleString()} م³
+                                        </span>
+                                      </td>
+                                    )}
+                                    {showSalesGradeCol && (
+                                      <td className="p-2.5 text-center font-mono font-bold bg-teal-50/20 whitespace-nowrap">
+                                        {achPct >= 100 ? (
+                                          <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                            فئة (أ) ⭐ ممتاز
                                           </span>
-                                        </td>
-                                      );
-                                    })}
-                                    <td className="p-2.5 text-center text-slate-400">•</td>
+                                        ) : achPct >= 80 ? (
+                                          <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                            فئة (ب) 🟡 جيد
+                                          </span>
+                                        ) : (
+                                          <span className="bg-rose-100 text-rose-900 border border-rose-300 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                            فئة (ج) 🔴 تنشيط
+                                          </span>
+                                        )}
+                                      </td>
+                                    )}
                                   </tr>
                                 );
                               });
@@ -2998,24 +3673,31 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                                   </td>
                                 );
                               })}
-                              {customColumns.map((col) => {
-                                const corpVal = computeCorporateCustomColumnValue(
-                                  col,
-                                  filteredSalesRecords,
-                                  corporateTotals.annualActual,
-                                  corporateTotals.annualTarget,
-                                  corporateTotals.annualVariance
-                                );
-                                return (
-                                  <td
-                                    key={col.id}
-                                    className="p-2.5 text-center font-mono font-bold text-amber-300 border-l border-slate-800 bg-slate-950 whitespace-nowrap"
-                                  >
-                                    {corpVal.formattedText}
-                                  </td>
-                                );
-                              })}
-                              <td className="p-2 text-center border-slate-800 bg-slate-950">—</td>
+                              {showSalesAchievementCol && (
+                                <td className="p-2.5 text-center font-mono font-bold text-emerald-300 border-l border-slate-800 bg-slate-950 whitespace-nowrap">
+                                  %{corporateAchievementPct}
+                                </td>
+                              )}
+                              {showSalesMonthlyAvgCol && (
+                                <td className="p-2.5 text-center font-mono font-bold text-blue-300 border-l border-slate-800 bg-slate-950 whitespace-nowrap">
+                                  {Number((corporateTotals.annualActual / 12).toFixed(0)).toLocaleString()} م³
+                                </td>
+                              )}
+                              {showSalesRevenueCol && (
+                                <td className="p-2.5 text-center font-mono font-bold text-purple-300 border-l border-slate-800 bg-slate-950 whitespace-nowrap">
+                                  {(corporateTotals.annualActual * 13).toLocaleString()} ج
+                                </td>
+                              )}
+                              {showSalesVarianceCol && (
+                                <td className="p-2.5 text-center font-mono font-bold text-amber-300 border-l border-slate-800 bg-slate-950 whitespace-nowrap">
+                                  {corporateTotals.annualVariance >= 0 ? '+' : ''}{corporateTotals.annualVariance.toLocaleString()} م³
+                                </td>
+                              )}
+                              {showSalesGradeCol && (
+                                <td className="p-2 text-center border-slate-800 bg-slate-950 text-teal-300 font-bold">
+                                  {corporateTotals.achievedCount} فئة أ
+                                </td>
+                              )}
                             </tr>
                           </tfoot>
                         </table>
@@ -3058,67 +3740,57 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             <th className="p-2.5 border-l border-indigo-200 min-w-[110px] text-center bg-indigo-50 font-black text-indigo-950">
                               المستهدف السنوي (م³)
                             </th>
-                            {/* Custom Columns */}
-                            {customColumns.map((col) => {
-                              const opSign =
-                                col.operation === 'add'
-                                  ? '+'
-                                  : col.operation === 'subtract'
-                                  ? '-'
-                                  : col.operation === 'multiply'
-                                  ? '×'
-                                  : col.operation === 'divide'
-                                  ? '÷'
-                                  : '%';
-                              return (
-                                <th
-                                  key={col.id}
-                                  className="p-2.5 border-l border-purple-200 min-w-[130px] text-center bg-purple-50 font-black text-purple-950"
-                                >
-                                  <div className="flex items-center justify-between gap-1">
-                                    <span>{col.name}</span>
-                                    <div className="flex items-center gap-1">
-                                      <button
-                                        onClick={() => handleStartEditColumn(col)}
-                                        title="تعديل الخانة"
-                                        className="text-purple-600 hover:text-purple-900 font-bold text-[10px]"
-                                      >
-                                        ✏️
-                                      </button>
-                                      <button
-                                        onClick={() => handleDeleteCustomColumn(col.id)}
-                                        title="حذف الخانة"
-                                        className="text-rose-500 hover:text-rose-800 font-bold text-xs"
-                                      >
-                                        ✕
-                                      </button>
-                                    </div>
-                                  </div>
-                                  <div className="text-[9px] font-mono text-purple-700 font-normal mt-0.5">
-                                    ({opSign} {col.operand2Type === 'constant' ? col.operand2Constant : col.operand2Label || col.operand2Key})
-                                  </div>
-                                </th>
-                              );
-                            })}
-                            <th className="p-2.5 min-w-[80px] text-center bg-slate-50">
-                              <button
-                                onClick={() => {
-                                  setEditingColumnId(null);
-                                  setNewColName('');
-                                  setIsAddColumnModalOpen(true);
-                                }}
-                                className="text-purple-700 hover:text-purple-900 font-black text-xs flex items-center justify-center gap-1 mx-auto"
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                                <span>خانة</span>
-                              </button>
-                            </th>
+                            {/* Analytical Columns Headers */}
+                            {showSalesAchievementCol && (
+                              <th className="p-2.5 border-l border-emerald-200 min-w-[110px] text-center bg-emerald-50 font-black text-emerald-950">
+                                <div className="flex items-center justify-center gap-1">
+                                  <span>نسبة التحقيق</span>
+                                  <span className="text-[9px] bg-emerald-200 text-emerald-900 px-1 rounded">تحليلي</span>
+                                </div>
+                              </th>
+                            )}
+                            {showSalesMonthlyAvgCol && (
+                              <th className="p-2.5 border-l border-blue-200 min-w-[110px] text-center bg-blue-50 font-black text-blue-950">
+                                <div className="flex items-center justify-center gap-1">
+                                  <span>المتوسط الشهري</span>
+                                  <span className="text-[9px] bg-blue-200 text-blue-900 px-1 rounded">تحليلي</span>
+                                </div>
+                              </th>
+                            )}
+                            {showSalesRevenueCol && (
+                              <th className="p-2.5 border-l border-purple-200 min-w-[120px] text-center bg-purple-50 font-black text-purple-950">
+                                <div className="flex items-center justify-center gap-1">
+                                  <span>القيمة بالجنيه</span>
+                                  <span className="text-[9px] bg-purple-200 text-purple-900 px-1 rounded">13 ج/م³</span>
+                                </div>
+                              </th>
+                            )}
+                            {showSalesVarianceCol && (
+                              <th className="p-2.5 border-l border-amber-200 min-w-[110px] text-center bg-amber-50 font-black text-amber-950">
+                                <div className="flex items-center justify-center gap-1">
+                                  <span>الانحراف (+/-)</span>
+                                  <span className="text-[9px] bg-amber-200 text-amber-900 px-1 rounded">تحليلي</span>
+                                </div>
+                              </th>
+                            )}
+                            {showSalesGradeCol && (
+                              <th className="p-2.5 min-w-[120px] text-center bg-teal-50 font-black text-teal-950">
+                                <div className="flex items-center justify-center gap-1">
+                                  <span>تصنيف المركز</span>
+                                  <span className="text-[9px] bg-teal-200 text-teal-900 px-1 rounded">أ/ب/ج</span>
+                                </div>
+                              </th>
+                            )}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
                           {filteredSalesRecords.map((r, index) => {
-                            const annualActual = r.annualActualM3 ?? r.currentSalesM3;
-                            const annualTarget = r.annualTargetM3 ?? r.targetSalesM3;
+                            const annualActual = r.annualActualM3 ?? r.currentSalesM3 ?? 0;
+                            const annualTarget = r.annualTargetM3 ?? r.targetSalesM3 ?? 0;
+                            const achPct = annualTarget > 0 ? Number(((annualActual / annualTarget) * 100).toFixed(1)) : 100;
+                            const monthlyAvg = Number((annualActual / 12).toFixed(0));
+                            const revenueEgp = annualActual * 13;
+                            const variance = annualActual - annualTarget;
                             const monthsList = [
                               'يناير', 'فبراير', 'مارس', 'إبريل', 'مايو', 'يونيو',
                               'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
@@ -3165,31 +3837,48 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                                 <td className="p-2.5 text-center font-mono font-bold text-slate-600 border-l border-indigo-100 bg-indigo-50/20">
                                   {annualTarget.toLocaleString()}
                                 </td>
-                                {/* Custom Columns Cells */}
-                                {customColumns.map((col) => {
-                                  const computed = computeCustomColumnValue(col, r);
-                                  return (
-                                    <td
-                                      key={col.id}
-                                      className="p-2.5 text-center font-mono font-bold border-l border-purple-100 bg-purple-50/20"
-                                    >
-                                      <span
-                                        className={
-                                          col.displayFormat === 'signed'
-                                            ? computed.isPositive
-                                              ? 'text-emerald-700 font-bold'
-                                              : 'text-rose-700 font-bold'
-                                            : 'text-purple-950'
-                                        }
-                                      >
-                                        {computed.formattedText}
+                                {/* Analytical Columns Cells */}
+                                {showSalesAchievementCol && (
+                                  <td className="p-2.5 text-center font-mono font-bold border-l border-emerald-100 bg-emerald-50/20 whitespace-nowrap">
+                                    <span className={`px-2 py-0.5 rounded-full text-xs font-black ${achPct >= 100 ? 'bg-emerald-100 text-emerald-800' : achPct >= 80 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'}`}>
+                                      %{achPct}
+                                    </span>
+                                  </td>
+                                )}
+                                {showSalesMonthlyAvgCol && (
+                                  <td className="p-2.5 text-center font-mono font-bold border-l border-blue-100 bg-blue-50/20 whitespace-nowrap text-blue-900">
+                                    {monthlyAvg.toLocaleString()} م³
+                                  </td>
+                                )}
+                                {showSalesRevenueCol && (
+                                  <td className="p-2.5 text-center font-mono font-bold border-l border-purple-100 bg-purple-50/20 whitespace-nowrap text-purple-900">
+                                    {revenueEgp.toLocaleString()} ج
+                                  </td>
+                                )}
+                                {showSalesVarianceCol && (
+                                  <td className="p-2.5 text-center font-mono font-bold border-l border-amber-100 bg-amber-50/20 whitespace-nowrap">
+                                    <span className={variance >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                                      {variance >= 0 ? '+' : ''}{variance.toLocaleString()} م³
+                                    </span>
+                                  </td>
+                                )}
+                                {showSalesGradeCol && (
+                                  <td className="p-2.5 text-center font-mono font-bold bg-teal-50/20 whitespace-nowrap">
+                                    {achPct >= 100 ? (
+                                      <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                        فئة (أ) ⭐ ممتاز
                                       </span>
-                                    </td>
-                                  );
-                                })}
-                                <td className="p-2.5 text-center text-slate-400">
-                                  •
-                                </td>
+                                    ) : achPct >= 80 ? (
+                                      <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                        فئة (ب) 🟡 جيد
+                                      </span>
+                                    ) : (
+                                      <span className="bg-rose-100 text-rose-900 border border-rose-300 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                        فئة (ج) 🔴 تنشيط
+                                      </span>
+                                    )}
+                                  </td>
+                                )}
                               </tr>
                             );
                           })}
@@ -3220,24 +3909,31 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             <td className="p-2.5 text-center font-mono font-bold text-slate-300 border-l border-slate-800 bg-slate-950">
                               {corporateTotals.annualTarget.toLocaleString()}
                             </td>
-                            {customColumns.map((col) => {
-                              const corpVal = computeCorporateCustomColumnValue(
-                                col,
-                                filteredSalesRecords,
-                                corporateTotals.annualActual,
-                                corporateTotals.annualTarget,
-                                corporateTotals.annualVariance
-                              );
-                              return (
-                                <td
-                                  key={col.id}
-                                  className="p-2.5 text-center font-mono font-bold text-amber-300 border-l border-slate-800 bg-slate-950"
-                                >
-                                  {corpVal.formattedText}
-                                </td>
-                              );
-                            })}
-                            <td className="p-2 text-center border-slate-800 bg-slate-950">—</td>
+                            {showSalesAchievementCol && (
+                              <td className="p-2.5 text-center font-mono font-bold text-emerald-300 border-l border-slate-800 bg-slate-950 whitespace-nowrap">
+                                %{corporateAchievementPct}
+                              </td>
+                            )}
+                            {showSalesMonthlyAvgCol && (
+                              <td className="p-2.5 text-center font-mono font-bold text-blue-300 border-l border-slate-800 bg-slate-950 whitespace-nowrap">
+                                {Number((corporateTotals.annualActual / 12).toFixed(0)).toLocaleString()} م³
+                              </td>
+                            )}
+                            {showSalesRevenueCol && (
+                              <td className="p-2.5 text-center font-mono font-bold text-purple-300 border-l border-slate-800 bg-slate-950 whitespace-nowrap">
+                                {(corporateTotals.annualActual * 13).toLocaleString()} ج
+                              </td>
+                            )}
+                            {showSalesVarianceCol && (
+                              <td className="p-2.5 text-center font-mono font-bold text-amber-300 border-l border-slate-800 bg-slate-950 whitespace-nowrap">
+                                {corporateTotals.annualVariance >= 0 ? '+' : ''}{corporateTotals.annualVariance.toLocaleString()} م³
+                              </td>
+                            )}
+                            {showSalesGradeCol && (
+                              <td className="p-2 text-center border-slate-800 bg-slate-950 text-teal-300 font-bold">
+                                {corporateTotals.achievedCount} فئة أ
+                              </td>
+                            )}
                           </tr>
                         </tfoot>
                       </table>
@@ -3750,61 +4446,172 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               {/* Sub-view 2: Budget Allocation & ROI Settings */}
               {salesSubTab === 'allocation' && (
                 <div className="space-y-6">
-                  {/* ROI & Point Cost Settings */}
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                      <label className="block font-bold text-slate-700 text-xs mb-1">
-                        نظام الولاء النشط
-                      </label>
-                      <select
-                        value={loyaltyModel.activeModelName}
-                        onChange={(e) => setLoyaltyModel({ ...loyaltyModel, activeModelName: e.target.value as any })}
-                        className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs font-bold"
-                      >
-                        <option value="قياسي 1:1">قياسي 1 نقطة لكل متر</option>
-                        <option value="ترويجي للمحطات المنخفضة">ترويجي ومضاعف للمحطات المنخفضة</option>
-                        <option value="باقة التاكسي والشركات">باقة التاكسي والشركات</option>
-                        <option value="أوقات غير الذروة">حوافز أوقات غير الذروة</option>
-                      </select>
+                  {/* Master Budget Criteria & Points Formula Control Box */}
+                  <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 rounded-3xl border border-indigo-900/60 shadow-lg space-y-4">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-indigo-800/40 pb-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">
+                            معايير الموازنة الرسمية
+                          </span>
+                          <span className="text-xs font-bold text-indigo-200">
+                            التحكم الكامل في تكلفة النقطة والمعادلة الشاملة
+                          </span>
+                        </div>
+                        <h4 className="text-base font-black text-white mt-1">
+                          معادلة احتساب نقاط الولاء وتكلفة النقطة على الشركة 🧮
+                        </h4>
+                      </div>
+                      <span className="font-mono bg-white/10 text-amber-300 font-bold px-3 py-1 rounded-xl text-xs border border-white/10">
+                        تكلفة النقطة: {loyaltyModel.costPerPointEgp} ج | سعر المتر: {pointsFormula.gasPricePerMeter} ج
+                      </span>
                     </div>
 
-                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                      <label className="block font-bold text-slate-700 text-xs mb-1">
-                        تكلفة النقطة على الشركة (جنية)
-                      </label>
-                      <input
-                        type="number"
-                        step="0.05"
-                        value={loyaltyModel.costPerPointEgp}
-                        onChange={(e) => setLoyaltyModel({ ...loyaltyModel, costPerPointEgp: Number(e.target.value) })}
-                        className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs font-mono font-black"
-                      />
-                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
+                        <label className="block font-bold text-amber-300 text-[11px]">
+                          قيمة تكلفة النقطة بالجنيه (Cost/Point):
+                        </label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          value={loyaltyModel.costPerPointEgp}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setLoyaltyModel({ ...loyaltyModel, costPerPointEgp: val });
+                            setPointsFormula({ ...pointsFormula, pointsToEgpRedemptionRatio: val });
+                          }}
+                          className="w-full bg-slate-900 text-amber-300 border border-amber-400/30 rounded-xl p-2 font-mono font-black text-sm"
+                        />
+                        <span className="text-[10px] text-slate-400 block">
+                          تعتمد عليها كافة معادلات الموازنة واستبدال الهدايا
+                        </span>
+                      </div>
 
-                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                      <label className="block font-bold text-slate-700 text-xs mb-1">
-                        العائد المتوقع من الولاء (%)
-                      </label>
-                      <input
-                        type="number"
-                        value={loyaltyModel.expectedMarginGainPct}
-                        onChange={(e) => setLoyaltyModel({ ...loyaltyModel, expectedMarginGainPct: Number(e.target.value) })}
-                        className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs font-mono font-black"
-                      />
-                    </div>
+                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
+                        <label className="block font-bold text-slate-200 text-[11px]">
+                          إجمالي موازنة الترويج المعتمدة (جنية):
+                        </label>
+                        <input
+                          type="number"
+                          value={loyaltyModel.totalPromotionalBudgetEgp}
+                          onChange={(e) =>
+                            setLoyaltyModel({ ...loyaltyModel, totalPromotionalBudgetEgp: Number(e.target.value) })
+                          }
+                          className="w-full bg-slate-900 text-emerald-300 border border-white/20 rounded-xl p-2 font-mono font-black text-sm"
+                        />
+                        <span className="text-[10px] text-slate-400 block">
+                          الموازنة الإجمالية الموجهة للمحطات والحملات
+                        </span>
+                      </div>
 
-                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                      <label className="block font-bold text-slate-700 text-xs mb-1">
-                        إجمالي موازنة الترويج (جنية)
-                      </label>
-                      <input
-                        type="number"
-                        value={loyaltyModel.totalPromotionalBudgetEgp}
-                        onChange={(e) => setLoyaltyModel({ ...loyaltyModel, totalPromotionalBudgetEgp: Number(e.target.value) })}
-                        className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs font-mono font-black"
-                      />
+                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
+                        <label className="block font-bold text-slate-200 text-[11px]">
+                          سعر متر الغاز الطبيعي المعتمد (جنية):
+                        </label>
+                        <input
+                          type="number"
+                          step="0.5"
+                          value={pointsFormula.gasPricePerMeter}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setPointsFormula({ ...pointsFormula, gasPricePerMeter: val });
+                            setEditGasPrice(val);
+                          }}
+                          className="w-full bg-slate-900 text-white border border-white/20 rounded-xl p-2 font-mono font-black text-sm"
+                        />
+                        <span className="text-[10px] text-slate-400 block">
+                          السعر الرسمي للمتر (13 ج/م³)
+                        </span>
+                      </div>
+
+                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
+                        <label className="block font-bold text-slate-200 text-[11px]">
+                          معدل النقاط الأساسي لكل متر:
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={pointsFormula.basePointsPerMeter}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setPointsFormula({ ...pointsFormula, basePointsPerMeter: val });
+                            setEditPointsRatio(val);
+                          }}
+                          className="w-full bg-slate-900 text-white border border-white/20 rounded-xl p-2 font-mono font-black text-sm"
+                        />
+                        <span className="text-[10px] text-slate-400 block">
+                          المعيار الأساسي (1 متر = 1 نقطة)
+                        </span>
+                      </div>
+
+                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
+                        <label className="block font-bold text-slate-200 text-[11px]">
+                          مضاعف الشريحة البرونزية / العادية:
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={pointsFormula.tierBronzeMultiplier}
+                          onChange={(e) =>
+                            setPointsFormula({ ...pointsFormula, tierBronzeMultiplier: Number(e.target.value) })
+                          }
+                          className="w-full bg-slate-900 text-white border border-white/20 rounded-xl p-2 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
+                        <label className="block font-bold text-slate-200 text-[11px]">
+                          مضاعف الشريحة الفضية:
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={pointsFormula.tierSilverMultiplier}
+                          onChange={(e) =>
+                            setPointsFormula({ ...pointsFormula, tierSilverMultiplier: Number(e.target.value) })
+                          }
+                          className="w-full bg-slate-900 text-white border border-white/20 rounded-xl p-2 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
+                        <label className="block font-bold text-amber-300 text-[11px]">
+                          مضاعف كارت الولاء الذهبي:
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={pointsFormula.tierGoldMultiplier}
+                          onChange={(e) =>
+                            setPointsFormula({ ...pointsFormula, tierGoldMultiplier: Number(e.target.value) })
+                          }
+                          className="w-full bg-slate-900 text-amber-300 border border-amber-400/30 rounded-xl p-2 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
+                        <label className="block font-bold text-emerald-300 text-[11px]">
+                          رصيد نقاط الترحيب للفني / وردية:
+                        </label>
+                        <input
+                          type="number"
+                          value={pointsFormula.technicianWelcomePointsPerShift}
+                          onChange={(e) =>
+                            setPointsFormula({
+                              ...pointsFormula,
+                              technicianWelcomePointsPerShift: Number(e.target.value),
+                            })
+                          }
+                          className="w-full bg-slate-900 text-emerald-300 border border-emerald-400/30 rounded-xl p-2 font-mono font-bold"
+                        />
+                        <span className="text-[10px] text-slate-400 block">
+                          حصة الفني لتوزيعها (+25، +50، +100)
+                        </span>
+                      </div>
                     </div>
                   </div>
+
 
                   {/* Detected Period & File Info Banner */}
                   <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
@@ -3968,30 +4775,106 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           );
         })()}
 
-        {/* Tab: AI Promotions Studio & Customer Loyalty Banner */}
-        {activeTab === 'promotions_studio' && (
-          <div className="p-6 space-y-8">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-              <div>
-                <h3 className="font-black text-lg text-slate-900 flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-amber-500 fill-amber-500" />
-                  <span>استوديو العروض والمسابقات بالذكاء الاصطناعي وبانر ولاء العملاء</span>
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  صياغة أفكار المسابقات والعروض الترويجية بنظام الذكاء الاصطناعي (معين)، وترجمتها فورياً لنقاط تمنح للعملاء متطابقة بدقة مع موازنة الشركة.
-                </p>
+        {/* Tab: AI Promotions Studio, Loyalty Calculator, Rewards Bank & Ideas Bank */}
+        {(activeTab === 'promotions_studio' || activeTab === 'rewards' || activeTab === 'ideas_bank') && (() => {
+          const effectivePromoTab = activeTab === 'rewards' ? 'rewards' : activeTab === 'ideas_bank' ? 'ideas' : promoSubTab;
+
+          return (
+            <div className="p-6 space-y-8">
+              {/* Header */}
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+                <div>
+                  <h3 className="font-black text-lg text-slate-900 flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-amber-500 fill-amber-500" />
+                    <span>استوديو العروض والذكاء الاصطناعي وبنك الهدايا والأفكار والحاسبة 🤖</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    منظومة متكاملة لمدير النظام: صياغة المسابقات بالذكاء الاصطناعي (معين)، حاسبة نقاط الولاء ودراسة الجدوى الاقتصادية، بنك الهدايا والمكافآت، وبنك الأفكار.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="bg-amber-100 text-amber-900 text-xs font-black px-3 py-1.5 rounded-full border border-amber-300">
+                    {campaigns.filter((c) => c.isActive).length} حملات نشطة
+                  </span>
+                  <span className="bg-emerald-100 text-emerald-900 text-xs font-black px-3 py-1.5 rounded-full border border-emerald-300">
+                    {rewards.length} هدايا معتمدة
+                  </span>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="bg-amber-100 text-amber-900 text-xs font-black px-3 py-1.5 rounded-full border border-amber-300">
-                  {campaigns.filter((c) => c.isActive).length} حملات نشطة في البانر
-                </span>
-              </div>
-            </div>
+              {/* Sub-Tabs Switcher */}
+              <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('promotions_studio');
+                    setPromoSubTab('campaigns');
+                  }}
+                  className={`py-2 px-4 rounded-xl text-xs font-black transition flex items-center gap-2 ${
+                    effectivePromoTab === 'campaigns'
+                      ? 'bg-amber-500 text-slate-950 shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4 text-amber-600" />
+                  <span>ورشة العروض والمسابقات بالذكاء الاصطناعي ({campaigns.length})</span>
+                </button>
 
-            {/* Financial Budget & Points Conversion Governance Bar */}
-            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 rounded-3xl border border-indigo-900/60 shadow-md">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('promotions_studio');
+                    setPromoSubTab('calculator');
+                  }}
+                  className={`py-2 px-4 rounded-xl text-xs font-black transition flex items-center gap-2 ${
+                    effectivePromoTab === 'calculator'
+                      ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  <Calculator className="w-4 h-4 text-emerald-500" />
+                  <span>حاسبة نقاط الولاء ودراسة الجدوى الاقتصادية 🧮 (باقة المئوية وفر 10.5 ج)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('promotions_studio');
+                    setPromoSubTab('rewards');
+                  }}
+                  className={`py-2 px-4 rounded-xl text-xs font-black transition flex items-center gap-2 ${
+                    effectivePromoTab === 'rewards'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  <Coins className="w-4 h-4 text-amber-500" />
+                  <span>بنك الهدايا والمكافآت والتدقيق الذكي للأسعار 🎁 ({rewards.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('promotions_studio');
+                    setPromoSubTab('ideas');
+                  }}
+                  className={`py-2 px-4 rounded-xl text-xs font-black transition flex items-center gap-2 ${
+                    effectivePromoTab === 'ideas'
+                      ? 'bg-violet-600 text-white shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  <Lightbulb className="w-4 h-4 text-violet-500" />
+                  <span>بنك الأفكار والمراجع التسويقية والروابط 💡 ({ideasBank.length})</span>
+                </button>
+              </div>
+
+              {/* Sub-Tab 1: Campaigns */}
+              {effectivePromoTab === 'campaigns' && (
+                <div className="space-y-8 animate-in fade-in">
+                  {/* Financial Budget & Points Conversion Governance Bar */}
+                  <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 rounded-3xl border border-indigo-900/60 shadow-md">
               <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
@@ -4336,16 +5219,27 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
                       {/* Card Footer Actions */}
                       <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
-                        <button
-                          onClick={() => handleToggleCampaign(camp.id)}
-                          className={`px-3 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1 ${
-                            camp.isActive
-                              ? 'bg-amber-100 text-amber-900 hover:bg-amber-200'
-                              : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                          }`}
-                        >
-                          {camp.isActive ? 'إخفاء من البانر' : 'تفعيل بالبانر 🚀'}
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => handleToggleCampaign(camp.id)}
+                            className={`px-3 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1 ${
+                              camp.isActive
+                                ? 'bg-amber-100 text-amber-900 hover:bg-amber-200'
+                                : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                            }`}
+                          >
+                            {camp.isActive ? 'إخفاء من البانر' : 'تفعيل بالبانر 🚀'}
+                          </button>
+
+                          <button
+                            onClick={() => handleStartEditCampaign(camp)}
+                            className="bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold px-3 py-1.5 rounded-xl border border-blue-200 transition flex items-center gap-1"
+                            title="تعديل تفاصيل الحملة أو المسابقة"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                            <span>تعديل ✏️</span>
+                          </button>
+                        </div>
 
                         <button
                           onClick={() => handleDeleteCampaign(camp.id)}
@@ -4360,8 +5254,1077 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 ))}
               </div>
             </div>
+
+            {/* Edit Campaign Modal */}
+            {editingCampaign && (
+              <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+                <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 my-8 space-y-4 max-h-[90vh] overflow-y-auto">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="w-9 h-9 rounded-xl bg-blue-100 text-blue-800 flex items-center justify-center font-bold text-base">
+                        ✏️
+                      </span>
+                      <div>
+                        <h4 className="font-black text-sm text-slate-900">
+                          تعديل الحملة / المسابقة المسجلة
+                        </h4>
+                        <p className="text-[11px] text-slate-500">
+                          تعديل فوري لكافة نصوص وبيانات وموازنة ومكافأة الحملة المعروضة للعميل
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setEditingCampaign(null)}
+                      className="text-slate-400 hover:text-slate-600 p-1 rounded-lg text-lg font-bold"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleSaveEditedCampaign} className="space-y-4 text-xs">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="sm:col-span-2">
+                        <label className="block font-bold text-slate-700 mb-1">
+                          عنوان العرض / المسابقة البارز:
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={editingCampaign.title}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, title: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block font-bold text-slate-700 mb-1">
+                          الشرح الترويجي المختصر (Subtitle):
+                        </label>
+                        <input
+                          type="text"
+                          value={editingCampaign.subtitle}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, subtitle: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">التصنيف:</label>
+                        <select
+                          value={editingCampaign.category}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, category: e.target.value as any })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold"
+                        >
+                          <option value="مسابقة">مسابقة وتحدي 🏆</option>
+                          <option value="مضاعفة نقاط">مضاعفة نقاط الولاء ⭐</option>
+                          <option value="عرض ترويجي">عرض ترويجي خاص 🔥</option>
+                          <option value="خصم خدمات">خصومات الزيوت والصيانة 🔧</option>
+                          <option value="شرح برنامج الولاء">شرح برنامج ولاء كارجاس 💎</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">شارة البانر (Badge):</label>
+                        <input
+                          type="text"
+                          value={editingCampaign.badge}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, badge: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold"
+                          placeholder="مثلاً: مسابقة نشطة 🏆 أو عرض خاص 🔥"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">
+                          عدد نقاط المكافأة للسائق:
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          value={editingCampaign.pointsReward}
+                          onChange={(e) => {
+                            const pts = Number(e.target.value);
+                            const costPerPoint = loyaltyModel.costPerPointEgp || 0.35;
+                            const equiv = Number((pts * costPerPoint).toFixed(1));
+                            setEditingCampaign({
+                              ...editingCampaign,
+                              pointsReward: pts,
+                              financialEquivalentEgp: equiv,
+                            });
+                          }}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono font-black text-amber-700"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">
+                          المقابل المالي بالجنية (معايير الموازنة):
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={editingCampaign.financialEquivalentEgp}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, financialEquivalentEgp: Number(e.target.value) })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">
+                          المخصص المالي للبند (جنية):
+                        </label>
+                        <input
+                          type="number"
+                          value={editingCampaign.allocatedBudgetItemEgp}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, allocatedBudgetItemEgp: Number(e.target.value) })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">
+                          عدد العملاء المستهدفين:
+                        </label>
+                        <input
+                          type="number"
+                          value={editingCampaign.targetDriversCount}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, targetDriversCount: Number(e.target.value) })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block font-bold text-slate-700 mb-1">
+                          نص الصياغة الإعلانية والترويجية الكاملة:
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={editingCampaign.aiGeneratedCopy || editingCampaign.rawIdea}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, aiGeneratedCopy: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 leading-relaxed"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block font-bold text-slate-700 mb-1">
+                          شرح برنامج كارجاس للولاء المرتبط بالعرض:
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={editingCampaign.explanationOfLoyalty}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, explanationOfLoyalty: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 leading-relaxed"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">نص زر التفاعل:</label>
+                        <input
+                          type="text"
+                          value={editingCampaign.buttonText}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, buttonText: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">إجراء الزر التفاعلي:</label>
+                        <select
+                          value={editingCampaign.buttonAction}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, buttonAction: e.target.value as any })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold"
+                        >
+                          <option value="navigate_map">التوجه لأقرب محطة (وصلني) 🗺️</option>
+                          <option value="view_rewards">فتح بنك المكافآت 🎁</option>
+                          <option value="open_fueling">كود التموين والولاء ⛽</option>
+                          <option value="view_details">عرض تفاصيل العرض ℹ️</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">تاريخ البدء:</label>
+                        <input
+                          type="date"
+                          value={editingCampaign.startDate}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, startDate: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">تاريخ الانتهاء:</label>
+                        <input
+                          type="date"
+                          value={editingCampaign.endDate}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, endDate: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={editingCampaign.isActive}
+                            onChange={(e) => setEditingCampaign({ ...editingCampaign, isActive: e.target.checked })}
+                            className="w-4 h-4 text-emerald-600 rounded"
+                          />
+                          <span className="font-bold text-slate-900">
+                            تفعيل العرض وإظهاره فوراً في بانر صفحة العميل الرئيسية
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => setEditingCampaign(null)}
+                        className="px-4 py-2 rounded-xl text-slate-600 bg-slate-100 hover:bg-slate-200 font-bold transition"
+                      >
+                        إلغاء
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black shadow-md transition flex items-center gap-1.5"
+                      >
+                        <Save className="w-4 h-4" />
+                        <span>حفظ التعديلات فوراً ✅</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         )}
+
+
+        {/* Sub-Tab 2: Loyalty Points Calculator & Economic Feasibility (حاسبة نقاط الولاء.html) */}
+        {effectivePromoTab === 'calculator' && (() => {
+          const totalPoints = Math.round(calcFuelMeters * calcMultiplier);
+          const cargasCostEgp = Number((totalPoints * calcCostPerPoint).toFixed(2));
+          const customerRewardValueEgp = Number((totalPoints * 0.50).toFixed(2));
+          const freeMetersEquivalent = Number((customerRewardValueEgp / calcGasPrice).toFixed(1));
+          const cargasTotalRevenueEgp = Number((calcFuelMeters * calcGasPrice).toFixed(2));
+          const driverSavingsVsGasolineEgp = Number((calcFuelMeters * calcGasolineSavingsPerMeter).toFixed(2));
+          const loyaltyCostPct = cargasTotalRevenueEgp > 0 ? Number(((cargasCostEgp / cargasTotalRevenueEgp) * 100).toFixed(2)) : 0;
+          const corporateMarginGainPct = 28;
+
+          return (
+            <div className="space-y-6 animate-in fade-in">
+              {/* Centennial Package & Core Economics Hero Banner */}
+              <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white p-6 rounded-3xl border border-emerald-800/60 shadow-lg space-y-4">
+                <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-emerald-800/40 pb-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                        المعيار الاقتصادي الرسمي لكارجاس
+                      </span>
+                      <span className="text-emerald-300 font-mono text-xs">معايير ملف حاسبة نقاط الولاء</span>
+                    </div>
+                    <h4 className="text-lg font-black text-white">
+                      🧮 حاسبة نقاط الولاء والجدوى الاقتصادية (13 ج/م³ • 0.35 ج/نقطة • وفر 10.5 ج/م³)
+                    </h4>
+                    <p className="text-xs text-slate-300 max-w-3xl leading-relaxed">
+                      نموذج مالي واقتصادي دقيق: كل متر غاز طبيعي يمنح نقطة ولاء (أو أكثر حسب مضاعف المحطة)، وتكلفة النقطة 0.35 ج فقط على الشركة، بينما يحقق السائق وفراً حقيقياً قدره 10.50 ج لكل متر مقارنة ببنزين 92/95، مع باقة المئوية المعتمدة (108 م³ / 100 نقطة) ونمو ربحي مستهدف +28%.
+                    </p>
+                  </div>
+
+                  <div className="bg-emerald-900/40 border border-emerald-500/40 p-3 rounded-2xl text-center shrink-0">
+                    <span className="text-[10px] text-emerald-200 block">نمو هامش أرباح الشركة</span>
+                    <span className="font-mono font-black text-amber-300 text-xl">+{corporateMarginGainPct}%</span>
+                    <span className="text-[10px] text-slate-300 block">Margin Gain</span>
+                  </div>
+                </div>
+
+                {/* Centennial Package Special Callout */}
+                <div className="bg-white/10 backdrop-blur-xs p-4 rounded-2xl border border-white/15 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-400/20 text-amber-400 flex items-center justify-center text-xl shrink-0 font-black">
+                      💯
+                    </div>
+                    <div>
+                      <span className="font-black text-amber-300 text-sm block">باقة المئوية المعتمدة (Centennial Loyalty Tier):</span>
+                      <span className="text-slate-200 text-xs">
+                        استهلاك <strong className="text-white">108 متر غاز</strong> يمنح السائق <strong className="text-amber-300">100 نقطة</strong> (هدية بقيمة 50 ج أو 3.85 م³ غاز مجاني)، بتكلفة فعلية على كارجاس <strong className="text-emerald-300">35 ج فقط</strong> (2.49% من المبيعات)، مع وفر صافٍ للسائق قدره <strong className="text-cyan-300">1,134 ج</strong> مقارنة بالبنزين!
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCalcFuelMeters(108);
+                      setCalcMultiplier(0.9259);
+                      setCalcPresetType('centennial');
+                    }}
+                    className="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-4 py-2 rounded-xl text-xs transition shrink-0 shadow-sm"
+                  >
+                    تطبيق باقة المئوية 💯
+                  </button>
+                </div>
+              </div>
+
+              {/* Preset Quick Switcher */}
+              <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs space-y-3">
+                <span className="font-black text-slate-800 text-xs flex items-center gap-1.5">
+                  <span>⚡ سيناريوهات وأنماط التموين الجاهزة للحساب:</span>
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCalcFuelMeters(1200);
+                      setCalcMultiplier(1.0);
+                      setCalcPresetType('taxi');
+                    }}
+                    className={`p-3 rounded-2xl font-bold transition flex flex-col items-center gap-1 border ${
+                      calcPresetType === 'taxi'
+                        ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    <span className="text-lg">🚕</span>
+                    <span className="font-black">تاكسي أجرة</span>
+                    <span className="text-[10px] opacity-80 font-mono">1,200 م³/شهر</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCalcFuelMeters(3500);
+                      setCalcMultiplier(1.0);
+                      setCalcPresetType('microbus');
+                    }}
+                    className={`p-3 rounded-2xl font-bold transition flex flex-col items-center gap-1 border ${
+                      calcPresetType === 'microbus'
+                        ? 'bg-blue-600 text-white border-blue-700 shadow-sm'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    <span className="text-lg">🚐</span>
+                    <span className="font-black">ميكروباص خطوط</span>
+                    <span className="text-[10px] opacity-80 font-mono">3,500 م³/شهر</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCalcFuelMeters(108);
+                      setCalcMultiplier(0.9259);
+                      setCalcPresetType('centennial');
+                    }}
+                    className={`p-3 rounded-2xl font-bold transition flex flex-col items-center gap-1 border ${
+                      calcPresetType === 'centennial'
+                        ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-sm'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    <span className="text-lg">💯</span>
+                    <span className="font-black">باقة المئوية</span>
+                    <span className="text-[10px] opacity-80 font-mono">108 م³ / 100 نقطة</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCalcFuelMeters(25000);
+                      setCalcMultiplier(1.0);
+                      setCalcPresetType('fleet');
+                    }}
+                    className={`p-3 rounded-2xl font-bold transition flex flex-col items-center gap-1 border ${
+                      calcPresetType === 'fleet'
+                        ? 'bg-purple-600 text-white border-purple-700 shadow-sm'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    <span className="text-lg">🚛</span>
+                    <span className="font-black">أسطول شركات</span>
+                    <span className="text-[10px] opacity-80 font-mono">25,000 م³/شهر</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCalcFuelMeters(150000);
+                      setCalcMultiplier(1.0);
+                      setCalcPresetType('station');
+                    }}
+                    className={`p-3 rounded-2xl font-bold transition flex flex-col items-center gap-1 border ${
+                      calcPresetType === 'station'
+                        ? 'bg-teal-600 text-white border-teal-700 shadow-sm'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    <span className="text-lg">⛽</span>
+                    <span className="font-black">محطة كاملة</span>
+                    <span className="text-[10px] opacity-80 font-mono">150,000 م³/شهر</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Interactive Controls & Live Sliders */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Inputs */}
+                <div className="lg:col-span-2 bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-6">
+                  <h4 className="font-black text-sm text-slate-900 border-b border-slate-100 pb-3 flex items-center justify-between">
+                    <span>مدخلات التموين والأسعار التفاعلية</span>
+                    <span className="text-xs text-slate-500 font-normal">قم بتحريك المؤشر أو كتابة القيمة</span>
+                  </h4>
+
+                  {/* Fuel Meters Slider & Number Input */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="font-black text-slate-800 text-xs flex items-center gap-1.5">
+                        <Fuel className="w-4 h-4 text-emerald-600" />
+                        <span>كمية استهلاك الغاز الطبيعي (م³):</span>
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min="1"
+                          max="1000000"
+                          value={calcFuelMeters}
+                          onChange={(e) => {
+                            setCalcFuelMeters(Math.max(1, Number(e.target.value)));
+                            setCalcPresetType('custom');
+                          }}
+                          className="w-32 bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 font-mono font-black text-slate-950 text-right text-sm"
+                        />
+                        <span className="text-xs font-bold text-slate-600">م³</span>
+                      </div>
+                    </div>
+
+                    <input
+                      type="range"
+                      min="10"
+                      max="100000"
+                      step="10"
+                      value={calcFuelMeters > 100000 ? 100000 : calcFuelMeters}
+                      onChange={(e) => {
+                        setCalcFuelMeters(Number(e.target.value));
+                        setCalcPresetType('custom');
+                      }}
+                      className="w-full accent-emerald-600 cursor-pointer h-2 bg-slate-200 rounded-lg"
+                    />
+                    <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+                      <span>10 م³</span>
+                      <span>1,200 م³ (تاكسي)</span>
+                      <span>3,500 م³ (ميكروباص)</span>
+                      <span>25,000 م³ (أسطول)</span>
+                      <span>100,000 م³</span>
+                    </div>
+                  </div>
+
+                  {/* Multiplier Selector */}
+                  <div className="space-y-2">
+                    <label className="font-black text-slate-800 text-xs block">
+                      معامل مضاعف نقاط الولاء (Points Multiplier):
+                    </label>
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      {[
+                        { val: 1.0, title: '1.0x عادي قياسي', desc: 'تموين طبيعي (1 م³ = 1 نقطة)' },
+                        { val: 1.5, title: '1.5x ترويجي', desc: 'محطات مستهدفة وفترات الهدوء' },
+                        { val: 2.0, title: '2.0x مضاعف', desc: 'محطات منخفضة المبيعات وتحديات' },
+                      ].map((m) => (
+                        <button
+                          key={m.val}
+                          type="button"
+                          onClick={() => {
+                            setCalcMultiplier(m.val);
+                            setCalcPresetType('custom');
+                          }}
+                          className={`p-3 rounded-2xl border text-right transition ${
+                            Math.abs(calcMultiplier - m.val) < 0.01
+                              ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-2xs font-black'
+                              : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 font-bold'
+                          }`}
+                        >
+                          <span className="block text-sm font-black">{m.title}</span>
+                          <span className="text-[10px] opacity-80 block">{m.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Financial Parameters Inputs */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 text-xs">
+                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-1">
+                      <label className="block text-[11px] font-bold text-slate-700">سعر المتر غاز (جنيه):</label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        value={calcGasPrice}
+                        onChange={(e) => setCalcGasPrice(Number(e.target.value))}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2 font-mono font-black text-sm"
+                      />
+                      <span className="text-[9px] text-slate-400 block">السعر الرسمي (13.00 ج)</span>
+                    </div>
+
+                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-1">
+                      <label className="block text-[11px] font-bold text-slate-700">تكلفة النقطة لكارجاس (جنيه):</label>
+                      <input
+                        type="number"
+                        step="0.05"
+                        value={calcCostPerPoint}
+                        onChange={(e) => setCalcCostPerPoint(Number(e.target.value))}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2 font-mono font-black text-sm"
+                      />
+                      <span className="text-[9px] text-slate-400 block">التكلفة المالية (0.35 ج)</span>
+                    </div>
+
+                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-1">
+                      <label className="block text-[11px] font-bold text-slate-700">وفر المتر مقابل البنزين (جنيه):</label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        value={calcGasolineSavingsPerMeter}
+                        onChange={(e) => setCalcGasolineSavingsPerMeter(Number(e.target.value))}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2 font-mono font-black text-sm"
+                      />
+                      <span className="text-[9px] text-slate-400 block">مقارنة ببنزين 92/95 (10.5 ج)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Instant Financial Yield & ROI Card */}
+                <div className="bg-gradient-to-br from-emerald-950 via-teal-950 to-slate-900 text-white p-6 rounded-3xl border border-emerald-700/50 shadow-md flex flex-col justify-between space-y-6">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between border-b border-emerald-800 pb-3">
+                      <span className="text-xs font-bold text-emerald-300">ملخص الجدوى والربحية</span>
+                      <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-emerald-400/30">
+                        مباشر ودقيق
+                      </span>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="bg-white/10 p-3 rounded-2xl border border-white/10">
+                        <span className="text-[10px] text-emerald-200 block">مبيعات الغاز الإجمالية لكارجاس</span>
+                        <span className="font-mono font-black text-xl text-white">
+                          {cargasTotalRevenueEgp.toLocaleString()} ج
+                        </span>
+                        <span className="text-[10px] text-slate-300 block font-mono">
+                          ({calcFuelMeters.toLocaleString()} م³ × {calcGasPrice} ج)
+                        </span>
+                      </div>
+
+                      <div className="bg-white/10 p-3 rounded-2xl border border-white/10">
+                        <span className="text-[10px] text-amber-200 block">تكلفة نقاط الولاء على كارجاس</span>
+                        <span className="font-mono font-black text-xl text-amber-300">
+                          {cargasCostEgp.toLocaleString()} ج
+                        </span>
+                        <span className="text-[10px] text-slate-300 block font-mono">
+                          (نسبة {loyaltyCostPct}% فقط من إجمالي المبيعات)
+                        </span>
+                      </div>
+
+                      <div className="bg-white/10 p-3 rounded-2xl border border-white/10">
+                        <span className="text-[10px] text-cyan-200 block">صافي وفر السائق مقارنة بالبنزين</span>
+                        <span className="font-mono font-black text-xl text-cyan-300">
+                          {driverSavingsVsGasolineEgp.toLocaleString()} ج
+                        </span>
+                        <span className="text-[10px] text-slate-300 block font-mono">
+                          (وفر 10.50 ج في كل متر تموّن)
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-emerald-800/60 flex items-center justify-between text-xs">
+                    <span className="text-slate-300">معدل العائد والجاذبية:</span>
+                    <span className="text-amber-400 font-black">عالي جداً (ROI ممتاز) ✓</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* KPI Cards Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs space-y-1">
+                  <span className="text-slate-500 text-[11px] block">إجمالي النقاط المكتسبة</span>
+                  <span className="font-mono font-black text-amber-600 text-2xl block">
+                    {totalPoints.toLocaleString()}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block font-mono">نقطة ولاء للعميل</span>
+                </div>
+
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs space-y-1">
+                  <span className="text-slate-500 text-[11px] block">القيمة السوقية للهدية / الغاز</span>
+                  <span className="font-mono font-black text-emerald-600 text-2xl block">
+                    {customerRewardValueEgp.toLocaleString()} ج
+                  </span>
+                  <span className="text-[10px] text-slate-400 block font-mono">
+                    (أو {freeMetersEquivalent} م³ غاز مجاني)
+                  </span>
+                </div>
+
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs space-y-1">
+                  <span className="text-slate-500 text-[11px] block">التكلفة الفعلية لكارجاس</span>
+                  <span className="font-mono font-black text-rose-600 text-2xl block">
+                    {cargasCostEgp.toLocaleString()} ج
+                  </span>
+                  <span className="text-[10px] text-slate-400 block font-mono">
+                    ({calcCostPerPoint} ج/نقطة)
+                  </span>
+                </div>
+
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs space-y-1">
+                  <span className="text-slate-500 text-[11px] block">نسبة تكلفة الولاء من الدخل</span>
+                  <span className="font-mono font-black text-blue-600 text-2xl block">
+                    %{loyaltyCostPct}
+                  </span>
+                  <span className="text-[10px] text-emerald-600 block font-bold">
+                    نمو ربحي +{corporateMarginGainPct}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Sub-Tab 3: Rewards Bank & AI Pricing Auditor */}
+        {effectivePromoTab === 'rewards' && (
+          <div className="space-y-6 animate-in fade-in">
+            {/* AI Reward Auditor & Pricing Engine (مُعِين) */}
+            <div className="bg-gradient-to-br from-emerald-900 via-teal-950 to-slate-900 text-white p-5 rounded-3xl border border-emerald-700/50 shadow-xl space-y-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-emerald-700/40 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-xl">
+                    🧠
+                  </div>
+                  <div>
+                    <h4 className="font-black text-sm text-white flex items-center gap-2">
+                      <span>الذكاء الاصطناعي لتدقيق الهدايا واحتساب النقاط والموازنة (مُعِين)</span>
+                      <span className="bg-emerald-500 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full">
+                        ذكي ومربوط بالموازنة
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-emerald-200">
+                      اكتب اسم الهدية وقيمتها التقديرية بالجنيه، وسيقوم الذكاء الاصطناعي بالتحري عن دقة السعر، واحتساب النقاط المكافئة، وكمية الغاز المجاني، والموازنة لعدد المشاركين!
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+                <div className="sm:col-span-2">
+                  <label className="block font-bold text-emerald-200 mb-1">اسم الهدية / الخدمة / الكوبون</label>
+                  <input
+                    type="text"
+                    value={aiRewardGiftName}
+                    onChange={(e) => setAiRewardGiftName(e.target.value)}
+                    placeholder="مثال: غيار زيت موبيل 5000 كم، طقم بوجيهات أصلي، 40 متر غاز، كابون كارفور..."
+                    className="w-full bg-slate-900/80 border border-emerald-600/40 rounded-xl p-2.5 text-xs text-white placeholder:text-slate-500 focus:ring-2 focus:ring-emerald-400 font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-emerald-200 mb-1">القيمة المقدرة (جنية)</label>
+                  <input
+                    type="number"
+                    value={aiRewardPriceEgp}
+                    onChange={(e) => setAiRewardPriceEgp(Number(e.target.value))}
+                    className="w-full bg-slate-900/80 border border-emerald-600/40 rounded-xl p-2.5 text-xs font-mono font-bold text-amber-300"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-emerald-200 mb-1">عدد المشاركين المستهدف</label>
+                  <input
+                    type="number"
+                    value={aiRewardTargetDrivers}
+                    onChange={(e) => setAiRewardTargetDrivers(Number(e.target.value))}
+                    className="w-full bg-slate-900/80 border border-emerald-600/40 rounded-xl p-2.5 text-xs font-mono font-bold text-cyan-300"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-emerald-200 font-bold">التصنيف:</span>
+                  <select
+                    value={aiRewardCategory}
+                    onChange={(e) => setAiRewardCategory(e.target.value as any)}
+                    className="bg-slate-900 border border-emerald-600/40 rounded-xl px-3 py-1.5 text-xs text-emerald-100 font-bold"
+                  >
+                    <option value="meters">غاز طبيعي مجاني (أمتار)</option>
+                    <option value="oil">زيوت وفلاتر</option>
+                    <option value="spark_plugs">بوجيهات وقطع صيانة</option>
+                    <option value="car_wash">غسيل وخدمات سيارات</option>
+                    <option value="discount">كوبونات وخصومات شركاء</option>
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isAuditingAiReward}
+                  onClick={handleAiAuditReward}
+                  className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black py-2.5 px-5 rounded-xl text-xs transition shadow-md flex items-center gap-2 disabled:opacity-50"
+                >
+                  <Sparkles className="w-4 h-4 text-slate-950" />
+                  <span>{isAuditingAiReward ? 'جارٍ التحري والتدقيق واحتساب النقاط...' : 'تدقيق السعر واحتساب النقاط والموازنة بالذكاء الاصطناعي 🧠'}</span>
+                </button>
+              </div>
+
+              {/* AI Audit Result Box */}
+              {aiRewardAuditResult && (
+                <div className="bg-slate-900/95 border-2 border-amber-400/70 p-4 rounded-2xl space-y-3 animate-in fade-in">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-amber-400 font-black text-sm">💡 نتيجة التدقيق الاستشاري لـ "مُعِين":</span>
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">
+                        {aiRewardAuditResult.pricingStatus}
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={handleAdoptAiReward}
+                      className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black px-4 py-1.5 rounded-xl text-xs transition shadow-md flex items-center gap-1.5"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>اعتماد وإضافة الهدية لبنك السائقين فوراً ✓</span>
+                    </button>
+                  </div>
+
+                  {/* Calculated Metrics Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                    <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
+                      <span className="text-[10px] text-slate-400 block">السعر المعتمد:</span>
+                      <span className="font-mono font-black text-amber-300 text-sm">
+                        {aiRewardAuditResult.verifiedFairPriceEgp} ج
+                      </span>
+                    </div>
+                    <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
+                      <span className="text-[10px] text-slate-400 block">النقاط المحتسبة للعميل:</span>
+                      <span className="font-mono font-black text-cyan-300 text-sm">
+                        {aiRewardAuditResult.pointsCost} نقطة
+                      </span>
+                      <span className="text-[9px] text-slate-400 block">(تكلفة النقطة 0.35 ج)</span>
+                    </div>
+                    <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
+                      <span className="text-[10px] text-slate-400 block">ما يعادله بالغاز الطبيعي:</span>
+                      <span className="font-mono font-black text-emerald-400 text-sm">
+                        {aiRewardAuditResult.freeMetersEquivalent} م³ غاز
+                      </span>
+                      <span className="text-[9px] text-slate-400 block">(سعر المتر 13 ج)</span>
+                    </div>
+                    <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
+                      <span className="text-[10px] text-slate-400 block">الموازنة لـ {aiRewardTargetDrivers} سائق:</span>
+                      <span className="font-mono font-black text-white text-sm">
+                        {aiRewardAuditResult.totalRequiredBudgetEgp.toLocaleString()} ج
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-200 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 leading-relaxed font-sans whitespace-pre-line">
+                    {aiRewardAuditResult.aiAuditNotes}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Standard Manual Reward Add Form */}
+            <form onSubmit={handleAddReward} className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3 text-xs">
+              <h4 className="font-bold text-slate-800 flex items-center gap-1.5">
+                <Plus className="w-4 h-4 text-emerald-600" />
+                إضافة مكافأة يدوية سريعة إلى بنك الولاء
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block font-bold text-slate-700 mb-1">اسم الهدية</label>
+                  <input
+                    type="text"
+                    required
+                    value={newRewardTitle}
+                    onChange={(e) => setNewRewardTitle(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">النقاط المطلوبة</label>
+                  <input
+                    type="number"
+                    required
+                    value={newRewardPoints}
+                    onChange={(e) => setNewRewardPoints(Number(e.target.value))}
+                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs font-mono font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">القيمة التقديرية</label>
+                  <input
+                    type="text"
+                    required
+                    value={newRewardValue}
+                    onChange={(e) => setNewRewardValue(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs"
+                  />
+                </div>
+              </div>
+              <button
+                type="submit"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-xl text-xs transition"
+              >
+                إضافة الهدية للبنك ✓
+              </button>
+            </form>
+
+            {/* Active Rewards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {rewards.map((r) => (
+                <div key={r.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-black text-sm text-slate-900">{r.title}</span>
+                      <span className="bg-amber-100 text-amber-900 text-xs font-black px-2 py-0.5 rounded-full">
+                        {r.pointsCost} نقطة
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">{r.description}</p>
+                    {r.freeMetersEquivalent && (
+                      <span className="inline-block mt-2 text-[10px] bg-emerald-50 text-emerald-800 font-bold px-2 py-0.5 rounded border border-emerald-200">
+                        ⛽ يعادل {r.freeMetersEquivalent} م³ غاز طبيعي
+                      </span>
+                    )}
+                  </div>
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                    <span className="text-[10px] text-slate-400 font-mono">{r.valueText}</span>
+                    <button
+                      onClick={() => handleDeleteReward(r.id)}
+                      className="text-rose-600 hover:text-rose-800 text-xs font-bold flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>حذف</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Sub-Tab 4: Ideas Bank & References for Super Admin Only */}
+        {effectivePromoTab === 'ideas' && (
+          <div className="space-y-6 animate-in fade-in">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                    <Lightbulb className="w-5 h-5 text-violet-600" />
+                    بنك الأفكار والهدايا والمراجع التسويقية (خاص بمدير النظام فقط)
+                  </h3>
+                  <span className="text-[10px] bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full font-bold border border-violet-200">
+                    🔒 محمي وسري للمدير
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  احتفظ هنا بكافة الأفكار التسويقية والروابط المرجعية، وانسخها بنقرة واحدة لتمريرها فوراً للذكاء الاصطناعي لاحتساب الموازنة والنقاط.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleOpenAddIdea}
+                  className="bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold py-2.5 px-4 rounded-xl transition flex items-center gap-2 shadow-xs"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>إضافة فكرة جديدة / حفظ رابط مرجعي 💡</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter & Search Bar */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200 text-xs">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-slate-500 font-bold ml-1">التصنيف:</span>
+                {['all', 'مسابقة', 'هدية عينية', 'كوبون وخصم', 'غاز مجاني', 'زيوت وفلاتر', 'صيانة وخدمات'].map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedIdeaCategory(cat)}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition ${
+                      selectedIdeaCategory === cat
+                        ? 'bg-violet-600 text-white shadow-xs'
+                        : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                    }`}
+                  >
+                    {cat === 'all' ? 'جميع الأفكار' : cat}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Search className="w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  value={ideaSearchQuery}
+                  onChange={(e) => setIdeaSearchQuery(e.target.value)}
+                  placeholder="ابحث في الأفكار أو الروابط..."
+                  className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs w-56 font-sans"
+                />
+              </div>
+            </div>
+
+            {/* Ideas Grid */}
+            {(() => {
+              const filteredIdeas = ideasBank.filter((it) => {
+                const matchCat = selectedIdeaCategory === 'all' || it.category === selectedIdeaCategory;
+                const matchQuery =
+                  !ideaSearchQuery ||
+                  it.title.toLowerCase().includes(ideaSearchQuery.toLowerCase()) ||
+                  it.description.toLowerCase().includes(ideaSearchQuery.toLowerCase()) ||
+                  (it.tags && it.tags.some((t) => t.toLowerCase().includes(ideaSearchQuery.toLowerCase())));
+                return matchCat && matchQuery;
+              });
+
+              if (filteredIdeas.length === 0) {
+                return (
+                  <div className="text-center py-12 bg-slate-50 rounded-3xl border border-dashed border-slate-200 space-y-3">
+                    <div className="w-12 h-12 rounded-full bg-violet-100 text-violet-600 flex items-center justify-center mx-auto text-xl">
+                      💡
+                    </div>
+                    <h4 className="font-bold text-slate-800 text-sm">لا توجد أفكار مطابقة للبحث</h4>
+                    <p className="text-xs text-slate-500">أضف فكرة جديدة أو رابط مرجعي لحفظها في البنك</p>
+                    <button
+                      onClick={handleOpenAddIdea}
+                      className="bg-violet-600 text-white text-xs font-bold py-2 px-4 rounded-xl"
+                    >
+                      + إضافة فكرة الآن
+                    </button>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredIdeas.map((item) => {
+                    const totalBudget = item.estimatedEgpValue * item.targetParticipants;
+                    const isCopied = copiedIdeaId === item.id;
+                    return (
+                      <div
+                        key={item.id}
+                        className="bg-white rounded-2xl border border-slate-200 shadow-xs hover:border-violet-400 transition flex flex-col justify-between p-5 space-y-4 group"
+                      >
+                        <div className="space-y-2.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="bg-violet-50 text-violet-800 text-[11px] font-black px-2.5 py-0.5 rounded-full border border-violet-200">
+                              {item.category}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => handleOpenEditIdea(item)}
+                                className="text-slate-400 hover:text-slate-700 p-1"
+                                title="تعديل الفكرة"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteIdea(item.id)}
+                                className="text-rose-400 hover:text-rose-600 p-1"
+                                title="حذف الفكرة"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <h4 className="font-black text-slate-900 text-sm group-hover:text-violet-900 transition">
+                            {item.title}
+                          </h4>
+
+                          <p className="text-xs text-slate-600 leading-relaxed">
+                            {item.description}
+                          </p>
+
+                          {/* Reference URL */}
+                          {item.referenceUrl && (
+                            <a
+                              href={item.referenceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 underline bg-blue-50/60 px-2.5 py-1 rounded-lg border border-blue-100 max-w-full truncate"
+                            >
+                              <Link className="w-3.5 h-3.5 shrink-0" />
+                              <span className="truncate" dir="ltr">{item.referenceUrl}</span>
+                              <ExternalLink className="w-3 h-3 shrink-0" />
+                            </a>
+                          )}
+
+                          {/* Tags */}
+                          {item.tags && item.tags.length > 0 && (
+                            <div className="flex flex-wrap gap-1 pt-1">
+                              {item.tags.map((t, idx) => (
+                                <span
+                                  key={idx}
+                                  className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-medium"
+                                >
+                                  #{t}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Financial Estimation Bar */}
+                        <div className="pt-3 border-t border-slate-100 space-y-3">
+                          <div className="grid grid-cols-2 gap-2 text-center bg-slate-50 p-2 rounded-xl">
+                            <div>
+                              <span className="text-[10px] text-slate-500 block">القيمة المقدرة:</span>
+                              <span className="font-mono font-black text-xs text-slate-900">
+                                {item.estimatedEgpValue.toLocaleString()} ج
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-slate-500 block">إجمالي الموازنة ({item.targetParticipants} سائق):</span>
+                              <span className="font-mono font-black text-xs text-emerald-700">
+                                {totalBudget.toLocaleString()} ج
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Actions: Copy & Send to AI */}
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                            <button
+                              onClick={() => handleCopyIdea(item)}
+                              className={`flex-1 text-xs font-bold py-1.5 px-2 rounded-xl border transition flex items-center justify-center gap-1 ${
+                                isCopied
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                  : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+                              }`}
+                              title="نسخ نص الفكرة لخانة الإدخال"
+                            >
+                              {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                              <span>{isCopied ? 'تم النسخ!' : 'نسخ الفكرة'}</span>
+                            </button>
+
+                            <button
+                              onClick={() => handleTransferIdeaToPromotions(item)}
+                              className="text-[11px] font-bold py-1.5 px-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-xl transition flex items-center gap-1"
+                              title="إرسال الفكرة لاستوديو العروض الترويجية والبانر"
+                            >
+                              <Sparkles className="w-3 h-3 text-amber-600" />
+                              <span>للعروض 🤖</span>
+                            </button>
+
+                            <button
+                              onClick={() => handleTransferIdeaToRewards(item)}
+                              className="text-[11px] font-bold py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 rounded-xl transition flex items-center gap-1"
+                              title="إرسال الفكرة للذكاء الاصطناعي لاحتساب النقاط وتدقيق السعر"
+                            >
+                              <Coins className="w-3 h-3 text-emerald-600" />
+                              <span>لبنك الهدايا 🎁</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </div>
+    );
+  })()}
 
         {/* Tab: Complaints & Technician Courtesy Ratings */}
         {activeTab === 'complaints' && (
@@ -4753,461 +6716,31 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         <span className="text-[10px] text-slate-500 block">⭐ {member.averageBehaviorRating || 4.9}</span>
                       </td>
                       <td className="p-3 text-center">
-                        <button
-                          onClick={() => sendPinViaWhatsApp(member)}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl transition flex items-center justify-center gap-1.5 mx-auto shadow-xs"
-                        >
-                          <Send className="w-3 h-3" />
-                          <span>إرسال كود الـ PIN 📲</span>
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                          <button
+                            onClick={() => sendPinViaWhatsApp(member)}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-xl transition flex items-center justify-center gap-1 shadow-xs"
+                            title="إرسال رابط الوردية اليومية عبر الواتساب"
+                          >
+                            <Send className="w-3 h-3" />
+                            <span>واتساب 📲</span>
+                          </button>
+                          <button
+                            onClick={() => copyTechnicianLoginLink(member)}
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold px-2 py-1.5 rounded-xl transition flex items-center justify-center gap-1 border border-slate-200"
+                            title="نسخ رابط الدخول المباشر للفني"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>نسخ الرابط 📋</span>
+                          </button>
+                        </div>
                       </td>
+
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </div>
-        )}
-
-        {/* Existing Tab: Rewards (الآن مدعوم بالذكاء الاصطناعي لتدقيق الأسعار وحساب النقاط) */}
-        {activeTab === 'rewards' && (
-          <div className="p-6 space-y-6">
-            {/* AI Reward Auditor & Pricing Engine (مُعِين) */}
-            <div className="bg-gradient-to-br from-emerald-900 via-teal-950 to-slate-900 text-white p-5 rounded-3xl border border-emerald-700/50 shadow-xl space-y-4">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-emerald-700/40 pb-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-xl">
-                    🧠
-                  </div>
-                  <div>
-                    <h4 className="font-black text-sm text-white flex items-center gap-2">
-                      <span>الذكاء الاصطناعي لتدقيق الهدايا واحتساب النقاط والموازنة (مُعِين)</span>
-                      <span className="bg-emerald-500 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full">
-                        ذكي ومربوط بالموازنة
-                      </span>
-                    </h4>
-                    <p className="text-[11px] text-emerald-200">
-                      اكتب اسم الهدية وقيمتها التقديرية بالجنيه، وسيقوم الذكاء الاصطناعي بالتحري عن دقة السعر، واحتساب النقاط المكافئة، وكمية الغاز المجاني، والموازنة لعدد المشاركين!
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
-                <div className="sm:col-span-2">
-                  <label className="block font-bold text-emerald-200 mb-1">اسم الهدية / الخدمة / الكوبون</label>
-                  <input
-                    type="text"
-                    value={aiRewardGiftName}
-                    onChange={(e) => setAiRewardGiftName(e.target.value)}
-                    placeholder="مثال: غيار زيت موبيل 5000 كم، طقم بوجيهات أصلي، 40 متر غاز، كابون كارفور..."
-                    className="w-full bg-slate-900/80 border border-emerald-600/40 rounded-xl p-2.5 text-xs text-white placeholder:text-slate-500 focus:ring-2 focus:ring-emerald-400 font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-emerald-200 mb-1">القيمة المقدرة (جنية)</label>
-                  <input
-                    type="number"
-                    value={aiRewardPriceEgp}
-                    onChange={(e) => setAiRewardPriceEgp(Number(e.target.value))}
-                    className="w-full bg-slate-900/80 border border-emerald-600/40 rounded-xl p-2.5 text-xs font-mono font-bold text-amber-300"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-emerald-200 mb-1">عدد المشاركين المستهدف</label>
-                  <input
-                    type="number"
-                    value={aiRewardTargetDrivers}
-                    onChange={(e) => setAiRewardTargetDrivers(Number(e.target.value))}
-                    className="w-full bg-slate-900/80 border border-emerald-600/40 rounded-xl p-2.5 text-xs font-mono font-bold text-cyan-300"
-                  />
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="text-emerald-200 font-bold">التصنيف:</span>
-                  <select
-                    value={aiRewardCategory}
-                    onChange={(e) => setAiRewardCategory(e.target.value as any)}
-                    className="bg-slate-900 border border-emerald-600/40 rounded-xl px-3 py-1.5 text-xs text-emerald-100 font-bold"
-                  >
-                    <option value="meters">غاز طبيعي مجاني (أمتار)</option>
-                    <option value="oil">زيوت وفلاتر</option>
-                    <option value="spark_plugs">بوجيهات وقطع صيانة</option>
-                    <option value="car_wash">غسيل وخدمات سيارات</option>
-                    <option value="discount">كوبونات وخصومات شركاء</option>
-                  </select>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={isAuditingAiReward}
-                  onClick={handleAiAuditReward}
-                  className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black py-2.5 px-5 rounded-xl text-xs transition shadow-md flex items-center gap-2 disabled:opacity-50"
-                >
-                  <Sparkles className="w-4 h-4 text-slate-950" />
-                  <span>{isAuditingAiReward ? 'جارٍ التحري والتدقيق واحتساب النقاط...' : 'تدقيق السعر واحتساب النقاط والموازنة بالذكاء الاصطناعي 🧠'}</span>
-                </button>
-              </div>
-
-              {/* AI Audit Result Box */}
-              {aiRewardAuditResult && (
-                <div className="bg-slate-900/95 border-2 border-amber-400/70 p-4 rounded-2xl space-y-3 animate-in fade-in">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800 pb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-amber-400 font-black text-sm">💡 نتيجة التدقيق الاستشاري لـ "مُعِين":</span>
-                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">
-                        {aiRewardAuditResult.pricingStatus}
-                      </span>
-                    </div>
-
-                    <button
-                      onClick={handleAdoptAiReward}
-                      className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black px-4 py-1.5 rounded-xl text-xs transition shadow-md flex items-center gap-1.5"
-                    >
-                      <Check className="w-4 h-4" />
-                      <span>اعتماد وإضافة الهدية لبنك السائقين فوراً ✓</span>
-                    </button>
-                  </div>
-
-                  {/* Calculated Metrics Cards */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
-                    <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
-                      <span className="text-[10px] text-slate-400 block">السعر المعتمد:</span>
-                      <span className="font-mono font-black text-amber-300 text-sm">
-                        {aiRewardAuditResult.verifiedFairPriceEgp} ج
-                      </span>
-                    </div>
-                    <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
-                      <span className="text-[10px] text-slate-400 block">النقاط المحتسبة للعميل:</span>
-                      <span className="font-mono font-black text-cyan-300 text-sm">
-                        {aiRewardAuditResult.pointsCost} نقطة
-                      </span>
-                      <span className="text-[9px] text-slate-400 block">(تكلفة النقطة 0.35 ج)</span>
-                    </div>
-                    <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
-                      <span className="text-[10px] text-slate-400 block">ما يعادله بالغاز الطبيعي:</span>
-                      <span className="font-mono font-black text-emerald-400 text-sm">
-                        {aiRewardAuditResult.freeMetersEquivalent} م³ غاز
-                      </span>
-                      <span className="text-[9px] text-slate-400 block">(سعر المتر 13 ج)</span>
-                    </div>
-                    <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
-                      <span className="text-[10px] text-slate-400 block">الموازنة لـ {aiRewardTargetDrivers} سائق:</span>
-                      <span className="font-mono font-black text-white text-sm">
-                        {aiRewardAuditResult.totalRequiredBudgetEgp.toLocaleString()} ج
-                      </span>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-slate-200 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 leading-relaxed font-sans whitespace-pre-line">
-                    {aiRewardAuditResult.aiAuditNotes}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Standard Manual Reward Add Form */}
-            <form onSubmit={handleAddReward} className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3 text-xs">
-              <h4 className="font-bold text-slate-800 flex items-center gap-1.5">
-                <Plus className="w-4 h-4 text-emerald-600" />
-                إضافة مكافأة يدوية سريعة إلى بنك الولاء
-              </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="block font-bold text-slate-700 mb-1">اسم الهدية</label>
-                  <input
-                    type="text"
-                    required
-                    value={newRewardTitle}
-                    onChange={(e) => setNewRewardTitle(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">النقاط المطلوبة</label>
-                  <input
-                    type="number"
-                    required
-                    value={newRewardPoints}
-                    onChange={(e) => setNewRewardPoints(Number(e.target.value))}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs font-mono font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">القيمة التقديرية</label>
-                  <input
-                    type="text"
-                    required
-                    value={newRewardValue}
-                    onChange={(e) => setNewRewardValue(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs"
-                  />
-                </div>
-              </div>
-              <button
-                type="submit"
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-5 rounded-xl text-xs transition"
-              >
-                إضافة الهدية للبنك ✓
-              </button>
-            </form>
-
-            {/* Active Rewards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {rewards.map((r) => (
-                <div key={r.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between space-y-3">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="font-black text-sm text-slate-900">{r.title}</span>
-                      <span className="bg-amber-100 text-amber-900 text-xs font-black px-2 py-0.5 rounded-full">
-                        {r.pointsCost} نقطة
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">{r.description}</p>
-                    {r.freeMetersEquivalent && (
-                      <span className="inline-block mt-2 text-[10px] bg-emerald-50 text-emerald-800 font-bold px-2 py-0.5 rounded border border-emerald-200">
-                        ⛽ يعادل {r.freeMetersEquivalent} م³ غاز طبيعي
-                      </span>
-                    )}
-                  </div>
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                    <span className="text-[10px] text-slate-400 font-mono">{r.valueText}</span>
-                    <button
-                      onClick={() => handleDeleteReward(r.id)}
-                      className="text-rose-600 hover:text-rose-800 text-xs font-bold flex items-center gap-1"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>حذف</span>
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Tab: Ideas Bank & References for Super Admin Only (بنك الأفكار والهدايا والمراجع) */}
-        {activeTab === 'ideas_bank' && (
-          <div className="p-6 space-y-6">
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                    <Lightbulb className="w-5 h-5 text-violet-600" />
-                    بنك الأفكار والهدايا والمراجع التسويقية (خاص بمدير النظام فقط)
-                  </h3>
-                  <span className="text-[10px] bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full font-bold border border-violet-200">
-                    🔒 محمي وسري للمدير
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  احتفظ هنا بكافة الأفكار التسويقية والروابط المرجعية، وانسخها بنقرة واحدة لتمريرها فوراً للذكاء الاصطناعي لاحتساب الموازنة والنقاط.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleOpenAddIdea}
-                  className="bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold py-2.5 px-4 rounded-xl transition flex items-center gap-2 shadow-xs"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>إضافة فكرة جديدة / حفظ رابط مرجعي 💡</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Filter & Search Bar */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200 text-xs">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-slate-500 font-bold ml-1">التصنيف:</span>
-                {['all', 'مسابقة', 'هدية عينية', 'كوبون وخصم', 'غاز مجاني', 'زيوت وفلاتر', 'صيانة وخدمات'].map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => setSelectedIdeaCategory(cat)}
-                    className={`px-3 py-1 rounded-xl text-xs font-bold transition ${
-                      selectedIdeaCategory === cat
-                        ? 'bg-violet-600 text-white shadow-xs'
-                        : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
-                    }`}
-                  >
-                    {cat === 'all' ? 'جميع الأفكار' : cat}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Search className="w-4 h-4 text-slate-400" />
-                <input
-                  type="text"
-                  value={ideaSearchQuery}
-                  onChange={(e) => setIdeaSearchQuery(e.target.value)}
-                  placeholder="ابحث في الأفكار أو الروابط..."
-                  className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs w-56 font-sans"
-                />
-              </div>
-            </div>
-
-            {/* Ideas Grid */}
-            {(() => {
-              const filteredIdeas = ideasBank.filter((it) => {
-                const matchCat = selectedIdeaCategory === 'all' || it.category === selectedIdeaCategory;
-                const matchQuery =
-                  !ideaSearchQuery ||
-                  it.title.toLowerCase().includes(ideaSearchQuery.toLowerCase()) ||
-                  it.description.toLowerCase().includes(ideaSearchQuery.toLowerCase()) ||
-                  (it.tags && it.tags.some((t) => t.toLowerCase().includes(ideaSearchQuery.toLowerCase())));
-                return matchCat && matchQuery;
-              });
-
-              if (filteredIdeas.length === 0) {
-                return (
-                  <div className="text-center py-12 bg-slate-50 rounded-3xl border border-dashed border-slate-200 space-y-3">
-                    <div className="w-12 h-12 rounded-full bg-violet-100 text-violet-600 flex items-center justify-center mx-auto text-xl">
-                      💡
-                    </div>
-                    <h4 className="font-bold text-slate-800 text-sm">لا توجد أفكار مطابقة للبحث</h4>
-                    <p className="text-xs text-slate-500">أضف فكرة جديدة أو رابط مرجعي لحفظها في البنك</p>
-                    <button
-                      onClick={handleOpenAddIdea}
-                      className="bg-violet-600 text-white text-xs font-bold py-2 px-4 rounded-xl"
-                    >
-                      + إضافة فكرة الآن
-                    </button>
-                  </div>
-                );
-              }
-
-              return (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredIdeas.map((item) => {
-                    const totalBudget = item.estimatedEgpValue * item.targetParticipants;
-                    const isCopied = copiedIdeaId === item.id;
-                    return (
-                      <div
-                        key={item.id}
-                        className="bg-white rounded-2xl border border-slate-200 shadow-xs hover:border-violet-400 transition flex flex-col justify-between p-5 space-y-4 group"
-                      >
-                        <div className="space-y-2.5">
-                          <div className="flex items-start justify-between gap-2">
-                            <span className="bg-violet-50 text-violet-800 text-[11px] font-black px-2.5 py-0.5 rounded-full border border-violet-200">
-                              {item.category}
-                            </span>
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={() => handleOpenEditIdea(item)}
-                                className="text-slate-400 hover:text-slate-700 p-1"
-                                title="تعديل الفكرة"
-                              >
-                                <Edit className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteIdea(item.id)}
-                                className="text-rose-400 hover:text-rose-600 p-1"
-                                title="حذف الفكرة"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-
-                          <h4 className="font-black text-slate-900 text-sm group-hover:text-violet-900 transition">
-                            {item.title}
-                          </h4>
-
-                          <p className="text-xs text-slate-600 leading-relaxed">
-                            {item.description}
-                          </p>
-
-                          {/* Reference URL */}
-                          {item.referenceUrl && (
-                            <a
-                              href={item.referenceUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 underline bg-blue-50/60 px-2.5 py-1 rounded-lg border border-blue-100 max-w-full truncate"
-                            >
-                              <Link className="w-3.5 h-3.5 shrink-0" />
-                              <span className="truncate" dir="ltr">{item.referenceUrl}</span>
-                              <ExternalLink className="w-3 h-3 shrink-0" />
-                            </a>
-                          )}
-
-                          {/* Tags */}
-                          {item.tags && item.tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1 pt-1">
-                              {item.tags.map((t, idx) => (
-                                <span
-                                  key={idx}
-                                  className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-medium"
-                                >
-                                  #{t}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Financial Estimation Bar */}
-                        <div className="pt-3 border-t border-slate-100 space-y-3">
-                          <div className="grid grid-cols-2 gap-2 text-center bg-slate-50 p-2 rounded-xl">
-                            <div>
-                              <span className="text-[10px] text-slate-500 block">القيمة المقدرة:</span>
-                              <span className="font-mono font-black text-xs text-slate-900">
-                                {item.estimatedEgpValue.toLocaleString()} ج
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-[10px] text-slate-500 block">إجمالي الموازنة ({item.targetParticipants} سائق):</span>
-                              <span className="font-mono font-black text-xs text-emerald-700">
-                                {totalBudget.toLocaleString()} ج
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Actions: Copy & Send to AI */}
-                          <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                            <button
-                              onClick={() => handleCopyIdea(item)}
-                              className={`flex-1 text-xs font-bold py-1.5 px-2 rounded-xl border transition flex items-center justify-center gap-1 ${
-                                isCopied
-                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                  : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
-                              }`}
-                              title="نسخ نص الفكرة لخانة الإدخال"
-                            >
-                              {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                              <span>{isCopied ? 'تم النسخ!' : 'نسخ الفكرة'}</span>
-                            </button>
-
-                            <button
-                              onClick={() => handleTransferIdeaToPromotions(item)}
-                              className="text-[11px] font-bold py-1.5 px-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-xl transition flex items-center gap-1"
-                              title="إرسال الفكرة لاستوديو العروض الترويجية والبانر"
-                            >
-                              <Sparkles className="w-3 h-3 text-amber-600" />
-                              <span>للعروض 🤖</span>
-                            </button>
-
-                            <button
-                              onClick={() => handleTransferIdeaToRewards(item)}
-                              className="text-[11px] font-bold py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 rounded-xl transition flex items-center gap-1"
-                              title="إرسال الفكرة للذكاء الاصطناعي لاحتساب النقاط وتدقيق السعر"
-                            >
-                              <Coins className="w-3 h-3 text-emerald-600" />
-                              <span>للهدايا 🎁</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
           </div>
         )}
 

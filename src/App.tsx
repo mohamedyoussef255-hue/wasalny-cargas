@@ -52,6 +52,18 @@ export default function App() {
     }
   }, [config.isDarkMode]);
 
+  // Check URL parameters for direct role routing (e.g. WhatsApp message sent to technician)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const roleParam = params.get('role');
+      const techIdParam = params.get('techId');
+      if (roleParam === 'technician' || techIdParam) {
+        setCurrentRole('technician');
+      }
+    } catch {}
+  }, []);
+
   const handleToggleTheme = () => {
     const updated = { ...config, isDarkMode: !config.isDarkMode };
     setConfig(updated);
@@ -98,31 +110,6 @@ export default function App() {
         onToggleTheme={handleToggleTheme}
       />
 
-      {/* Version Status & Instant Rollback Banner */}
-      <div className="bg-slate-900 text-slate-300 text-[11px] py-1.5 px-4 no-print border-b border-slate-800 flex items-center justify-between">
-        <div className="max-w-7xl mx-auto w-full flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span className="font-bold text-white">النسخة الموسعة v2.8 Enterprise:</span>
-            <span className="text-slate-400 hidden sm:inline">
-              خريطة تفاعلية وأقرب محطة • حوافز الفنيين وحسن المعاملة • إظهار وإخفاء المحتويات • موازنة مبيعات المحطات
-            </span>
-          </div>
-          <button
-            onClick={() => {
-              if (confirm('هل ترغب في مسح التعديلات والرجوع للنسخة الكلاسيكية السابقة فوراً؟')) {
-                handleRollback();
-                alert('تمت العودة للنسخة الكلاسيكية بنجاح!');
-              }
-            }}
-            className="flex items-center gap-1 text-[10px] text-amber-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-0.5 rounded-lg border border-slate-700 transition"
-            title="الرجوع للنسخة الكلاسيكية السابقة ومسح التعديلات لو لم تناسبك"
-          >
-            <RotateCcw className="w-3 h-3" />
-            <span>العودة للنسخة الأصلية</span>
-          </button>
-        </div>
-      </div>
 
       {/* Main Content Viewport */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">

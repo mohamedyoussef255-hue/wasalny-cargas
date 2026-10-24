@@ -86,79 +86,65 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             </div>
 
-            {/* Mobile Admin Trigger Quick Button */}
-            <div className="md:hidden flex items-center gap-2">
-              <button
-                onClick={onTriggerAdminModal}
-                className="p-2 text-slate-600 hover:text-emerald-700 rounded-xl bg-slate-100 text-xs font-bold flex items-center gap-1"
-                title="لوحة الإدارة"
-              >
-                <Lock className="w-4 h-4" />
-              </button>
-            </div>
+            {/* Mobile Admin Trigger: Hidden from regular users, secret 5-clicks on logo is the entrance */}
           </div>
 
-          {/* Role Navigation Buttons (Driver vs Technician vs Admin) */}
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <div className="bg-slate-100/90 p-1 rounded-2xl flex items-center gap-1 border border-slate-200/80">
-              {/* Driver Tab */}
-              <button
-                onClick={() => onRoleChange('driver')}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                  currentRole === 'driver'
-                    ? 'bg-white text-emerald-700 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <UserCheck className="w-4 h-4 text-emerald-600" />
-                <span>بوابة العميل (السائق)</span>
-              </button>
-
-              {/* Technician Tab */}
-              <button
-                onClick={() => onRoleChange('technician')}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                  currentRole === 'technician'
-                    ? 'bg-white text-blue-700 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Wrench className="w-4 h-4 text-blue-600" />
-                <span>فني التموين (الوردية)</span>
-              </button>
-
-              {/* Admin Portal Tab (shown if unlocked or direct toggle) */}
-              {isAdminUnlocked && (
+          {/* Right Action Bar: Theme Toggle, and Admin Role Controls ONLY if Admin Unlocked */}
+          <div className="flex items-center gap-2">
+            {/* Admin Controls Toolbar (VISIBLE ONLY WHEN ADMIN IS UNLOCKED) */}
+            {isAdminUnlocked ? (
+              <div className="bg-slate-900 text-white p-1 rounded-2xl flex items-center gap-1 border border-slate-700 shadow-md">
+                <span className="text-[10px] text-emerald-400 font-bold px-2 hidden sm:inline">
+                  👑 وضع المدير:
+                </span>
+                
+                {/* Admin Portal Tab */}
                 <button
                   onClick={() => onRoleChange('admin')}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
                     currentRole === 'admin'
-                      ? 'bg-rose-700 text-white shadow-sm'
-                      : 'text-rose-700 hover:bg-rose-50'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800'
                   }`}
                 >
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>لوحة مدير النظام</span>
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>لوحة التحكم</span>
                 </button>
-              )}
-            </div>
 
-            {/* Quick Admin Unlock Button */}
-            {!isAdminUnlocked && (
-              <button
-                onClick={onTriggerAdminModal}
-                className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-xl transition border border-slate-200"
-                title="تسجيل دخول المدير (0000 أو 5 نقرات على اللوجو)"
-              >
-                <Lock className="w-3.5 h-3.5 text-slate-500" />
-                <span className="hidden sm:inline">دخول المدير</span>
-              </button>
-            )}
+                {/* Preview Driver View */}
+                <button
+                  onClick={() => onRoleChange('driver')}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    currentRole === 'driver'
+                      ? 'bg-emerald-700 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  }`}
+                  title="معاينة صفحة العميل"
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span className="hidden md:inline">معاينة العميل</span>
+                </button>
+
+                {/* Preview Technician View */}
+                <button
+                  onClick={() => onRoleChange('technician')}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    currentRole === 'technician'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  }`}
+                  title="معاينة صفحة الفني"
+                >
+                  <Wrench className="w-3.5 h-3.5" />
+                  <span className="hidden md:inline">معاينة الفني</span>
+                </button>
+              </div>
+            ) : null}
 
             {/* Dark / Light Toggle */}
             <button
               onClick={onToggleTheme}
-              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+              className="p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
               title="تبديل الوضع الليلي / النهاري"
             >
               {config.isDarkMode ? (
