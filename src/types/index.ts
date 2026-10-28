@@ -1,4 +1,4 @@
-export type UserRole = 'driver' | 'technician' | 'admin';
+export type UserRole = 'driver' | 'technician' | 'admin' | 'finance';
 
 export type StationFacilityType =
   | 'cng_station'          // محطة تموين غاز طبيعي
@@ -35,6 +35,15 @@ export interface CargasStationLocation {
   cctvStatus?: 'live' | 'offline';              // حالة بث الكاميرات
   crowdLevel?: 'فاضية وسريعة' | 'متوسطة' | 'مزدحمة (طابور)'; // حالة الزحام المرصودة
   crowdEstimatedWaitMinutes?: number;           // زمن الانتظار التقديري بالدقائق
+  // إعدادات وتخصيصات الإدارة المالية للنقاط بالمحطة
+  region?: string;                              // المنطقة الجغرافية (القاهرة الكبرى، الإسكندرية، الدلتا، القناة، الصعيد)
+  costPerPointEgp?: number;                     // تكلفة النقطة بالجنيه المقررة من الإدارة المالية للمحطة
+  pointsAwardRatePerMeter?: number;             // معدل منح النقاط لكل متر غاز في هذه المحطة (افتراضي 1)
+  isLoyaltyProgramActive?: boolean;             // تفعيل أو تعطيل برنامج النقاط في هذه المحطة تحديداً
+  financialApprovedByAdmin?: boolean;           // اعتماد مدير النظام لتسعيرة وتكلفة الإدارة المالية
+  financialApprovedAt?: string;                 // توقيت اعتماد مدير النظام
+  financialApprovedBy?: string;                 // اسم أو معرف من اعتمد التسعيرة
+  financialNotes?: string;                      // توجيهات وملاحظات الإدارة المالية
 }
 
 export interface MaintenanceItem {
@@ -116,31 +125,52 @@ export interface FuelingTransaction {
   // إحصائيات التكرار
   driverStationFuelingCount?: number; // رقم تفويلة السائق من هذه المحطة
   driverPumpFuelingCount?: number;    // رقم تفويلة السائق من هذه الطلمبة
-  // تموين استبدال نقاط الولاء وهدايا الأمتار المجانية
-  isRewardRedemption?: boolean;       // تفويلة مستبدلة من نقاط الولاء
+  // تموين استبدال نقاط الولاء والهدايا
+  isRewardRedemption?: boolean;       // عملية مستبدلة من نقاط الولاء
   rewardRedemptionId?: string;        // معرف كود الاستبدال
   rewardTitle?: string;               // اسم المكافأة المستبدلة
+  // رصد ومتابعة الإدارة المالية
+  stationCostPerPointEgp?: number;     // تكلفة النقطة بالجنيه المقررة للمحطة وقت العملية
+  stationPointsRate?: number;          // معدل منح النقاط وقت العملية (نقطة/م³)
+  financialLiabilityEgp?: number;      // إجمالي التكلفة المالية للنقاط المستحقة (pointsEarned * costPerPoint)
+  regionName?: string;                 // المنطقة الجغرافية للمحطة
 }
+
+export type RewardCategory =
+  | 'oil'                    // منتجات وزيوت كارجاس المعتمدة
+  | 'maintenance'            // صيانة وإصلاح وفلاتر وبوجيهات
+  | 'inspection'             // فحص واختبار أسطوانات وصمامات أمان
+  | 'discount_coupon'        // كوبونات خصم فورية
+  | 'services_goods'         // خدمات وسلع عينية (غسيل وتلميع)
+  | 'third_party_discount'   // خصومات وسلع لدى الغير والشركاء التجاريين
+  | 'spark_plugs'
+  | 'meters'
+  | 'discount'
+  | 'car_wash'
+  | 'merchandise';
 
 export interface RewardItem {
   id: string;
   title: string;
   description: string;
   pointsCost: number;
-  category: 'meters' | 'oil' | 'spark_plugs' | 'car_wash' | 'discount' | 'merchandise' | 'service';
+  category: RewardCategory;
   valueText: string;
   icon: string;
   isActive: boolean;
   estimatedEgpValue?: number;     // القيمة المالية المقدرة بالجنية
-  freeMetersEquivalent?: number;  // ما يعادلها من أمتار الغاز الطبيعي المجانية
+  partnerName?: string;           // اسم جهة الخصم لدى الغير (مثلاً: كارفور، سبينيس، بي تك)
+  discountPercentage?: number;    // نسبة الخصم %
+  couponCodeValue?: string;       // كود الكوبون
   aiAuditNotes?: string;          // تقرير وتوصية الذكاء الاصطناعي لتحري دقة التسعير
+  freeMetersEquivalent?: number;  // للأمتار للتوافق الخلفي
 }
 
 // بنك الأفكار والهدايا والعروض الترويجية والروابط الخاصة بمدير النظام
 export interface IdeaBankItem {
   id: string;
   title: string;              // مسمى الفكرة أو الهدية
-  category: 'مسابقة' | 'عرض ترويجي' | 'هدية عينية' | 'أمتار غاز' | 'كوبون خدمة' | 'شراكة تجارية';
+  category: 'مسابقة' | 'عرض ترويجي' | 'هدية عينية' | 'كوبون خدمة' | 'شراكة تجارية' | 'أمتار غاز';
   description: string;        // تفاصيل وشرح الفكرة
   referenceUrl?: string;      // رابط مرجعي للفكرة أو الشراكة للاحتفاظ به
   estimatedEgpValue: number;  // القيمة التقديرية بالجنية
@@ -162,15 +192,19 @@ export interface RewardRedemption {
   redemptionCode: string;
   createdAt: string;
   isUsed: boolean;
-  category?: 'meters' | 'oil' | 'spark_plugs' | 'car_wash' | 'discount' | 'merchandise' | 'service';
-  freeMeters?: number;                // عدد الأمتار المجانية المعتمدة (مثال 5 م³ أو 15 م³)
-  calculatedEgpValue?: number;        // القيمة بالجنيه (freeMeters * gasPrice)
+  category?: RewardCategory;
+  calculatedEgpValue?: number;        // القيمة التقديرية بالجنيه
+  partnerName?: string;               // جهة الشريك أو الخصم لدى الغير
+  discountPercentage?: number;        // نسبة الخصم
+  couponCodeValue?: string;           // كود الكوبون
+  giftType?: string;                  // مسمى نوع الهدية
   usedAt?: string;                    // تاريخ ووقت الصرف لدى الفني
   usedAtStation?: string;             // اسم المحطة التي تم الصرف بها
   dispensedByTechnicianId?: string;   // كود فني التموين الذي نفذ العملية
   dispensedByTechnicianName?: string; // اسم فني التموين
   pumpNumber?: number;                // رقم الطلمبة التي تم التموين منها
   fuelingTransactionId?: string;      // رقم إيصال التفويلة المرتبط
+  freeMeters?: number;                // حقل الأمتار للتوافق الخلفي
 }
 
 export interface AntiFraudLog {
@@ -307,13 +341,22 @@ export interface CustomComputedColumn {
   createdAt: string;
 }
 
-// نموذج إدارة وتكلفة النقاط والعائد
+// نموذج إدارة وتكلفة النقاط والعائد والمعيار الاقتصادي الرسمي
 export interface LoyaltyCostModel {
   activeModelName: 'قياسي 1:1' | 'ترويجي للمحطات المنخفضة' | 'باقة التاكسي والشركات' | 'أوقات غير الذروة';
   costPerPointEgp: number;         // تكلفة النقطة الواحدة على الشركة بالجنية (افتراضي 0.35 ج)
   expectedMarginGainPct: number;   // العائد المتوقع من زيادة الولاء % (افتراضي 28%)
   totalPromotionalBudgetEgp: number; // إجمالي موازنة الترويج المعتمدة
   allocatedBudgetSumEgp: number;
+  // المعيار الاقتصادي الرسمي القابل للتعديل بالكامل
+  officialGasPrice?: number;                 // سعر المتر الرسمي الافتراضي 13 ج
+  officialCostPerPoint?: number;             // تكلفة النقطة الرسمية الافتراضية 0.35 ج
+  officialGasolineSavingsPerMeter?: number;  // وفر السائق لكل متر مقارنة بالبنزين 10.5 ج
+  officialMarginGainPct?: number;            // نسبة نمو هامش أرباح الشركة 28%
+  centennialMeters?: number;                 // أمتار باقة المئوية 108 م³
+  centennialPoints?: number;                 // نقاط باقة المئوية 100 نقطة
+  centennialRewardValueEgp?: number;         // القيمة السوقية لمكافأة المئوية 50 ج
+  customerRewardPerPointEgp?: number;        // القيمة السوقية للنقطة للعميل 0.50 ج
 }
 
 // معايير الحملات الترويجية والمسابقات وبانر العروض للعملاء المصاغ بالذكاء الاصطناعي
@@ -347,6 +390,7 @@ export interface AppConfig {
   gasPricePerMeter: number; // default 13 EGP
   pointsPerMeter: number; // default 1
   adminPin: string; // default "0000"
+  financePin?: string; // default "1234" (الرقم السري لدخول وتعديل الإدارة المالية)
   stationCode: string;
   stationName: string;
   stationLat: number;
@@ -391,18 +435,92 @@ export interface AppConfig {
   pointsFormula?: PointsFormulaConfig;
   // ترتيب وتنسيق عناصر وصفحات العميل والفني
   layoutSettings?: PageLayoutSettings;
+  // إعدادات الربط والتحكم بنظام السكادا (SCADA Webhook)
+  scadaConfig?: ScadaConfig;
 }
 
-// إعدادات ترتيب ومواضع عناصر صفحات العميل والفني
+// أعمدة ومقاسات المساحات المرنة في نظام التخطيط الديناميكي
+export type SectionColSpan = 12 | 7 | 6 | 5 | 4;
+export type SectionHeightMode = 'compact' | 'normal' | 'expanded';
+
+// تعريف كل مساحة في شاشة العميل والفني
+export interface SectionLayoutItem {
+  id: string;
+  title: string;
+  description?: string;
+  colSpan: SectionColSpan; // 12 = عرض كامل 100%, 7 = عريض 60%, 6 = نصف الشاشة 50%, 5 = مائل 40%, 4 = ثلث 33%
+  heightMode: SectionHeightMode;
+  visible: boolean;
+  order: number;
+  icon?: string;
+}
+
+// إعدادات ترتيب ومواضع ومقاسات عناصر صفحات العميل والفني
 export interface PageLayoutSettings {
   driverSectionsOrder: string[];
   technicianSectionsOrder: string[];
+  driverSections: SectionLayoutItem[];
+  technicianSections: SectionLayoutItem[];
 }
 
+// هيكل جلسة التموين التلقائية بنظام السكادا (fueling_sessions)
+export interface FuelingSession {
+  session_id: string;
+  station_id: string;
+  station_name?: string;
+  hose_id: string;
+  user_id: string;
+  driver_name?: string;
+  car_plate: string;
+  car_model?: string;
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'EXPIRED';
+  volume_m3?: number;
+  unit_price?: number;
+  total_amount?: number;
+  points_earned?: number;
+  created_at: string;
+  completed_at?: string;
+  scada_transaction_id?: string;
+  technician_id?: string;
+  technician_name?: string;
+  odometer_km?: number;
+  notes?: string;
+}
+
+// حمولة قراءة العداد المستلمة من نظام السكادا (SCADA Webhook Payload)
+export interface ScadaTransactionPayload {
+  api_key: string;
+  station_id: string;
+  hose_id: string;
+  volume_m3: number;
+  transaction_id: string;
+}
+
+// إعدادات الربط والتحكم بنظام السكادا لمحطات كارجاس
+export interface ScadaConfig {
+  enabled: boolean;
+  apiKey: string;
+  webhookEndpoint: string;
+  autoWindowMinutes: number; // مدة صلاحية الجلسة المفتوحة (افتراضي 10 دقائق)
+  simulationDelaySeconds: number;
+  lastReceivedSignal?: {
+    timestamp: string;
+    station_id: string;
+    hose_id: string;
+    volume_m3: number;
+    transaction_id: string;
+    status: 'matched' | 'unmatched' | 'invalid_key';
+    sessionId?: string;
+    carPlate?: string;
+    pointsEarned?: number;
+  };
+}
 
 // المعادلة المعتمدة والشاملة لاحتساب نقاط الولاء في كافة أرجاء التطبيق
 export interface PointsFormulaConfig {
-  basePointsPerMeter: number;        // معدل النقاط الأساسي لكل متر (افتراضياً 1)
+  ratioMode?: 'points_per_meter' | 'meters_per_point'; // نمط احتساب النسبة: هل نقاط لكل متر أم أمتار لكل نقطة
+  metersPerPointUnit?: number;       // عند اختيار meters_per_point: كل كم متر يعادل 1 نقطة (مثلاً 5 أو 10 م³ = 1 نقطة)
+  basePointsPerMeter: number;        // معدل النقاط الأساسي لكل متر (افتراضياً 1 أو 10)
   gasPricePerMeter: number;          // سعر متر الغاز المعتمد (13 ج)
   calculationBasis: 'meters' | 'egp';// الحساب بناء على كمية الأمتار أم القيمة بالجنيه
   tierBronzeMultiplier: number;      // مضاعف الشريحة البرونزية / العادية (1.0x)
@@ -412,6 +530,46 @@ export interface PointsFormulaConfig {
   volumeBonusPoints: number;         // بونص النقاط عند تجاوز الحد (مثلاً 10 نقاط)
   technicianWelcomePointsPerShift: number; // رصيد النقاط الترحيبية المتاح للفني في الوردية لتوزيعه (مثلاً 350 نقطة)
   pointsToEgpRedemptionRatio: number;// القيمة التقديرية للنقطة بالجنيه (0.35 ج)
+}
+
+// خدمات حجز مواعيد الصيانة وفحص الأسطوانات
+export type AppointmentServiceType =
+  | 'فحص واختبار أسطوانة الغاز وصمام الأمان (شهادة المرور)'
+  | 'صيانة دورية وتغيير طقم فلاتر الغاز'
+  | 'تغيير زيت المحرك وفحص الفلتر أسفل المظلة'
+  | 'تغيير طقم بوجيهات بوش وضبط فجوة الإشعال'
+  | 'فحص تسريب الغاز ومعايرة منظم الضغط والرشاشات'
+  | 'صيانة سريعة عامة وضبط محبس الأمان';
+
+export type AppointmentStatus =
+  | 'scheduled'               // محجوز ومجدول
+  | 'awaiting_confirmation'   // تم إرسال تنبيه تأكيد الحضور (قبل الموعد بساعتين)
+  | 'confirmed_by_driver'     // تم تأكيد الحضور من السائق
+  | 'auto_cancelled_no_show'  // تم الإلغاء تلقائياً لعدم التأكيد خلال مهلة ساعة
+  | 'reallocated_to_standby'  // تم شغل المكان ونقل الموعد لعميل آخر بالانتظار
+  | 'completed'               // تم التنفيذ بالمحطة
+  | 'cancelled_by_driver';    // ألغاه السائق بنفسه
+
+export interface ServiceAppointment {
+  id: string;
+  driverId: string;
+  driverName: string;
+  carPlate: string;
+  phone: string;
+  stationId: string;
+  stationName: string;
+  serviceType: AppointmentServiceType;
+  appointmentDate: string;           // YYYY-MM-DD
+  timeSlot: string;                  // e.g. "10:00 ص - 10:30 ص"
+  status: AppointmentStatus;
+  createdAt: string;
+  alertSentAt?: string;              // وقت إرسال التنبيه (قبل الموعد بساعتين)
+  confirmationDeadline?: string;     // مهلة الرد (ساعة واحدة بعد التنبيه)
+  confirmedAt?: string;
+  reallocatedToDriverId?: string;    // كود السائق الجديد الذي شغل الموعد الشاغر
+  reallocatedToDriverName?: string;
+  reallocatedToCarPlate?: string;
+  notes?: string;
 }
 
 // إعدادات وتحكم مدير النظام الشاملة في تطبيق "وصّلني" والملاحة
@@ -429,7 +587,22 @@ export interface WasalnyConfig {
   subtitle?: string;                     // نص توضيحي يظهر تحت العنوان
   mapCoverImageUrl?: string;             // رابط أو صورة خلفية الخريطة المخصصة
   cargasLogoBadgeUrl?: string;           // لوجو كارجاس المخصص على بطاقة الخريطة
-  cardLayout?: 'banner_top' | 'radar_compact';
+  cardLayout?: string;                   // تصميم بطاقة العرض
+}
+
+// هيكل مصفوفة تسعير وتخصيص تكلفة النقاط لكل محطة ومنطقة جغرافية
+export interface StationFinancialConfig {
+  stationId: string;
+  stationName: string;
+  region: string;
+  costPerPointEgp: number;           // تكلفة النقطة بالجنيه المقررة من الإدارة المالية
+  pointsAwardRatePerMeter: number;   // معدل منح النقاط لكل متر غاز (مثلاً: 1 أو 1.5 أو 2)
+  isProgramActive: boolean;          // تفعيل أو تعطيل برنامج النقاط في هذه المحطة
+  allocatedBudgetEgp?: number;       // موازنة الترويج والنقاط المخصصة للمحطة
+  isApprovedByAdmin: boolean;        // اعتماد مدير النظام
+  approvedAt?: string;
+  approvedBy?: string;
+  financialNotes?: string;
 }
 
 export interface VersionSnapshot {

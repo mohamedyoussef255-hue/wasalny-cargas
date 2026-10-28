@@ -144,7 +144,21 @@ export const MoenAssistant: React.FC<MoenAssistantProps> = ({
   const generateMoenReply = (query: string): string => {
     const q = query.toLowerCase();
 
-    // Check if query touches forbidden topics if admin restricted
+    // 0. Refueling Meters & Gas Station Operations
+    if (q.includes('تموين') || q.includes('عداد') || q.includes('قراءة') || q.includes('متر') || q.includes('تسجيل') || q.includes('سيارة')) {
+      return 'يا بطل تسجيل التموين بقى في ثواني معدودة! الفني بيفتح واجهة العدادات، يكتب قراءة البداية وقراءة النهاية للعداد، والسيستم بيحسب أوتوماتيك كمية الغاز بالأمتار المكعبة (م³) وإجمالي الفلوس المطلوبة بسعر المتر المعتمد اللي نازل من الإدارة. بتختار نوع العربية ورقم اللوحة وتدوس حفظ، والعملية بتتسجل فوراً في قاعدة بيانات Supabase مع إيصال حراري فوري!';
+    }
+
+    // 0.1 Pricing & System Settings
+    if (q.includes('سعر') || q.includes('تسعير') || q.includes('تعديل السعر') || q.includes('اعدادات') || q.includes('إعدادات') || q.includes('settings')) {
+      return 'سعر متر الغاز الطبيعي ده إعداد مركزي ومحمي في جدول system_settings في قاعدة البيانات. الفني مقفول عليه التعديل (Read-only) عشان الدقة، ومدير النظام (Admin) بس هو اللي يقدر يغير السعر أو نسبة الضريبة أو اسم المحطة من لوحة التحكم، والتعديل بيسمّع في لحظتها وبشكل دائم على شاشات كل الفنيين!';
+    }
+
+    // 0.2 Supabase & PostgreSQL & RLS Security
+    if (q.includes('supabase') || q.includes('سوبابيز') || q.includes('rls') || q.includes('امان') || q.includes('أمان') || q.includes('قاعدة بيانات') || q.includes('sql')) {
+      return 'المعمارية مبنية على أعلى معايير الأمان باستخدام Supabase PostgreSQL مع تفعيل سياسات Row Level Security (RLS): جدول إعدادات النظام مفيش مخلوق يقدر يعدل فيه غير المدير، وجدول التموينات الفني يقدر يضيف فيه ويشوف ورديته هو بس، والمدير بيشوف كافة التقارير والحركات ويصدرها إكسيل بضغطة زر!';
+    }
+
     // 1. Loyalty & Points
     if (q.includes('نقط') || q.includes('ولاء') || q.includes('نقاط') || q.includes('مكافأ') || q.includes('هدية') || q.includes('هدايا')) {
       return 'يا باشا برنامج الولاء معمول عشان يكافئك على كل متر غاز! مع كل متر غاز بتفوِّله بتاخد نقطة، وسعر المتر حالياً ' + config.gasPricePerMeter + ' جنيه. النقط دي بتتحوش في محفظتك وتقدر تبدلها بـ 5 أو 15 متر غاز مجاني، أو غسيل كيماوي، أو خصم نص القيمة على تغيير الزيت، أو طقم بوجيهات أصلي. كل اللي عليك تعرض الـ QR كود بتاعك للفني وهو بيمسحه في ثانية!';

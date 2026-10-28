@@ -28,20 +28,52 @@ import { AdminModal } from './components/AdminModal';
 import { DriverPortal } from './components/DriverPortal';
 import { TechnicianPortal } from './components/TechnicianPortal';
 import { AdminPortal } from './components/AdminPortal';
+import { FinancialManagementPortal } from './components/FinancialManagementPortal';
+import { FinanceModal } from './components/FinanceModal';
 import { MoenAssistant } from './components/MoenAssistant';
-import { ShieldCheck, Sparkles, Fuel, Car, Wrench, Heart, RotateCcw, MapPin } from 'lucide-react';
+import { SettingsProvider, useSettings } from './context/SettingsContext';
+import { ShieldCheck, Sparkles, Fuel, Car, Wrench, Heart, RotateCcw, MapPin, DollarSign } from 'lucide-react';
 
 export default function App() {
-  const [config, setConfig] = useState<AppConfig>(getAppConfig);
+  return (
+    <SettingsProvider>
+      <MainAppContent />
+    </SettingsProvider>
+  );
+}
+
+function MainAppContent() {
+  const { gasPrice, stationName, updateSetting } = useSettings();
+
+  const [config, setConfig] = useState<AppConfig>(() => {
+    const initial = getAppConfig();
+    return {
+      ...initial,
+      gasPricePerMeter: gasPrice || initial.gasPricePerMeter,
+      stationName: stationName || initial.stationName,
+    };
+  });
   const [driver, setDriver] = useState<DriverProfile>(getDriverProfile);
   const [crew, setCrew] = useState<TechnicianCrewMember[]>(getStationCrew);
   const [rewards, setRewards] = useState<RewardItem[]>(getRewards);
   const [transactions, setTransactions] = useState<FuelingTransaction[]>(getTransactions);
   const [stations, setStations] = useState<CargasStationLocation[]>(getStationLocations);
 
+  // Sync settings context gasPrice and stationName to config
+  useEffect(() => {
+    if (gasPrice && config.gasPricePerMeter !== gasPrice) {
+      setConfig((prev) => ({ ...prev, gasPricePerMeter: gasPrice }));
+    }
+    if (stationName && config.stationName !== stationName) {
+      setConfig((prev) => ({ ...prev, stationName }));
+    }
+  }, [gasPrice, stationName]);
+
   const [currentRole, setCurrentRole] = useState<UserRole>('driver');
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
+  const [isFinanceModalOpen, setIsFinanceModalOpen] = useState(false);
+  const [isFinanceUnlocked, setIsFinanceUnlocked] = useState(false);
 
   // Sync dark mode class
   useEffect(() => {
@@ -51,18 +83,6 @@ export default function App() {
       document.documentElement.classList.remove('dark');
     }
   }, [config.isDarkMode]);
-
-  // Check URL parameters for direct role routing (e.g. WhatsApp message sent to technician)
-  useEffect(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const roleParam = params.get('role');
-      const techIdParam = params.get('techId');
-      if (roleParam === 'technician' || techIdParam) {
-        setCurrentRole('technician');
-      }
-    } catch {}
-  }, []);
 
   const handleToggleTheme = () => {
     const updated = { ...config, isDarkMode: !config.isDarkMode };
@@ -75,12 +95,21 @@ export default function App() {
       setIsAdminModalOpen(true);
       return;
     }
+    if (role === 'finance' && !isFinanceUnlocked && !isAdminUnlocked) {
+      setIsFinanceModalOpen(true);
+      return;
+    }
     setCurrentRole(role);
   };
 
   const handleAdminSuccess = () => {
     setIsAdminUnlocked(true);
     setCurrentRole('admin');
+  };
+
+  const handleFinanceSuccess = () => {
+    setIsFinanceUnlocked(true);
+    setCurrentRole('finance');
   };
 
   const refreshAllData = () => {
@@ -128,6 +157,10 @@ export default function App() {
               saveDriverProfile(d);
             }}
             onRefreshData={refreshAllData}
+            onUpdateConfig={(cfg) => {
+              setConfig(cfg);
+              saveAppConfig(cfg);
+            }}
           />
         )}
 
@@ -150,6 +183,10 @@ export default function App() {
               setTransactions(txs);
               saveTransactions(txs);
             }}
+            onUpdateConfig={(cfg) => {
+              setConfig(cfg);
+              saveAppConfig(cfg);
+            }}
           />
         )}
 
@@ -160,6 +197,7 @@ export default function App() {
             rewards={rewards}
             stationCrew={crew}
             stations={stations}
+            transactions={transactions}
             onUpdateConfig={(cfg) => {
               setConfig(cfg);
               saveAppConfig(cfg);
@@ -179,6 +217,28 @@ export default function App() {
             onRollbackToClassic={handleRollback}
           />
         )}
+
+        {/* Dedicated Standalone Financial Management Portal (بوابة الإدارة المالية المعتمدة) */}
+        {currentRole === 'finance' && (
+          <FinancialManagementPortal
+            config={config}
+            stations={stations}
+            transactions={transactions}
+            onUpdateStations={(sts) => {
+              setStations(sts);
+              saveStationLocations(sts);
+            }}
+            onUpdateConfig={(cfg) => {
+              setConfig(cfg);
+              saveAppConfig(cfg);
+            }}
+            isStandalone={true}
+            onLogoutFinance={() => {
+              setCurrentRole('driver');
+              setIsFinanceUnlocked(false);
+            }}
+          />
+        )}
       </main>
 
       {/* Secret Admin Authentication Modal (0000) */}
@@ -187,6 +247,15 @@ export default function App() {
         onClose={() => setIsAdminModalOpen(false)}
         correctPin={config.adminPin}
         onSuccess={handleAdminSuccess}
+      />
+
+      {/* Financial Management Authentication Modal (1234) */}
+      <FinanceModal
+        isOpen={isFinanceModalOpen}
+        onClose={() => setIsFinanceModalOpen(false)}
+        correctPin={config.financePin || '1234'}
+        adminPin={config.adminPin || '0000'}
+        onSuccess={handleFinanceSuccess}
       />
 
       {/* Egyptian Voice & Interactive Assistant "مُعِين" */}

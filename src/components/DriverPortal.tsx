@@ -61,11 +61,21 @@ import {
   saveRedemptions,
   getDriverStationAndPumpFuelingCounts,
   calculateDistanceKm,
+  DEFAULT_DRIVER_SECTIONS,
   DEFAULT_DRIVER_SECTIONS_ORDER,
 } from '../services/storageService';
 import { CargasStationsMap } from './CargasStationsMap';
+import { InlineNearestStationMap } from './InlineNearestStationMap';
 import { CargasNavApp } from '../navigation/CargasNavApp';
 import { CustomerFeedbackModal } from './CustomerFeedbackModal';
+import { AppointmentBookingModal } from './AppointmentBookingModal';
+
+import {
+  DynamicInPageLayoutEditor,
+  SectionEditControls,
+  AdminPinVerifyModal,
+} from './DynamicInPageLayoutEditor';
+import { SectionLayoutItem, SectionColSpan, SectionHeightMode } from '../types';
 
 interface DriverPortalProps {
   config: AppConfig;
@@ -76,6 +86,7 @@ interface DriverPortalProps {
   crew: TechnicianCrewMember[];
   onUpdateDriver: (driver: DriverProfile) => void;
   onRefreshData: () => void;
+  onUpdateConfig?: (config: AppConfig) => void;
 }
 
 export type DriverPageView = 'home' | 'map' | 'loyalty' | 'maintenance' | 'history' | 'feedback' | 'complaints';
@@ -89,6 +100,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
   crew,
   onUpdateDriver,
   onRefreshData,
+  onUpdateConfig,
 }) => {
   const [activePage, setActivePage] = useState<DriverPageView>('home');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
@@ -106,6 +118,101 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
 
   // Station Navigation Modal State (Wasalny Hero Popup)
   const [isStationNavModalOpen, setIsStationNavModalOpen] = useState(false);
+  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+
+  // Dynamic In-Page Layout Customization State (5-Clicks Gesture by Admin)
+  const [isLayoutEditMode, setIsLayoutEditMode] = useState(false);
+  const [isAdminPinModalOpen, setIsAdminPinModalOpen] = useState(false);
+  const [clickCount, setClickCount] = useState(0);
+  const [lastClickTime, setLastClickTime] = useState(0);
+
+  // Sections State (التحكم المباشر في ترتيب ومقاسات وإظهار/إخفاء المساحات)
+  const [driverSections, setDriverSections] = useState<SectionLayoutItem[]>(() => {
+    return (config.layoutSettings?.driverSections && config.layoutSettings.driverSections.length > 0)
+      ? config.layoutSettings.driverSections
+      : DEFAULT_DRIVER_SECTIONS;
+  });
+
+  useEffect(() => {
+    if (config.layoutSettings?.driverSections && config.layoutSettings.driverSections.length > 0) {
+      setDriverSections(config.layoutSettings.driverSections);
+    }
+  }, [config.layoutSettings?.driverSections]);
+
+  const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
+
+  // 5-Clicks Handler on Any Page Space (بالضغط على الصفحة خمس مرات متتالية)
+  const handlePageTapGesture = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button, input, textarea, select, a, [draggable]')) return;
+
+    const now = Date.now();
+    if (now - lastClickTime < 2500) {
+      const nextCount = clickCount + 1;
+      setClickCount(nextCount);
+      if (nextCount >= 5) {
+        setClickCount(0);
+        setIsAdminPinModalOpen(true);
+      }
+    } else {
+      setClickCount(1);
+    }
+    setLastClickTime(now);
+  };
+
+  // Section Ordering & Resizing Handlers
+  const handleMoveUp = (id: string) => {
+    const sorted = [...driverSections].sort((a, b) => a.order - b.order);
+    const index = sorted.findIndex((s) => s.id === id);
+    if (index <= 0) return;
+    const prev = sorted[index - 1];
+    const curr = sorted[index];
+    const prevOrder = prev.order;
+    prev.order = curr.order;
+    curr.order = prevOrder;
+    setDriverSections([...driverSections]);
+  };
+
+  const handleMoveDown = (id: string) => {
+    const sorted = [...driverSections].sort((a, b) => a.order - b.order);
+    const index = sorted.findIndex((s) => s.id === id);
+    if (index === -1 || index >= sorted.length - 1) return;
+    const next = sorted[index + 1];
+    const curr = sorted[index];
+    const nextOrder = next.order;
+    next.order = curr.order;
+    curr.order = nextOrder;
+    setDriverSections([...driverSections]);
+  };
+
+  const handleChangeColSpan = (id: string, colSpan: SectionColSpan) => {
+    setDriverSections(driverSections.map((s) => (s.id === id ? { ...s, colSpan } : s)));
+  };
+
+  const handleChangeHeightMode = (id: string, heightMode: SectionHeightMode) => {
+    setDriverSections(driverSections.map((s) => (s.id === id ? { ...s, heightMode } : s)));
+  };
+
+  const handleToggleVisibility = (id: string) => {
+    setDriverSections(driverSections.map((s) => (s.id === id ? { ...s, visible: !s.visible } : s)));
+  };
+
+  const handleDragStart = (id: string) => {
+    setDraggedSectionId(id);
+  };
+
+  const handleDrop = (targetId: string) => {
+    if (!draggedSectionId || draggedSectionId === targetId) return;
+    const sorted = [...driverSections].sort((a, b) => a.order - b.order);
+    const sourceIndex = sorted.findIndex((s) => s.id === draggedSectionId);
+    const targetIndex = sorted.findIndex((s) => s.id === targetId);
+    if (sourceIndex === -1 || targetIndex === -1) return;
+    const [moved] = sorted.splice(sourceIndex, 1);
+    sorted.splice(targetIndex, 0, moved);
+    const reordered = sorted.map((s, idx) => ({ ...s, order: idx + 1 }));
+    setDriverSections(reordered);
+    setDraggedSectionId(null);
+  };
 
   // GPS Auto-detected nearest station state
   const [driverGpsLocation, setDriverGpsLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -260,10 +367,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
       return;
     }
 
-    const isFreeMeters = reward.category === 'meters' || reward.title.includes('متر') || reward.title.includes('أمتار');
-    const freeMetersCount = reward.freeMetersEquivalent || (isFreeMeters ? Math.max(5, Math.round(reward.pointsCost / 10)) : 0);
-    const gasPrice = config.gasPricePerMeter || 13;
-    const calculatedEgp = freeMetersCount > 0 ? freeMetersCount * gasPrice : (reward.estimatedEgpValue || reward.pointsCost * 0.5);
+    const calculatedEgp = reward.estimatedEgpValue || reward.pointsCost * 0.5;
 
     const redemptionCode = 'VOUCH-' + Math.floor(100000 + Math.random() * 900000);
     const newRedemption: RewardRedemption = {
@@ -279,7 +383,6 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
       createdAt: new Date().toISOString(),
       isUsed: false,
       category: reward.category,
-      freeMeters: freeMetersCount,
       calculatedEgpValue: calculatedEgp,
     };
 
@@ -395,7 +498,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
       visible: v.showServiceRating,
     },
     {
-      id: 'maintenance' as DriverPageView, // Used for routing complaints in handler
+      id: 'complaints' as DriverPageView,
       label: 'صندوق الشكاوى والمقترحات',
       sub: 'تواصل مباشر مع الإدارة 19058 📨',
       icon: <MessageSquare className="w-4 h-4 text-rose-500" />,
@@ -404,8 +507,18 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
   ];
 
   return (
-    <div className="space-y-6">
-      
+    <div className="space-y-6" onClick={handlePageTapGesture}>
+      {/* In-Page Dynamic Layout Editor Toolbar (نشط بالضغط 5 مرات متتالية لمدير النظام) */}
+      <DynamicInPageLayoutEditor
+        pageType="driver"
+        config={config}
+        onUpdateConfig={onUpdateConfig}
+        onSectionsChange={(updated) => setDriverSections(updated)}
+        currentSections={driverSections}
+        isEditMode={isLayoutEditMode}
+        onToggleEditMode={(enabled) => setIsLayoutEditMode(enabled)}
+      />
+
       {/* Top Bars: Only shown when NOT in enlarged map view */}
       {activePage !== 'map' && (
         <>
@@ -726,304 +839,561 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
         /* Main Layout with Customer Menu Icon and Full-Width Viewport */
         <div className="space-y-6">
           
-          {/* Top Customer Navigation Bar featuring the "قائمة العميل" Icon */}
-          <div className="bg-white rounded-3xl p-3.5 sm:p-4 shadow-sm border border-slate-200/90 flex flex-wrap items-center justify-between gap-3">
+          {/* Top Customer Navigation Bar with Direct Section Tabs */}
+          <div className="bg-white rounded-3xl p-3 sm:p-4 shadow-sm border border-slate-200/90 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
             
-            {/* The Main "قائمة العميل" Icon Button */}
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setIsCustomerMenuOpen(true)}
-                className="flex items-center gap-2.5 sm:gap-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-600 text-white px-4 sm:px-5 py-2.5 rounded-2xl shadow-md transition-all duration-200 transform hover:scale-[1.02] active:scale-95 group border border-emerald-400/30"
-                title="اضغط هنا لفتح قائمة العميل وإظهار كافة الأيقونات والخدمات"
-              >
-                <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center text-lg group-hover:rotate-12 transition">
-                  🚗
-                </div>
-                <div className="text-right">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs sm:text-sm font-black">قائمة العميل</span>
-                    <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-xs">
-                      اضغط لعرض الأيقونات ⚡
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-emerald-100 block font-light">
-                    انقر لإظهار باقي الأيقونات والخدمات
-                  </span>
-                </div>
-                <ChevronDown className="w-4 h-4 text-emerald-200 mr-1 group-hover:translate-y-0.5 transition" />
-              </button>
+            {/* Direct Horizontal Tabs for Switching Between Pages */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0 scrollbar-none">
+              {navMenuItems
+                .filter((item) => item.visible)
+                .map((item) => {
+                  const isActive = activePage === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        if (item.id === 'feedback') {
+                          setFeedbackInitialTab('rating');
+                          setIsFeedbackModalOpen(true);
+                        } else if (item.id === 'complaints') {
+                          setFeedbackInitialTab('complaint');
+                          setIsFeedbackModalOpen(true);
+                        } else {
+                          setActivePage(item.id);
+                        }
+                      }}
+                      className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all shrink-0 active:scale-95 ${
+                        isActive
+                          ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md shadow-emerald-600/25 border border-emerald-500'
+                          : 'bg-slate-50 hover:bg-emerald-50/60 text-slate-700 border border-slate-200/90 hover:border-emerald-300'
+                      }`}
+                      title={item.sub}
+                    >
+                      <span>{item.icon}</span>
+                      <span>{item.label}</span>
+                      {item.badge && (
+                        <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-2xs">
+                          {item.badge}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
             </div>
 
-            {/* Active Section Label & Quick Stats */}
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200/90 px-3.5 py-2 rounded-2xl text-xs font-bold text-slate-700">
-                <span className="text-slate-400 text-[11px] hidden sm:inline">الصفحة المعروضة:</span>
-                <span className="text-emerald-700 font-black flex items-center gap-1.5">
-                  {navMenuItems.find((m) => m.id === activePage)?.icon}
-                  <span>{navMenuItems.find((m) => m.id === activePage)?.label}</span>
-                </span>
-              </div>
-
+            {/* Quick Stats & Profile Edit Button */}
+            <div className="flex items-center justify-between lg:justify-end gap-2.5 shrink-0 border-t lg:border-t-0 pt-2 lg:pt-0 border-slate-100">
               <div className="bg-emerald-50 border border-emerald-200 px-3.5 py-2 rounded-2xl text-xs font-black text-emerald-800 flex items-center gap-1.5">
                 <span className="text-sm">🪙</span>
                 <span>{driver.points} نقطة ولاء</span>
               </div>
+
+              {v.showEditProfile && (
+                <button
+                  onClick={() => {
+                    setEditName(driver.name);
+                    setEditPhone(driver.phone);
+                    setEditPlate(driver.carPlate);
+                    setEditModel(driver.carModel);
+                    setEditOdo(driver.odometerKm);
+                    setEditCapacity(driver.cngCylinderCapacity);
+                    setIsEditProfileOpen(true);
+                  }}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/90 text-xs font-bold px-3 py-2 rounded-2xl transition flex items-center gap-1.5 active:scale-95"
+                  title="تعديل بيانات الملف والسيارة"
+                >
+                  <Edit3 className="w-3.5 h-3.5 text-slate-600" />
+                  <span className="hidden sm:inline">تعديل السيارة</span>
+                </button>
+              )}
             </div>
           </div>
 
           {/* Dynamic Content Viewport (Full Width) */}
           <div className="space-y-6">
 
-            {/* View 1: Home & Quick QR */}
+            {/* View 1: Dynamic Home Sections Driven by In-Page Layout Customizer */}
             {activePage === 'home' && (
-              <div className="space-y-6 animate-in fade-in">
-                
-                {/* Personal QR + Stats */}
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-                  
-                  {/* QR Card */}
-                  <div className="md:col-span-5 bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 flex flex-col items-center justify-between space-y-4 text-center">
-                    <div className="w-full flex items-center justify-between border-b border-slate-100 pb-3">
-                      <div className="text-right">
-                        <h3 className="font-black text-sm text-slate-900 flex items-center gap-1.5">
-                          <QrCode className="w-4 h-4 text-emerald-600" />
-                          كود الـ QR للتموين السريع
-                        </h3>
-                        <p className="text-[11px] text-slate-500">
-                          اعرض هذا الكود لفني التموين لمسحه
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => setIsQrModalOpen(true)}
-                        className="p-2 text-slate-400 hover:text-emerald-600 rounded-xl hover:bg-slate-50 transition"
-                        title="تكبير الكود"
-                      >
-                        <Maximize2 className="w-4 h-4" />
-                      </button>
-                    </div>
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-6 animate-in fade-in">
+                {[...driverSections]
+                  .sort((a, b) => a.order - b.order)
+                  .filter((sec) => sec.visible || isLayoutEditMode)
+                  .map((section) => {
+                    const colClass =
+                      section.colSpan === 12
+                        ? 'col-span-12'
+                        : section.colSpan === 7
+                        ? 'col-span-12 md:col-span-7'
+                        : section.colSpan === 6
+                        ? 'col-span-12 md:col-span-6'
+                        : section.colSpan === 5
+                        ? 'col-span-12 md:col-span-5'
+                        : 'col-span-12 md:col-span-4';
 
-                    <div className="p-3 bg-gradient-to-tr from-emerald-50 via-teal-50 to-slate-50 rounded-2xl border-2 border-dashed border-emerald-300 flex items-center justify-center">
-                      {qrDataUrl ? (
-                        <img
-                          src={qrDataUrl}
-                          alt="QR كارجاس السائق"
-                          className="w-52 h-52 rounded-xl shadow-xs"
-                        />
-                      ) : (
-                        <div className="w-52 h-52 flex items-center justify-center text-slate-400 text-xs">
-                          جارٍ التوليد...
-                        </div>
-                      )}
-                    </div>
+                    const isDragging = draggedSectionId === section.id;
 
-                    <div className="w-full bg-slate-50 rounded-2xl p-3 border border-slate-200/80 space-y-1.5 text-xs text-right">
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 text-[11px]">رقم اللوحة:</span>
-                        <span className="font-black text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
-                          {driver.carPlate}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 text-[11px]">السيارة:</span>
-                        <span className="font-bold text-slate-800">{driver.carModel}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 text-[11px]">سعة الأسطوانة / العداد:</span>
-                        <span className="font-mono font-bold text-emerald-700">
-                          {driver.cngCylinderCapacity}L • {driver.odometerKm.toLocaleString()} كم
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => setIsQrModalOpen(true)}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-xs"
-                    >
-                      عرض الكود بملء الشاشة 🔍
-                    </button>
-                  </div>
-
-                  {/* Grand Wasalny Station Card raised to fill the space beside QR Code */}
-                  <div className="md:col-span-7 bg-gradient-to-br from-slate-900 via-slate-850 to-emerald-950 text-white rounded-3xl p-5 sm:p-6 shadow-2xl border-2 border-emerald-500/40 relative overflow-hidden flex flex-col justify-between space-y-4 group">
-                    {/* Map Graphic Preview Background */}
-                    <div
-                      className="absolute inset-0 bg-cover bg-center opacity-30 mix-blend-luminosity filter saturate-150 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
-                      style={{
-                        backgroundImage: `url('https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=1200&q=80')`,
-                      }}
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-tr from-slate-950 via-slate-900/90 to-emerald-950/80 pointer-events-none" />
-
-                    {/* Header: Cargas Logo Badge + Nearest Station Specs */}
-                    <div className="relative z-10 flex items-start gap-4">
+                    return (
                       <div
-                        onClick={() => setIsStationNavModalOpen(true)}
-                        className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-tr from-emerald-600 via-teal-700 to-emerald-500 p-2 border-2 border-emerald-400/60 shadow-xl flex flex-col items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition shrink-0 relative group/icon"
-                        title="اضغط لمعاينة تفاصيل المحطة وبدء الملاحة"
+                        key={section.id}
+                        className={`${colClass} transition-all duration-200 ${
+                          isLayoutEditMode
+                            ? 'p-3 rounded-3xl border-2 border-dashed border-amber-400/90 bg-amber-50/15 shadow-md relative'
+                            : ''
+                        } ${!section.visible && isLayoutEditMode ? 'opacity-40 grayscale' : ''} ${
+                          isDragging ? 'opacity-40 scale-98' : ''
+                        }`}
+                        onDragOver={(e) => {
+                          if (isLayoutEditMode) {
+                            e.preventDefault();
+                          }
+                        }}
+                        onDrop={() => {
+                          if (isLayoutEditMode) {
+                            handleDrop(section.id);
+                          }
+                        }}
                       >
-                        {config.wasalnyConfig?.logoUrl ? (
-                          <img src={config.wasalnyConfig.logoUrl} alt="شعار كارجاس" className="w-full h-full object-contain" />
-                        ) : (
-                          <div className="text-center">
-                            <span className="text-2xl sm:text-3xl block group-hover/icon:rotate-12 transition">⛽</span>
-                            <span className="text-[9px] font-black text-amber-300 font-mono tracking-tighter">CARGAS</span>
+                        {/* Section Edit Header Overlay (سحب وإفلات وتكبير وتصغير وإخفاء) */}
+                        <SectionEditControls
+                          section={section}
+                          isEditMode={isLayoutEditMode}
+                          onMoveUp={() => handleMoveUp(section.id)}
+                          onMoveDown={() => handleMoveDown(section.id)}
+                          onChangeColSpan={(span) => handleChangeColSpan(section.id, span)}
+                          onChangeHeightMode={(mode) => handleChangeHeightMode(section.id, mode)}
+                          onToggleVisibility={() => handleToggleVisibility(section.id)}
+                          onDragStart={() => handleDragStart(section.id)}
+                        />
+                        {/* 1. Wasalny Live Nearest Station Map */}
+                        {section.id === 'wasalny_hero' && v.showNearestStationMap && (
+                          <InlineNearestStationMap
+                            station={activeDetectedStation || stations[0]}
+                            allStations={stations}
+                            userLocation={driverGpsLocation}
+                            distanceKm={gpsDistanceKm}
+                            config={config}
+                            onNavigateToMapPage={() => setActivePage('map')}
+                            onPlayVoiceGuidance={handlePlayWadahGuidance}
+                            onLocateUser={() => {
+                              if (!navigator.geolocation) {
+                                alert('متصفحك لا يدعم تحديد الموقع الجغرافي GPS.');
+                                return;
+                              }
+                              navigator.geolocation.getCurrentPosition(
+                                (pos) => {
+                                  const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                                  setDriverGpsLocation(coords);
+                                  if (stations && stations.length > 0) {
+                                    let closest = stations[0];
+                                    let minD = calculateDistanceKm(coords.lat, coords.lng, closest.latitude, closest.longitude);
+                                    for (let i = 1; i < stations.length; i++) {
+                                      const d = calculateDistanceKm(coords.lat, coords.lng, stations[i].latitude, stations[i].longitude);
+                                      if (d < minD) {
+                                        minD = d;
+                                        closest = stations[i];
+                                      }
+                                    }
+                                    setGpsNearestStation(closest);
+                                    setGpsDistanceKm(Number(minD.toFixed(1)));
+                                  }
+                                },
+                                (err) => console.warn('Locate error:', err),
+                                { timeout: 8000, enableHighAccuracy: true }
+                              );
+                            }}
+                          />
+                        )}
+
+                        {/* 2. QR Vehicle Card */}
+                        {section.id === 'qr_vehicle_card' && (
+                          <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 flex flex-col items-center justify-between space-y-4 text-center h-full">
+                            <div className="w-full flex items-center justify-between border-b border-slate-100 pb-3">
+                              <div className="text-right">
+                                <h3 className="font-black text-sm text-slate-900 flex items-center gap-1.5">
+                                  <QrCode className="w-4 h-4 text-emerald-600" />
+                                  كود الـ QR للتموين السريع
+                                </h3>
+                                <p className="text-[11px] text-slate-500">
+                                  اعرض هذا الكود لفني التموين لمسحه
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => setIsQrModalOpen(true)}
+                                className="p-2 text-slate-400 hover:text-emerald-600 rounded-xl hover:bg-slate-50 transition"
+                                title="تكبير الكود"
+                              >
+                                <Maximize2 className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            <div className="p-3 bg-gradient-to-tr from-emerald-50 via-teal-50 to-slate-50 rounded-2xl border-2 border-dashed border-emerald-300 flex items-center justify-center">
+                              {qrDataUrl ? (
+                                <img
+                                  src={qrDataUrl}
+                                  alt="QR كارجاس السائق"
+                                  className="w-52 h-52 rounded-xl shadow-xs"
+                                />
+                              ) : (
+                                <div className="w-52 h-52 flex items-center justify-center text-slate-400 text-xs">
+                                  جارٍ التوليد...
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="w-full bg-slate-50 rounded-2xl p-3 border border-slate-200/80 space-y-1.5 text-xs text-right">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-500 text-[11px]">رقم اللوحة:</span>
+                                <span className="font-black text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                  {driver.carPlate}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-500 text-[11px]">السيارة:</span>
+                                <span className="font-bold text-slate-800">{driver.carModel}</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-500 text-[11px]">سعة الأسطوانة / العداد:</span>
+                                <span className="font-mono font-bold text-emerald-700">
+                                  {driver.cngCylinderCapacity}L • {driver.odometerKm.toLocaleString()} كم
+                                </span>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => setIsQrModalOpen(true)}
+                              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-xs"
+                            >
+                              عرض الكود بملء الشاشة 🔍
+                            </button>
                           </div>
                         )}
-                        <span className="absolute -top-1 -right-1 flex h-4 w-4">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-400 border-2 border-slate-900"></span>
-                        </span>
-                      </div>
 
-                      <div className="space-y-1.5 flex-1 text-right">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                            <Compass className="w-3 h-3 text-emerald-400 animate-spin" style={{ animationDuration: '6s' }} />
-                            <span>أكبر محطة كارجاس CNG • رادار حي</span>
-                          </span>
-                          {gpsDistanceKm !== null && (
-                            <span className="bg-teal-500/20 text-teal-200 border border-teal-400/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                              على بُعد {gpsDistanceKm} كم 📍
-                            </span>
-                          )}
-                          {activeDetectedStation?.crowdLevel && (
-                            <span className="bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                              الزحام: {activeDetectedStation.crowdLevel} 🟢
-                            </span>
-                          )}
-                        </div>
+                        {/* 3. Golden Loyalty Card */}
+                        {section.id === 'golden_card' && v.showGoldenCard && (
+                          <div className="bg-gradient-to-tr from-amber-600 via-amber-500 to-yellow-400 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden border border-amber-300">
+                            <div className="flex items-start justify-between relative z-10">
+                              <div>
+                                <span className="text-[10px] uppercase tracking-wider font-extrabold bg-black/20 px-2.5 py-1 rounded-full border border-white/30">
+                                  CARGAS VIP LOYALTY CARD
+                                </span>
+                                <p className="text-2xl font-black mt-2 tracking-tight">
+                                  كارت كارجاس الذهبي
+                                </p>
+                              </div>
+                              <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-2xl shadow-inner border border-white/40">
+                                ⛽
+                              </div>
+                            </div>
 
-                        <h3 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
-                          <span>{config.wasalnyConfig?.buttonLabel || 'وصلني لأقرب محطة'}:</span>
-                          <span className="text-emerald-300">{activeStationName}</span>
-                        </h3>
-                        <p className="text-xs text-slate-300 font-light flex items-center gap-1.5">
-                          <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                          <span>{activeDetectedStation?.address || 'مصر — شبكة محطات كارجاس CNG الوطنية'}</span>
-                          {activeDetectedStation?.city && <span className="text-slate-400">({activeDetectedStation.city})</span>}
-                        </p>
-                      </div>
-                    </div>
+                            <div className="mt-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4 relative z-10">
+                              <div>
+                                <p className="text-xs text-amber-100 font-medium">
+                                  {config.customTexts.pointsBannerTitle}
+                                </p>
+                                <div className="flex items-baseline gap-2 mt-0.5">
+                                  <span className="text-4xl sm:text-5xl font-black tracking-tight text-white drop-shadow-sm">
+                                    {driver.points}
+                                  </span>
+                                  <span className="text-sm font-bold text-amber-100">نقطة كارجاس</span>
+                                </div>
+                              </div>
 
-                    {/* Services Strip */}
-                    <div className="relative z-10 flex flex-wrap items-center gap-2 pt-2 border-t border-slate-700/80 text-[11px] text-emerald-200">
-                      <span className="bg-white/10 px-2.5 py-1 rounded-xl">تموين غاز سريع ⚡</span>
-                      <span className="bg-white/10 px-2.5 py-1 rounded-xl">زيوت معتمدة 🛢️</span>
-                      <span className="bg-white/10 px-2.5 py-1 rounded-xl">فحص الأسطوانات 🛡️</span>
-                      <span className="bg-white/10 px-2.5 py-1 rounded-xl">خدمة 24/7 ⏱️</span>
-                    </div>
+                              <div className="bg-black/20 backdrop-blur-md rounded-2xl p-3 border border-white/20 text-right">
+                                <span className="text-[10px] text-amber-100 block">القيمة التقديرية:</span>
+                                <span className="text-base font-extrabold text-white">
+                                  تعادل {(driver.points * 1.3).toFixed(0)} جنيه
+                                </span>
+                              </div>
+                            </div>
 
-                    {/* Actions */}
-                    <div className="relative z-10 flex flex-wrap items-center gap-2.5 pt-2">
-                      {config.wasalnyConfig?.voiceGuidance !== 'silent' && (
-                        <button
-                          type="button"
-                          onClick={handlePlayWadahGuidance}
-                          className="flex items-center gap-1.5 bg-amber-400/20 hover:bg-amber-400/30 text-amber-200 border border-amber-400/40 text-xs font-bold px-3 py-2.5 rounded-2xl transition active:scale-95"
-                          title="استمع لإرشاد وضاح الصوتي باللهجة المصرية"
-                        >
-                          <Volume2 className="w-4 h-4 text-amber-300" />
-                          <span>صوت وضاح 🗣️</span>
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => setIsStationNavModalOpen(true)}
-                        className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs sm:text-sm px-4 py-2.5 rounded-2xl transition-all shadow-xl active:scale-95 group/btn"
-                      >
-                        <Navigation className="w-4 h-4 text-slate-950 group-hover/btn:translate-x-1 transition" />
-                        <span>ابدأ الملاحة وتفاصيل المحطة 🗺️</span>
-                      </button>
-
-                      <button
-                        onClick={() => setActivePage('map')}
-                        className="bg-white/15 hover:bg-white/25 text-white border border-white/20 text-xs font-bold px-3 py-2.5 rounded-2xl transition active:scale-95 flex items-center gap-1.5"
-                        title="تكبير الخريطة وفتح تطبيق وصّلني"
-                      >
-                        <Maximize2 className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">تكبير الخريطة ⛶</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Golden Card & Metrics directly below the top QR + Wasalny row */}
-                <div className="space-y-4">
-                  {v.showGoldenCard && (
-                    <div className="bg-gradient-to-tr from-amber-600 via-amber-500 to-yellow-400 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden border border-amber-300">
-                      <div className="flex items-start justify-between relative z-10">
-                        <div>
-                          <span className="text-[10px] uppercase tracking-wider font-extrabold bg-black/20 px-2.5 py-1 rounded-full border border-white/30">
-                            CARGAS VIP LOYALTY CARD
-                          </span>
-                          <p className="text-2xl font-black mt-2 tracking-tight">
-                            كارت كارجاس الذهبي
-                          </p>
-                        </div>
-                        <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-2xl shadow-inner border border-white/40">
-                          ⛽
-                        </div>
-                      </div>
-
-                      <div className="mt-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4 relative z-10">
-                        <div>
-                          <p className="text-xs text-amber-100 font-medium">
-                            {config.customTexts.pointsBannerTitle}
-                          </p>
-                          <div className="flex items-baseline gap-2 mt-0.5">
-                            <span className="text-4xl sm:text-5xl font-black tracking-tight text-white drop-shadow-sm">
-                              {driver.points}
-                            </span>
-                            <span className="text-sm font-bold text-amber-100">نقطة كارجاس</span>
+                            <div className="mt-5 pt-4 border-t border-white/20 flex items-center justify-between text-xs text-amber-100 font-medium relative z-10">
+                              <span>كود العميل: {driver.id}</span>
+                              <button
+                                onClick={() => setActivePage('loyalty')}
+                                className="bg-black/20 hover:bg-black/30 text-white font-bold px-3 py-1 rounded-xl transition text-[11px]"
+                              >
+                                استبدال الهدايا ←
+                              </button>
+                            </div>
                           </div>
-                        </div>
+                        )}
 
-                        <div className="bg-black/20 backdrop-blur-md rounded-2xl p-3 border border-white/20 text-right">
-                          <span className="text-[10px] text-amber-100 block">القيمة التقديرية:</span>
-                          <span className="text-base font-extrabold text-white">
-                            تعادل {(driver.points * 1.3).toFixed(0)} جنيه
-                          </span>
-                        </div>
+                        {/* 4. Fueling Count Stats & Total Savings */}
+                        {section.id === 'fueling_count_stats' && (
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs text-center space-y-1">
+                                <span className="text-xs text-slate-500 font-medium block">إجمالي الغاز المُمون</span>
+                                <span className="text-lg sm:text-xl font-black text-slate-900 font-mono">
+                                  {driver.totalMetersFueled.toLocaleString()}
+                                </span>
+                                <span className="text-[10px] text-emerald-600 font-bold block">متر مكعب m³</span>
+                              </div>
+
+                              <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs text-center space-y-1">
+                                <span className="text-xs text-slate-500 font-medium block">إجمالي الإنفاق</span>
+                                <span className="text-lg sm:text-xl font-black text-slate-900 font-mono">
+                                  {driver.totalSpentEgp.toLocaleString()}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-bold block">جنيه مصري</span>
+                              </div>
+
+                              <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs text-center space-y-1">
+                                <span className="text-xs text-slate-500 font-medium block">الوفورات المحققة</span>
+                                <span className="text-lg sm:text-xl font-black text-emerald-600 font-mono">
+                                  ~{(driver.totalMetersFueled * 6.5).toLocaleString()}
+                                </span>
+                                <span className="text-[10px] text-emerald-700 font-bold block">جنيه وفر!</span>
+                              </div>
+                            </div>
+
+                            {v.showFuelingCountStats && (
+                              <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-slate-50 p-4 rounded-2xl border border-emerald-200/70 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-lg">
+                                    🔄
+                                  </div>
+                                  <div>
+                                    <h4 className="font-black text-xs sm:text-sm text-slate-900">
+                                      تكرار التموين في محطة {activeStationName}
+                                    </h4>
+                                    <p className="text-[11px] text-slate-600">
+                                      تم التموين من هذه المحطة <span className="font-bold text-emerald-700 font-mono">#{currentStationCounts.stationCount}</span> مرة
+                                    </p>
+                                  </div>
+                                </div>
+                                <span className="bg-white px-3 py-1 rounded-xl border border-emerald-200 text-xs font-bold text-emerald-800">
+                                  عميل كارجاس الوفي ⭐
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* 5. Rewards Bank Quick Strip */}
+                        {section.id === 'rewards_bank' && v.showRewardsBank && (
+                          <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 space-y-4">
+                            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                              <div className="flex items-center gap-2">
+                                <Gift className="w-5 h-5 text-emerald-600" />
+                                <div>
+                                  <h3 className="font-black text-sm text-slate-900">بنك مكافآت وأمتار كارجاس المجانية</h3>
+                                  <p className="text-[11px] text-slate-500">استبدل نقاطك بأمتار غاز أو هدايا معتمدة</p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => setActivePage('loyalty')}
+                                className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                              >
+                                <span>عرض الكل</span>
+                                <ChevronLeft className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                              {rewards.slice(0, 3).map((r) => {
+                                const canAfford = driver.points >= r.pointsCost;
+                                return (
+                                  <div key={r.id} className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/50 flex items-center justify-between gap-3">
+                                    <div>
+                                      <h4 className="font-black text-xs text-slate-900">{r.title}</h4>
+                                      <span className="text-[10px] text-amber-700 font-bold">{r.pointsCost} نقطة</span>
+                                    </div>
+                                    <button
+                                      onClick={() => handleRedeemReward(r)}
+                                      disabled={!canAfford}
+                                      className={`text-[11px] font-bold px-3 py-1.5 rounded-xl transition ${
+                                        canAfford ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                                      }`}
+                                    >
+                                      {canAfford ? 'استبدال' : 'نقاط غير كافية'}
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 6. Maintenance Schedule Quick Summary */}
+                        {section.id === 'maintenance_schedule' && v.showMaintenanceSchedule && (
+                          <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 space-y-4">
+                            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                              <div className="flex items-center gap-2">
+                                <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                                <div>
+                                  <h3 className="font-black text-sm text-slate-900">جدول الصيانة الدورية وتنبيهات الأمان</h3>
+                                  <p className="text-[11px] text-slate-500">حالة دورات صيانة الغاز الطبيعي والسيارة</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setIsBookingModalOpen(true)}
+                                  className="text-xs font-black bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-3 py-1.5 rounded-xl shadow-xs transition flex items-center gap-1 active:scale-95"
+                                >
+                                  <Calendar className="w-3.5 h-3.5" />
+                                  <span>حجز موعد فحص/صيانة 📅</span>
+                                </button>
+                                <button
+                                  onClick={() => setActivePage('maintenance')}
+                                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                                >
+                                  <span>الجدول</span>
+                                  <ChevronLeft className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {driver.maintenanceSchedule.slice(0, 2).map((item) => {
+                                const kmRemaining = item.nextDueKm - driver.odometerKm;
+                                return (
+                                  <div key={item.id} className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/50 space-y-2">
+                                    <div className="flex items-center justify-between text-xs">
+                                      <span className="font-bold text-slate-800">{item.name}</span>
+                                      <span className={`font-mono text-[11px] font-bold ${kmRemaining <= 500 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                                        {kmRemaining > 0 ? `متبقي ${kmRemaining.toLocaleString()} كم` : 'موعد الصيانة حان'}
+                                      </span>
+                                    </div>
+                                    <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                                      <div
+                                        className={`h-full ${kmRemaining <= 500 ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                                        style={{ width: `${Math.min(100, Math.max(10, 100 - (kmRemaining / item.intervalKm) * 100))}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 7. Fueling History Quick Preview */}
+                        {section.id === 'fueling_history' && v.showFuelingHistory && (
+                          <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 space-y-4">
+                            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                              <div className="flex items-center gap-2">
+                                <Clock className="w-5 h-5 text-emerald-600" />
+                                <div>
+                                  <h3 className="font-black text-sm text-slate-900">سجل آخر التفويلات</h3>
+                                  <p className="text-[11px] text-slate-500">أحدث عمليات تموين الغاز المسجلة</p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => setActivePage('history')}
+                                className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                              >
+                                <span>السجل بالكامل</span>
+                                <ChevronLeft className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            <div className="divide-y divide-slate-100">
+                              {transactions.slice(0, 3).map((tx) => (
+                                <div key={tx.id} className="py-2.5 flex items-center justify-between text-xs">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
+                                      ⛽
+                                    </span>
+                                    <div>
+                                      <span className="font-bold text-slate-800">{tx.stationName} (مضخة #{tx.pumpNumber})</span>
+                                      <span className="text-[10px] text-slate-400 block font-mono">
+                                        {new Date(tx.timestamp).toLocaleDateString('ar-EG')}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="text-left font-mono">
+                                    <span className="font-black text-slate-900">{tx.metersQuantity} م³</span>
+                                    <span className="text-[10px] text-emerald-600 font-bold block">+{tx.pointsEarned} نقطة</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 8. Promotional Banner */}
+                        {section.id === 'promotional_banner' && v.showPromotionalBanner && activeCampaigns.length > 0 && (
+                          <div className="relative overflow-hidden rounded-3xl shadow-lg border border-slate-700/50">
+                            {(() => {
+                              const camp = activeCampaigns[currentCampaignIndex] || activeCampaigns[0];
+                              return (
+                                <div className={`p-5 text-white bg-gradient-to-r ${camp.bannerGradient || 'from-indigo-950 via-slate-900 to-slate-950'}`}>
+                                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                                    <div>
+                                      <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded-full">
+                                        {camp.badge || 'عرض حصري'}
+                                      </span>
+                                      <h4 className="text-base font-black mt-1">{camp.title}</h4>
+                                      <p className="text-xs text-slate-200 mt-0.5 max-w-xl">{camp.subtitle}</p>
+                                    </div>
+                                    <button
+                                      onClick={() => {
+                                        if (camp.buttonAction === 'navigate_map') setActivePage('map');
+                                        else if (camp.buttonAction === 'view_rewards') setActivePage('loyalty');
+                                      }}
+                                      className="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs px-4 py-2 rounded-xl transition shadow-sm shrink-0"
+                                    >
+                                      {camp.buttonText || 'استكشف الآن'}
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        )}
+
+                        {/* 9. Service Rating Card */}
+                        {section.id === 'service_rating' && v.showServiceRating && (
+                          <div
+                            onClick={() => {
+                              setFeedbackInitialTab('rating');
+                              setIsFeedbackModalOpen(true);
+                            }}
+                            className="bg-gradient-to-tr from-amber-50 to-yellow-50 p-5 rounded-3xl border border-amber-200 shadow-xs cursor-pointer hover:shadow-md transition flex items-center justify-between h-full"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center text-xl font-black shrink-0">
+                                ⭐
+                              </div>
+                              <div>
+                                <h4 className="font-black text-sm text-slate-900">تقييم الفني والخدمة</h4>
+                                <p className="text-xs text-slate-600">شاركنا رأيك في تجربة التموين وساهم في تحسين الخدمة</p>
+                              </div>
+                            </div>
+                            <span className="text-xs font-bold text-amber-800 bg-white px-3 py-1.5 rounded-xl border border-amber-300 shrink-0">
+                              قيّم الآن ←
+                            </span>
+                          </div>
+                        )}
+
+                        {/* 10. Complaints Box Card */}
+                        {section.id === 'complaints_box' && v.showComplaintsBox && (
+                          <div
+                            onClick={() => {
+                              setFeedbackInitialTab('complaint');
+                              setIsFeedbackModalOpen(true);
+                            }}
+                            className="bg-gradient-to-tr from-rose-50 to-pink-50 p-5 rounded-3xl border border-rose-200 shadow-xs cursor-pointer hover:shadow-md transition flex items-center justify-between h-full"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-2xl bg-rose-500 text-white flex items-center justify-center text-xl font-black shrink-0">
+                                📨
+                              </div>
+                              <div>
+                                <h4 className="font-black text-sm text-slate-900">صندوق الشكاوى والمقترحات</h4>
+                                <p className="text-xs text-slate-600">صوتك مسموع مباشرة لدى إدارة شركة كارجاس</p>
+                              </div>
+                            </div>
+                            <span className="text-xs font-bold text-rose-800 bg-white px-3 py-1.5 rounded-xl border border-rose-300 shrink-0">
+                              إرسال مقترح ←
+                            </span>
+                          </div>
+                        )}
                       </div>
-
-                      <div className="mt-5 pt-4 border-t border-white/20 flex items-center justify-between text-xs text-amber-100 font-medium relative z-10">
-                        <span>كود العميل: {driver.id}</span>
-                        <button
-                          onClick={() => setActivePage('loyalty')}
-                          className="bg-black/20 hover:bg-black/30 text-white font-bold px-3 py-1 rounded-xl transition text-[11px]"
-                        >
-                          استبدال الهدايا ←
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs text-center space-y-1">
-                      <span className="text-xs text-slate-500 font-medium block">إجمالي الغاز المُمون</span>
-                      <span className="text-lg sm:text-xl font-black text-slate-900 font-mono">
-                        {driver.totalMetersFueled.toLocaleString()}
-                      </span>
-                      <span className="text-[10px] text-emerald-600 font-bold block">متر مكعب m³</span>
-                    </div>
-
-                    <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs text-center space-y-1">
-                      <span className="text-xs text-slate-500 font-medium block">إجمالي الإنفاق</span>
-                      <span className="text-lg sm:text-xl font-black text-slate-900 font-mono">
-                        {driver.totalSpentEgp.toLocaleString()}
-                      </span>
-                      <span className="text-[10px] text-slate-500 font-bold block">جنيه مصري</span>
-                    </div>
-
-                    <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs text-center space-y-1">
-                      <span className="text-xs text-slate-500 font-medium block">الوفورات المحققة</span>
-                      <span className="text-lg sm:text-xl font-black text-emerald-600 font-mono">
-                        ~{(driver.totalMetersFueled * 6.5).toLocaleString()}
-                      </span>
-                      <span className="text-[10px] text-emerald-700 font-bold block">جنيه وفر!</span>
-                    </div>
-                  </div>
-                </div>
+                    );
+                  })}
               </div>
             )}
 
@@ -1033,10 +1403,10 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
                   <div>
                     <h3 className="font-black text-base text-slate-900">
-                      استبدال نقاط الولاء بهدايا وأمتار مجانية
+                      استبدال نقاط الولاء بهدايا وكوبونات خصم ومنتجات زيوت وصيانة وفحص وخدمات لدى الغير 🎁
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      اختر المكافأة التي تناسبك واستبدلها فوراً بكود معتمد صالح في جميع محطات ومراكز كارجاس
+                      اختر المكافأة التي تناسبك واستبدلها فوراً بكود معتمد صالح في جميع محطات ومراكز كارجاس ولدى شبكة الشركاء التجاريين
                     </p>
                   </div>
                   <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200">
@@ -1110,12 +1480,12 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                   })}
                 </div>
 
-                {/* Active Vouchers & Free Meters Redemption QR Codes */}
+                {/* Active Vouchers & Coupons List */}
                 <div className="pt-6 border-t border-slate-100 space-y-4">
                   <div className="flex items-center justify-between">
                     <h4 className="font-black text-sm text-slate-900 flex items-center gap-2">
                       <Gift className="w-4 h-4 text-emerald-600" />
-                      <span>قسائم الهدايا والأمتار المجانية الخاصة بك (كود الصرف لدى فني التموين)</span>
+                      <span>قسائم الهدايا وكوبونات الخصم ومنتجات الصيانة الخاصة بك (كود الصرف لدى المحطة والشركاء)</span>
                     </h4>
                     <span className="text-[11px] text-slate-500 font-medium">
                       إجمالي القسائم: {redemptions.length}
@@ -1124,7 +1494,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
 
                   {redemptions.length === 0 ? (
                     <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center text-xs text-slate-500">
-                      لم تقم باستبدال أي قسائم بعد. عندما تجمع نقاطاً وتستبدلها بأمتار مجانية ستظهر قسيمتك هنا مع كود الـ QR الخاص بالصرف.
+                      لم تقم باستبدال أي قسائم بعد. عندما تجمع نقاطاً وتستبدلها بهدايا أو زيوت أو كوبونات خصم ستظهر قسيمتك هنا مع كود الصرف الخاص بك.
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -1142,11 +1512,9 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                               <div>
                                 <div className="flex items-center gap-2">
                                   <span className="font-black text-sm text-slate-900">{red.rewardTitle}</span>
-                                  {red.freeMeters ? (
-                                    <span className="bg-emerald-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
-                                      {red.freeMeters} م³ مجاناً ⛽
-                                    </span>
-                                  ) : null}
+                                  <span className="bg-amber-500 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                    هدية / كوبون معتمد 🎁
+                                  </span>
                                 </div>
                                 <span className="font-mono text-xs font-bold text-slate-600 mt-1 block">
                                   كود القسيمة: <span className="text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">{red.redemptionCode}</span>
@@ -1203,11 +1571,21 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                       {config.customTexts.maintenanceNotice}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl text-xs">
-                    <span className="text-slate-500">العداد الحالي:</span>
-                    <span className="font-mono font-black text-slate-900">
-                      {driver.odometerKm.toLocaleString()} كم
-                    </span>
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsBookingModalOpen(true)}
+                      className="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-xs px-4 py-2 rounded-xl shadow-xs transition flex items-center gap-1.5 active:scale-95"
+                    >
+                      <Calendar className="w-4 h-4" />
+                      <span>حجز موعد فحص أسطوانة أو صيانة 📅</span>
+                    </button>
+                    <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl text-xs">
+                      <span className="text-slate-500">العداد الحالي:</span>
+                      <span className="font-mono font-black text-slate-900">
+                        {driver.odometerKm.toLocaleString()} كم
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -1692,26 +2070,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
         </div>
       )}
 
-      {/* Persistent Floating Customer Menu Icon (FAB) */}
-      <div className="fixed bottom-6 left-6 z-40 print:hidden">
-        <button
-          onClick={() => setIsCustomerMenuOpen((prev) => !prev)}
-          className="relative flex items-center gap-2.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-xs px-4 py-3 rounded-2xl shadow-2xl transition-all duration-300 transform hover:scale-105 active:scale-95 border-2 border-white/40 backdrop-blur-md group"
-          title="قائمة العميل — اضغط لإظهار كافة الأيقونات"
-        >
-          <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center text-lg group-hover:rotate-12 transition">
-            🚗
-          </div>
-          <div className="text-right">
-            <span className="block text-[9px] text-emerald-200 font-normal">قائمة العميل</span>
-            <span className="block text-xs font-black">عرض الأيقونات ⚡</span>
-          </div>
-          <span className="flex h-2.5 w-2.5 relative mr-1">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-400"></span>
-          </span>
-        </button>
-      </div>
+
 
       {/* Free Meters Reward Redemption QR Modal */}
       {selectedRedemptionForQr && (
@@ -1945,6 +2304,25 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
         initialTab={feedbackInitialTab}
         onRatingSubmitted={onRefreshData}
         onComplaintSubmitted={onRefreshData}
+      />
+
+      {/* Service Appointments & Smart Reallocation Modal */}
+      <AppointmentBookingModal
+        isOpen={isBookingModalOpen}
+        onClose={() => setIsBookingModalOpen(false)}
+        driver={driver}
+        stations={stations}
+      />
+
+      {/* 5-Clicks Admin Verification Modal (التحقق الأمني لتفعيل التحرير بالسحب والإفلات) */}
+      <AdminPinVerifyModal
+        isOpen={isAdminPinModalOpen}
+        onClose={() => setIsAdminPinModalOpen(false)}
+        correctPin={config.adminPin || '0000'}
+        onSuccess={() => {
+          setIsAdminPinModalOpen(false);
+          setIsLayoutEditMode(true);
+        }}
       />
     </div>
   );

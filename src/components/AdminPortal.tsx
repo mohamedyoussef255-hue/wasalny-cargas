@@ -53,8 +53,8 @@ import {
   Navigation,
   Volume2,
   Compass,
-  ArrowUp,
-  ArrowDown,
+  Edit3,
+  X,
 } from 'lucide-react';
 import {
   AppConfig,
@@ -75,8 +75,8 @@ import {
   IdeaBankItem,
   RawSalesSheetData,
   WasalnyConfig,
-  PointsFormulaConfig,
-  PageLayoutSettings,
+  FuelingTransaction,
+  LoyaltyCostModel,
 } from '../types';
 import { generateQrDataUrl } from '../services/qrService';
 import {
@@ -111,6 +111,7 @@ import {
   deleteCustomSalesColumn,
   getPromotionalCampaigns,
   savePromotionalCampaign,
+  savePromotionalCampaigns,
   deletePromotionalCampaign,
   togglePromotionalCampaignActive,
   aiFormulateCampaignCopy,
@@ -124,17 +125,20 @@ import {
   aiAuditAndGenerateReward,
   AiAuditRewardResult,
   DEFAULT_WASALNY_CONFIG,
-  DEFAULT_POINTS_FORMULA,
-  DEFAULT_DRIVER_SECTIONS_ORDER,
-  DEFAULT_TECHNICIAN_SECTIONS_ORDER,
-  DEFAULT_LAYOUT_SETTINGS,
 } from '../services/storageService';
+import { REWARDS_100_CATALOG } from '../data/rewardsCatalog';
+import { RefuelingAdminDashboard } from './RefuelingAdminDashboard';
+import { PromotionsFormulaManager } from './PromotionsFormulaManager';
+import { PointsCalculator } from './PointsCalculator';
+import { DynamicLayoutManager } from './DynamicLayoutManager';
+import { FinancialManagementPortal } from './FinancialManagementPortal';
 
 interface AdminPortalProps {
   config: AppConfig;
   rewards: RewardItem[];
   stationCrew: TechnicianCrewMember[];
   stations: CargasStationLocation[];
+  transactions: FuelingTransaction[];
   onUpdateConfig: (config: AppConfig) => void;
   onUpdateRewards: (rewards: RewardItem[]) => void;
   onUpdateCrew: (crew: TechnicianCrewMember[]) => void;
@@ -147,6 +151,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   rewards,
   stationCrew,
   stations,
+  transactions,
   onUpdateConfig,
   onUpdateRewards,
   onUpdateCrew,
@@ -154,8 +159,22 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onRollbackToClassic,
 }) => {
   const [activeTab, setActiveTab] = useState<
-    'pumps' | 'crew' | 'rewards' | 'stations_map' | 'wasalny_control' | 'visibility' | 'sales_budget' | 'promotions_studio' | 'ideas_bank' | 'complaints' | 'moen' | 'cms' | 'rollback'
-  >('wasalny_control');
+    | 'refueling_ops'
+    | 'financial_management'
+    | 'dynamic_layout'
+    | 'wasalny_control'
+    | 'stations_map'
+    | 'pumps'
+    | 'crew'
+    | 'rewards'
+    | 'visibility'
+    | 'promotions_studio'
+    | 'ideas_bank'
+    | 'complaints'
+    | 'moen'
+    | 'cms'
+    | 'rollback'
+  >('refueling_ops');
 
   // Pump & Store QR State
   const [stationCodeInput, setStationCodeInput] = useState(config.stationCode);
@@ -183,6 +202,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [aiRewardTargetDrivers, setAiRewardTargetDrivers] = useState<number>(200);
   const [isAuditingAiReward, setIsAuditingAiReward] = useState(false);
   const [aiRewardAuditResult, setAiRewardAuditResult] = useState<AiAuditRewardResult | null>(null);
+  const [rewardSearchFilter, setRewardSearchFilter] = useState('');
+  const [rewardCategoryFilter, setRewardCategoryFilter] = useState<string>('all');
 
   // Configuration Edit State
   const [editAppName, setEditAppName] = useState(config.appName);
@@ -192,6 +213,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [editGasPrice, setEditGasPrice] = useState(config.gasPricePerMeter);
   const [editPointsRatio, setEditPointsRatio] = useState(config.pointsPerMeter);
   const [editAdminPin, setEditAdminPin] = useState(config.adminPin);
+  const [editFinancePin, setEditFinancePin] = useState(config.financePin || '1234');
   const [editThemeColor, setEditThemeColor] = useState(config.themeColor);
   const [editWelcomeDriver, setEditWelcomeDriver] = useState(config.customTexts.welcomeDriver);
   const [editWelcomeTech, setEditWelcomeTech] = useState(config.customTexts.welcomeTech);
@@ -284,104 +306,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   );
   const [wasalnyShowCrowd, setWasalnyShowCrowd] = useState(defaultWasalny.showCrowdStatus);
   const [wasalnyBtnLabel, setWasalnyBtnLabel] = useState(
-    defaultWasalny.buttonLabel || 'وصلني لأقرب محطة كارجاس ⛽'
+    defaultWasalny.buttonLabel || 'أقرب محطة كارجاس (وصّلني) 📍'
   );
-  const [wasalnySubtitle, setWasalnySubtitle] = useState(
-    defaultWasalny.subtitle || 'توجيه ذكي وملاحة فورية لأقرب محطة تموين كارجاس CNG مجهزة وسريعة'
-  );
-  const [wasalnyCoverImage, setWasalnyCoverImage] = useState(defaultWasalny.mapCoverImageUrl || '');
-  const [wasalnyLogoBadge, setWasalnyLogoBadge] = useState(defaultWasalny.cargasLogoBadgeUrl || '');
-
-  const handleWasalnyCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const compressed = await compressImageFile(file, 800, 0.85);
-      setWasalnyCoverImage(compressed);
-    } catch {
-      const reader = new FileReader();
-      reader.onload = (ev) => setWasalnyCoverImage(ev.target?.result as string);
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleWasalnyLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const compressed = await compressImageFile(file, 200, 0.9);
-      setWasalnyLogoBadge(compressed);
-    } catch {
-      const reader = new FileReader();
-      reader.onload = (ev) => setWasalnyLogoBadge(ev.target?.result as string);
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleUploadStationsSheetForWasalny = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      if (file.name.endsWith('.json')) {
-        const text = await file.text();
-        const json = JSON.parse(text);
-        if (Array.isArray(json) && json.length > 0) {
-          const formatted: CargasStationLocation[] = json.map((item: any, idx: number) => ({
-            id: item.id || `ST-MAP-${idx + 1}`,
-            name: item.name || item['اسم المحطة'] || item['اسم المركز'] || `محطة كارجاس ${idx + 1}`,
-            city: item.city || item['المحافظة'] || item['المدينة'] || 'القاهرة',
-            address: item.address || item['العنوان'] || 'مصر',
-            latitude: Number(item.latitude || item.lat || item['خط العرض'] || 30.0884),
-            longitude: Number(item.longitude || item.lng || item['خط الطول'] || 31.2468),
-            operatingHours: item.operatingHours || item['مواعيد العمل'] || '24 ساعة',
-            pumpsCount: Number(item.pumpsCount || item['عدد الطلمبات'] || 8),
-            crowdLevel: item.crowdLevel || 'خفيف',
-            supportedVehicles: ['تاكسي', 'ميكروباص', 'ملاكي', 'نقل'],
-            activities: ['تموين غاز طبيعي', 'زيوت كارجاس'],
-          }));
-          onUpdateStations(formatted);
-          saveStationLocations(formatted);
-          alert(`✅ تم استيراد وتحديث ${formatted.length} محطة على خريطة وصّلني وتطبيق الملاحة بنجاح!`);
-        }
-      } else {
-        const data = await file.arrayBuffer();
-        const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const jsonRows: any[] = XLSX.utils.sheet_to_json(worksheet);
-        if (jsonRows.length === 0) {
-          alert('الملف فارغ أو لا يحتوي على صفوف بيانات صالحة.');
-          return;
-        }
-        const parsedStations: CargasStationLocation[] = jsonRows.map((r, idx) => {
-          const name = r['اسم المركز (المحطة)'] || r['اسم المحطة'] || r['المحطة'] || r.name || `محطة كارجاس ${idx + 1}`;
-          const city = r['المحافظة'] || r['المدينة'] || r.city || 'القاهرة';
-          const address = r['العنوان'] || r.address || 'مصر';
-          const lat = parseFloat(r['الإحداثيات Y'] || r['خط العرض'] || r.latitude || r.lat || 30.0884);
-          const lng = parseFloat(r['الإحداثيات X'] || r['خط الطول'] || r.longitude || r.lng || 31.2468);
-          return {
-            id: `ST-XLS-${idx + 1}`,
-            name,
-            city,
-            address,
-            latitude: isNaN(lat) ? 30.0884 : lat,
-            longitude: isNaN(lng) ? 31.2468 : lng,
-            operatingHours: r['مواعيد العمل'] || '24 ساعة',
-            pumpsCount: parseInt(r['عدد الطلمبات'] || 8, 10),
-            crowdLevel: 'خفيف',
-            supportedVehicles: ['تاكسي', 'ميكروباص', 'ملاكي', 'نقل'],
-            activities: ['تموين غاز طبيعي', 'زيوت كارجاس'],
-          };
-        });
-        onUpdateStations(parsedStations);
-        saveStationLocations(parsedStations);
-        alert(`✅ تم قراءة وتحديث ${parsedStations.length} موقع ومحطة على خريطة وصلني وتطبيق الملاحة بنجاح!`);
-      }
-    } catch (err) {
-      console.error(err);
-      alert('حدث خطأ أثناء قراءة ملف المحطات. تأكد من صحة الملف.');
-    }
-  };
 
   const handleSaveWasalnySettings = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -395,11 +321,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       arrivalAlertDistanceMeters: Number(wasalnyAlertDistance),
       customWelcomeMessage: wasalnyWelcomeMsg.trim(),
       showCrowdStatus: wasalnyShowCrowd,
-      buttonLabel: wasalnyBtnLabel.trim() || 'وصلني لأقرب محطة كارجاس ⛽',
-      subtitle: wasalnySubtitle.trim() || 'توجيه ذكي وملاحة فورية لأقرب محطة تموين كارجاس CNG مجهزة وسريعة',
-      mapCoverImageUrl: wasalnyCoverImage,
-      cargasLogoBadgeUrl: wasalnyLogoBadge,
-      cardLayout: 'banner_top',
+      buttonLabel: wasalnyBtnLabel.trim() || 'أقرب محطة كارجاس (وصّلني) 📍',
     };
     const updatedConfig: AppConfig = {
       ...config,
@@ -407,7 +329,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     };
     onUpdateConfig(updatedConfig);
     saveAppConfig(updatedConfig);
-    alert('✅ تم حفظ كافة إعدادات وتحكم تطبيق "وصّلني" وتحديث خيارات الملاحة والتوجيه الصوتي وصور الواجهة فوراً!');
+    alert('✅ تم حفظ كافة إعدادات وتحكم تطبيق "وصّلني" وتحديث خيارات الملاحة والتوجيه الصوتي فوراً!');
   };
 
   const handleTestWadahVoice = () => {
@@ -428,26 +350,54 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     window.speechSynthesis.speak(utterance);
   };
 
-  // Visibility Matrix State & Layout Reorder Mode
+  // Visibility Matrix State
   const [driverVis, setDriverVis] = useState(config.visibility.driver);
   const [techVis, setTechVis] = useState(config.visibility.technician);
-  const [visibilitySubTab, setVisibilitySubTab] = useState<'reorder_layout' | 'checkboxes'>('reorder_layout');
-
 
   // Loyalty Model & Budget State
   const [loyaltyModel, setLoyaltyModel] = useState(config.loyaltyCostModel);
   const [salesRecords, setSalesRecords] = useState<StationSalesRecord[]>(getSalesRecords);
   const [rawSheetData, setRawSheetData] = useState<RawSalesSheetData | null>(getRawSalesSheet);
 
-  // Promotions Studio Sub-Tabs State (دمج استوديو العروض وبنك الهدايا والأفكار والحاسبة)
+  // Promotions Studio Sub-Tabs State (ورشة العروض، حاسبة النقاط والمعيار الاقتصادي، بنك الهدايا والأفكار)
   const [promoSubTab, setPromoSubTab] = useState<'campaigns' | 'calculator' | 'rewards' | 'ideas'>('campaigns');
 
-  // Loyalty Points Calculator State (طبقا لمعادلات كارجاس وحاسبة نقاط الولاء.html)
+  // Campaign & Banner Copy Edit State (التحكم الكامل في صيغة البانر وتعديل العروض)
+  const [editingCampaign, setEditingCampaign] = useState<PromotionalCampaign | null>(null);
+
+  // Official Economic Standard State (التحكم في المعيار الاقتصادي الرسمي لكارجاس)
+  const [isEditingEconomicStandard, setIsEditingEconomicStandard] = useState(false);
+  const [officialGasPrice, setOfficialGasPrice] = useState<number>(
+    config.loyaltyCostModel?.officialGasPrice ?? config.gasPricePerMeter ?? 13.0
+  );
+  const [officialCostPerPoint, setOfficialCostPerPoint] = useState<number>(
+    config.loyaltyCostModel?.officialCostPerPoint ?? config.loyaltyCostModel?.costPerPointEgp ?? 0.35
+  );
+  const [officialGasolineSavingsPerMeter, setOfficialGasolineSavingsPerMeter] = useState<number>(
+    config.loyaltyCostModel?.officialGasolineSavingsPerMeter ?? 10.5
+  );
+  const [officialMarginGainPct, setOfficialMarginGainPct] = useState<number>(
+    config.loyaltyCostModel?.officialMarginGainPct ?? 28
+  );
+  const [centennialMeters, setCentennialMeters] = useState<number>(
+    config.loyaltyCostModel?.centennialMeters ?? 108
+  );
+  const [centennialPoints, setCentennialPoints] = useState<number>(
+    config.loyaltyCostModel?.centennialPoints ?? 100
+  );
+  const [centennialRewardValueEgp, setCentennialRewardValueEgp] = useState<number>(
+    config.loyaltyCostModel?.centennialRewardValueEgp ?? 50
+  );
+  const [customerRewardPerPointEgp, setCustomerRewardPerPointEgp] = useState<number>(
+    config.loyaltyCostModel?.customerRewardPerPointEgp ?? 0.50
+  );
+
+  // Loyalty Points Calculator State (طبقا لمعايير كارجاس وحاسبة نقاط الولاء)
   const [calcFuelMeters, setCalcFuelMeters] = useState<number>(1200);
   const [calcMultiplier, setCalcMultiplier] = useState<number>(1.0);
-  const [calcGasPrice, setCalcGasPrice] = useState<number>(config.gasPricePerMeter || 13.0);
-  const [calcCostPerPoint, setCalcCostPerPoint] = useState<number>(config.loyaltyCostModel?.costPerPointEgp || 0.35);
-  const [calcGasolineSavingsPerMeter, setCalcGasolineSavingsPerMeter] = useState<number>(10.5);
+  const [calcGasPrice, setCalcGasPrice] = useState<number>(config.loyaltyCostModel?.officialGasPrice ?? config.gasPricePerMeter ?? 13.0);
+  const [calcCostPerPoint, setCalcCostPerPoint] = useState<number>(config.loyaltyCostModel?.officialCostPerPoint ?? config.loyaltyCostModel?.costPerPointEgp ?? 0.35);
+  const [calcGasolineSavingsPerMeter, setCalcGasolineSavingsPerMeter] = useState<number>(config.loyaltyCostModel?.officialGasolineSavingsPerMeter ?? 10.5);
   const [calcPresetType, setCalcPresetType] = useState<'taxi' | 'microbus' | 'centennial' | 'fleet' | 'station' | 'custom'>('taxi');
 
   // Sales Analytical Columns Toggles (لإضافة الخانات التحليلية المفيدة في قراءة الشيت المرفوع)
@@ -528,24 +478,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [campaignBudgetItemEgp, setCampaignBudgetItemEgp] = useState<number>(20000);
   const [campaignTargetDrivers, setCampaignTargetDrivers] = useState<number>(500);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
-  // Promotional Campaigns Editing State
-  const [editingCampaign, setEditingCampaign] = useState<PromotionalCampaign | null>(null);
-
-  // Master Points Formula & Budget Criteria State
-  const [pointsFormula, setPointsFormula] = useState<PointsFormulaConfig>(
-    config.pointsFormula || DEFAULT_POINTS_FORMULA
-  );
-
-  // Dynamic Layout Reordering State for Driver and Technician Pages
-  const [driverSectionsOrder, setDriverSectionsOrder] = useState<string[]>(
-    config.layoutSettings?.driverSectionsOrder || DEFAULT_DRIVER_SECTIONS_ORDER
-  );
-  const [techSectionsOrder, setTechSectionsOrder] = useState<string[]>(
-    config.layoutSettings?.technicianSectionsOrder || DEFAULT_TECHNICIAN_SECTIONS_ORDER
-  );
+  const [aiDraftCampaign, setAiDraftCampaign] = useState<Partial<PromotionalCampaign> | null>(null);
 
   // Handlers for Custom Columns
-
   const handleAddCustomColumn = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newColName.trim()) {
@@ -773,77 +708,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const updated = campaigns.filter((c) => c.id !== id);
     setCampaigns(updated);
     deletePromotionalCampaign(id);
-  };
-
-  // Campaign Edit Handlers
-  const handleStartEditCampaign = (camp: PromotionalCampaign) => {
-    setEditingCampaign({ ...camp });
-  };
-
-  const handleSaveEditedCampaign = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingCampaign) return;
-    const updated = campaigns.map((c) => (c.id === editingCampaign.id ? editingCampaign : c));
-    setCampaigns(updated);
-    savePromotionalCampaign(editingCampaign);
     onUpdateConfig({ ...config, promotionalCampaigns: updated });
-    alert(`✅ تم تحديث وحفظ بيانات الحملة/المسابقة "${editingCampaign.title}" بنجاح!`);
-    setEditingCampaign(null);
-  };
-
-  // Layout Reordering Handlers for Driver & Technician Pages
-  const moveDriverSection = (index: number, direction: 'up' | 'down') => {
-    const newOrder = [...driverSectionsOrder];
-    const targetIdx = direction === 'up' ? index - 1 : index + 1;
-    if (targetIdx < 0 || targetIdx >= newOrder.length) return;
-    const temp = newOrder[index];
-    newOrder[index] = newOrder[targetIdx];
-    newOrder[targetIdx] = temp;
-    setDriverSectionsOrder(newOrder);
-  };
-
-  const moveTechSection = (index: number, direction: 'up' | 'down') => {
-    const newOrder = [...techSectionsOrder];
-    const targetIdx = direction === 'up' ? index - 1 : index + 1;
-    if (targetIdx < 0 || targetIdx >= newOrder.length) return;
-    const temp = newOrder[index];
-    newOrder[index] = newOrder[targetIdx];
-    newOrder[targetIdx] = temp;
-    setTechSectionsOrder(newOrder);
-  };
-
-  const handleResetLayoutToDefault = () => {
-    if (!confirm('هل ترغب في استعادة الترتيب النموذجي الافتراضي لكافة عناصر صفحات العميل والفني؟')) return;
-    setDriverSectionsOrder(DEFAULT_DRIVER_SECTIONS_ORDER);
-    setTechSectionsOrder(DEFAULT_TECHNICIAN_SECTIONS_ORDER);
-    const updatedConfig: AppConfig = {
-      ...config,
-      layoutSettings: {
-        driverSectionsOrder: DEFAULT_DRIVER_SECTIONS_ORDER,
-        technicianSectionsOrder: DEFAULT_TECHNICIAN_SECTIONS_ORDER,
-      },
-    };
-    onUpdateConfig(updatedConfig);
-    saveAppConfig(updatedConfig);
-    alert('✅ تمت استعادة الترتيب النموذجي بنجاح!');
-  };
-
-  const handleSaveLayoutSettings = () => {
-    const updatedLayout: PageLayoutSettings = {
-      driverSectionsOrder,
-      technicianSectionsOrder: techSectionsOrder,
-    };
-    const updatedConfig: AppConfig = {
-      ...config,
-      layoutSettings: updatedLayout,
-      visibility: {
-        driver: driverVis,
-        technician: techVis,
-      },
-    };
-    onUpdateConfig(updatedConfig);
-    saveAppConfig(updatedConfig);
-    alert('✅ تم حفظ ترتيب ومواضع عناصر وبنرات ومساحات صفحتي العميل والفني بنجاح!');
   };
 
   // Moen Config State
@@ -1294,16 +1159,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const sendPinViaWhatsApp = (member: TechnicianCrewMember) => {
     const cleanPhone = member.phone.replace(/\D/g, '');
-    const techLoginUrl = `${window.location.origin}${window.location.pathname}?role=technician&techId=${member.id}&pin=${member.dailyPin}`;
-    const message = `مرحباً يا بطل كارجاس ${member.name} (${member.role}) ⛽\nتم إرسال رابط الدخول وتفعيل ورديتك في منظومة كارجاس للولاء:\n\n• كود الفني: ${member.id}\n• رقم الـ PIN السري لليوم: [ ${member.dailyPin} ]\n• المحطة: ${config.stationName}\n\n👇 اضغط على الرابط التالي للدخول فوراً وبدء الوردية وتسجيل التموينات واستبدال الأمتار المجانية:\n${techLoginUrl}\n\nمنظومة كارجاس وعزوتي للبرمجيات وتكنولوجيا المعلومات - م. محمد عبد الرحمن يوسف.`;
+    const message = `مرحباً زميلنا ${member.name} (${member.role}) في ${config.stationName}.\nكود الـ PIN السري الخاص بك لتفعيل وردية اليوم هو: [ ${member.dailyPin} ].\nيرجى فتح التطبيق والتحقق من التواجد في محيط المحطة لبدء الوردية.\nمنظومة كارجاس وعزوتي - م. محمد عبد الرحمن يوسف.`;
     const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
     window.open(whatsappUrl, '_blank');
-  };
-
-  const copyTechnicianLoginLink = (member: TechnicianCrewMember) => {
-    const techLoginUrl = `${window.location.origin}${window.location.pathname}?role=technician&techId=${member.id}&pin=${member.dailyPin}`;
-    navigator.clipboard.writeText(techLoginUrl);
-    alert(`✅ تم نسخ رابط دخول الفني ${member.name} إلى الحافظة بنجاح:\n${techLoginUrl}`);
   };
 
   const regenerateAllDailyPins = () => {
@@ -1361,6 +1219,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       gasPricePerMeter: Number(editGasPrice),
       pointsPerMeter: Number(editPointsRatio),
       adminPin: editAdminPin.trim() || '0000',
+      financePin: editFinancePin.trim() || '1234',
       themeColor: editThemeColor,
       stationCode: stationCodeInput,
       googlePlayUrl: playUrlInput,
@@ -1384,36 +1243,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       assistantEnabled: moenEnabled,
       assistantOnlyAdmin: moenOnlyAdmin,
       assistantAllowedTopics: moenAllowedTopics,
-      wasalnyConfig: {
-        enabled: wasalnyEnabled,
-        voiceGuidance: wasalnyVoice,
-        autoVoiceOnOpen: wasalnyAutoVoice,
-        navigationProvider: wasalnyProvider,
-        targetStationMode: wasalnyTargetMode,
-        featuredStationId: wasalnyFeaturedStationId,
-        arrivalAlertDistanceMeters: Number(wasalnyAlertDistance),
-        customWelcomeMessage: wasalnyWelcomeMsg.trim(),
-        showCrowdStatus: wasalnyShowCrowd,
-        buttonLabel: wasalnyBtnLabel.trim() || 'وصلني لأقرب محطة كارجاس ⛽',
-        subtitle: wasalnySubtitle.trim() || 'توجيه ذكي وملاحة فورية لأقرب محطة تموين كارجاس CNG مجهزة وسريعة',
-        mapCoverImageUrl: wasalnyCoverImage,
-        cargasLogoBadgeUrl: wasalnyLogoBadge,
-        cardLayout: 'banner_top',
-      },
-      layoutSettings: {
-        driverSectionsOrder,
-        technicianSectionsOrder: techSectionsOrder,
-      },
-      pointsFormula: {
-        ...pointsFormula,
-        pointsToEgpRedemptionRatio: Number(loyaltyModel.costPerPointEgp),
-      },
     };
 
     onUpdateConfig(updatedConfig);
     saveAppConfig(updatedConfig);
-    alert('✅ تم حفظ وتحديث كافة إعدادات المنظومة وترتيب الواجهات ومصفوفة الظهور وتطبيق وصّلني وتكلفة النقاط بنجاح!');
-
+    alert('تم حفظ وتحديث كافة إعدادات المنظومة ومصفوفة الظهور وتكلفة النقاط بنجاح!');
   };
 
   const handlePrintCard = (item: { title: string; qrUrl: string; sub: string }) => {
@@ -1484,6 +1318,42 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       <div className="bg-white rounded-3xl shadow-xs border border-slate-200 overflow-hidden no-print">
         <div className="flex border-b border-slate-200 bg-slate-50 p-2 gap-2 overflow-x-auto no-scrollbar">
           <button
+            onClick={() => setActiveTab('refueling_ops')}
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition whitespace-nowrap ${
+              activeTab === 'refueling_ops'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md font-black'
+                : 'text-emerald-800 hover:text-emerald-950 bg-emerald-50/70 border border-emerald-200'
+            }`}
+          >
+            <Fuel className="w-4 h-4 text-emerald-400" />
+            <span>حركات التموين والأسعار (Supabase RLS) ⚡</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('financial_management')}
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition whitespace-nowrap ${
+              activeTab === 'financial_management'
+                ? 'bg-gradient-to-r from-emerald-600 via-teal-700 to-indigo-800 text-white shadow-md font-black'
+                : 'text-indigo-800 hover:text-indigo-950 bg-indigo-50/70 border border-indigo-200'
+            }`}
+          >
+            <DollarSign className="w-4 h-4 text-emerald-500" />
+            <span>الإدارة المالية وتكلفة النقاط بالمحطات 💼📊</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('dynamic_layout')}
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition whitespace-nowrap ${
+              activeTab === 'dynamic_layout'
+                ? 'bg-gradient-to-r from-teal-600 to-emerald-700 text-white shadow-md font-black'
+                : 'text-teal-800 hover:text-teal-950 bg-teal-50/70 border border-teal-200'
+            }`}
+          >
+            <Layers className="w-4 h-4 text-teal-600" />
+            <span>تخطيط وترتيب المساحات والأيقونات 📐</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('pumps')}
             className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition whitespace-nowrap ${
               activeTab === 'pumps' ? 'bg-white text-rose-700 shadow-sm border border-slate-200' : 'text-slate-600'
@@ -1491,16 +1361,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           >
             <QrCode className="w-4 h-4 text-rose-600" />
             <span>أكواد المضخات والمتاجر والطباعة</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('stations_map')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition whitespace-nowrap ${
-              activeTab === 'stations_map' ? 'bg-white text-emerald-700 shadow-sm border border-slate-200' : 'text-slate-600'
-            }`}
-          >
-            <MapPin className="w-4 h-4 text-emerald-600" />
-            <span>إحداثيات المحطات ورفع KMZ/إكسيل ({stations.length})</span>
           </button>
 
           <button
@@ -1512,7 +1372,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             }`}
           >
             <Navigation className="w-4 h-4 text-emerald-600" />
-            <span>تحكم تطبيق وصّلني والملاحة 🚗</span>
+            <span>تحكم تطبيق وصّلني والملاحة وإحداثيات المحطات 🚗📍</span>
           </button>
 
           <button
@@ -1523,16 +1383,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           >
             <Sliders className="w-4 h-4 text-purple-600" />
             <span>التحكم في إظهار وإخفاء عناصر العميل والفني</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('sales_budget')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition whitespace-nowrap ${
-              activeTab === 'sales_budget' ? 'bg-white text-blue-700 shadow-sm border border-slate-200' : 'text-slate-600'
-            }`}
-          >
-            <DollarSign className="w-4 h-4 text-blue-600" />
-            <span>شيت مبيعات المحطات والإحداثيات والتحليل 📊</span>
           </button>
 
           <button
@@ -1597,6 +1447,36 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             <span>استعادة النسخة والنسخ الاحتياطي 🔄</span>
           </button>
         </div>
+
+        {/* Tab: Refueling Operations & Central System Settings (Supabase & RLS) */}
+        {activeTab === 'refueling_ops' && (
+          <div className="p-6">
+            <RefuelingAdminDashboard />
+          </div>
+        )}
+
+        {/* Tab: Central Financial Management & Station Point Cost Engine */}
+        {activeTab === 'financial_management' && (
+          <div className="p-6">
+            <FinancialManagementPortal
+              config={config}
+              stations={stations}
+              transactions={transactions}
+              onUpdateStations={onUpdateStations}
+              onUpdateConfig={onUpdateConfig}
+            />
+          </div>
+        )}
+
+        {/* Tab: Dynamic Layout & Section Sizing Engine */}
+        {activeTab === 'dynamic_layout' && (
+          <div className="p-6">
+            <DynamicLayoutManager
+              config={config}
+              onUpdateConfig={onUpdateConfig}
+            />
+          </div>
+        )}
 
         {/* Tab: Stations Map & KMZ/Excel Coordinates Upload */}
         {activeTab === 'stations_map' && (
@@ -2253,142 +2133,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
                   <div className="space-y-1">
                     <label className="block font-bold text-slate-700 text-[11px]">
-                      مسمى أيقونة وبطاقة وصّلني في واجهة العميل:
+                      مسمى أيقونة وصّلني في واجهة العميل:
                     </label>
                     <input
                       type="text"
                       value={wasalnyBtnLabel}
                       onChange={(e) => setWasalnyBtnLabel(e.target.value)}
-                      placeholder="وصلني لأقرب محطة كارجاس ⛽"
+                      placeholder="أقرب محطة كارجاس (وصّلني) 📍"
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-900"
                     />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block font-bold text-slate-700 text-[11px]">
-                      النص التوضيحي تحت "وصلني لأقرب محطة":
-                    </label>
-                    <input
-                      type="text"
-                      value={wasalnySubtitle}
-                      onChange={(e) => setWasalnySubtitle(e.target.value)}
-                      placeholder="توجيه ذكي وملاحة فورية لأقرب محطة تموين كارجاس CNG مجهزة وسريعة"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium text-slate-800"
-                    />
-                  </div>
-
-                  {/* Logo & Cover Image Customization */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100">
-                    {/* Cargas Logo on Map */}
-                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-800 text-[11px]">شعار كارجاس على الخريطة:</span>
-                        {wasalnyLogoBadge && (
-                          <button
-                            type="button"
-                            onClick={() => setWasalnyLogoBadge('')}
-                            className="text-[10px] text-rose-600 font-bold hover:underline"
-                          >
-                            إزالة
-                          </button>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shrink-0">
-                          {wasalnyLogoBadge ? (
-                            <img src={wasalnyLogoBadge} alt="Cargas Badge" className="w-full h-full object-contain" />
-                          ) : (
-                            <span className="text-lg">⛽</span>
-                          )}
-                        </div>
-                        <input
-                          type="file"
-                          id="wasalnyLogoInput"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={handleWasalnyLogoUpload}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => document.getElementById('wasalnyLogoInput')?.click()}
-                          className="flex-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 py-1.5 px-2 rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1"
-                        >
-                          <Upload className="w-3 h-3 text-emerald-600" />
-                          <span>رفع لوجو كارجاس</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Map Background Image */}
-                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-800 text-[11px]">صورة خلفية بطاقة الخريطة:</span>
-                        {wasalnyCoverImage && (
-                          <button
-                            type="button"
-                            onClick={() => setWasalnyCoverImage('')}
-                            className="text-[10px] text-rose-600 font-bold hover:underline"
-                          >
-                            استعادة الافتراضية
-                          </button>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-200 flex items-center justify-center overflow-hidden shrink-0">
-                          {wasalnyCoverImage ? (
-                            <img src={wasalnyCoverImage} alt="Cover" className="w-full h-full object-cover" />
-                          ) : (
-                            <span className="text-lg">🗺️</span>
-                          )}
-                        </div>
-                        <input
-                          type="file"
-                          id="wasalnyCoverInput"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={handleWasalnyCoverUpload}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => document.getElementById('wasalnyCoverInput')?.click()}
-                          className="flex-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 py-1.5 px-2 rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1"
-                        >
-                          <Upload className="w-3 h-3 text-blue-600" />
-                          <span>رفع خلفية الخريطة</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Upload Stations Locations File (Excel/JSON) */}
-                  <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-emerald-950 text-xs flex items-center gap-1.5">
-                        <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-                        <span>تغذية وتحديث محطات كارجاس والخريطة:</span>
-                      </span>
-                      <span className="text-[10px] bg-emerald-200 text-emerald-900 font-bold px-2 py-0.5 rounded-full">
-                        {stations.length} محطة مسجلة
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-emerald-800 leading-relaxed">
-                      ارفع ملف إكسيل (.xlsx) أو JSON يحتوي على أسماء المحطات والإحداثيات (خط العرض وخط الطول) لتحديث قاعدة بيانات الملاحة وخريطة وصّلني فوراً!
-                    </p>
-                    <input
-                      type="file"
-                      id="wasalnyStationsSheetInput"
-                      accept=".xlsx, .xls, .json"
-                      className="hidden"
-                      onChange={handleUploadStationsSheetForWasalny}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => document.getElementById('wasalnyStationsSheetInput')?.click()}
-                      className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-xs"
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>رفع شيت إكسيل أو JSON لمحطات كارجاس 📍</span>
-                    </button>
                   </div>
 
                   <label className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-200 cursor-pointer">
@@ -2576,6 +2329,143 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </div>
             </div>
 
+            {/* Embedded Station Coordinates & KMZ / KML / Excel Management inside Wasalny */}
+            <div className="bg-white p-6 rounded-3xl border border-emerald-300/80 shadow-md space-y-6">
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center text-xl shadow-md">
+                    📍
+                  </div>
+                  <div>
+                    <h4 className="font-black text-base text-slate-900 flex items-center gap-2">
+                      <span>إدارة إحداثيات المحطات ورفع ملفات KMZ / KML والإكسيل</span>
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2.5 py-0.5 rounded-full border border-emerald-200">
+                        {stations.length} محطة مسجلة
+                      </span>
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      ارفع ملف KMZ / KML لمواقع كارجاس أو شيت الإكسيل لتحديث إحداثيات نظام الملاحة والتوجيه وصّلني لحظياً
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="file"
+                    id="wasalnyKmzUploadInput"
+                    accept=".kmz, .kml, .xlsx, .xls"
+                    className="hidden"
+                    onChange={handleStationsFileUpload}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById('wasalnyKmzUploadInput')?.click()}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black py-2.5 px-4 rounded-xl transition flex items-center gap-2 shadow-xs active:scale-95"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>رفع ملف KMZ / KML أو إكسيل 🗺️</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={downloadStationsSampleExcel}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-2.5 px-3 rounded-xl transition flex items-center gap-1.5 border border-slate-200"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>نموذج إكسيل</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleOpenAddStation}
+                    className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-black py-2.5 px-4 rounded-xl transition flex items-center gap-1.5 shadow-xs"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>إضافة محطة يدوياً</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Stations Coordinates Table */}
+              <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="w-full text-xs text-right">
+                  <thead className="bg-slate-50 text-slate-700 font-bold border-b border-slate-200">
+                    <tr>
+                      <th className="p-3">اسم المحطة / المركز</th>
+                      <th className="p-3">المحافظة والعنوان</th>
+                      <th className="p-3 font-mono">خط العرض (Lat)</th>
+                      <th className="p-3 font-mono">خط الطول (Lng)</th>
+                      <th className="p-3 text-center">المنطقة الجغرافية</th>
+                      <th className="p-3 text-center">تكلفة النقطة (ج)</th>
+                      <th className="p-3 text-center">معدل النقاط/م³</th>
+                      <th className="p-3 text-center">برنامج الولاء</th>
+                      <th className="p-3 text-center">الإجراءات</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {stations.map((st) => (
+                      <tr key={st.id} className="hover:bg-slate-50/70 transition">
+                        <td className="p-3 font-bold text-slate-900">
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs">
+                              ⛽
+                            </span>
+                            <div>
+                              <div>{st.name}</div>
+                              {st.code && <div className="text-[10px] text-slate-400 font-mono">{st.code}</div>}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-3 text-slate-600">{st.city} - {st.address}</td>
+                        <td className="p-3 font-mono text-[11px] text-slate-700" dir="ltr">
+                          {st.latitude.toFixed(5)}
+                        </td>
+                        <td className="p-3 font-mono text-[11px] text-slate-700" dir="ltr">
+                          {st.longitude.toFixed(5)}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-800">
+                            {st.region || 'القاهرة الكبرى'}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center font-mono font-black text-amber-700">
+                          {st.costPerPointEgp ?? 0.35} ج
+                        </td>
+                        <td className="p-3 text-center font-mono font-bold text-blue-700">
+                          {st.pointsAwardRatePerMeter ?? 10} ن/م³
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${st.isLoyaltyProgramActive !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                            {st.isLoyaltyProgramActive !== false ? 'نشط' : 'معطل'}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditStation(st)}
+                              className="text-emerald-700 hover:bg-emerald-50 p-1.5 rounded-lg transition"
+                              title="تعديل بيانات وإحداثيات المحطة"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteStation(st.id)}
+                              className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg transition"
+                              title="حذف المحطة"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             {/* Bottom Save Action */}
             <div className="bg-slate-50 border border-slate-200 rounded-3xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -2597,528 +2487,229 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
         )}
 
-        {/* Tab: Visibility & Layout Reordering Control (ترتيب ومواضع عناصر صفحتي العميل والفني) */}
-        {activeTab === 'visibility' && (() => {
-          const DRIVER_SECTION_META: Record<string, { title: string; icon: string; desc: string; visKey?: keyof typeof driverVis }> = {
-            wasalny_hero: { title: 'بطاقة تطبيق وصّلني وملاحة أقرب محطة (في صدر الصفحة)', icon: '🚗', desc: 'ملاحة فورية، زر التوجيه الصوتي، واختيار خرائط كارجاس أو جوجل' },
-            promotional_banner: { title: 'بانر العروض والمسابقات وشرح برنامج الولاء', icon: '✨', desc: 'بانر العروض الترويجية والمسابقات وصياغة الذكاء الاصطناعي (معين)', visKey: 'showPromotionalBanner' },
-            golden_card: { title: 'كارت كارجاس الذهبي والباركود ونقاط الولاء', icon: '💳', desc: 'بطاقة العضوية والـ QR للتموين ورصيد النقاط والشريحة', visKey: 'showGoldenCard' },
-            rewards_bank: { title: 'بنك الهدايا والمكافآت واستبدال الأمتار المجانية', icon: '🎁', desc: 'استبدال النقاط بأمتار غاز وزيوت وكوبونات مع كود الـ QR للفني', visKey: 'showRewardsBank' },
-            fueling_count_stats: { title: 'إحصائيات التردد وعدد مرات التموين', icon: '⛽', desc: 'عدد مرات التموين من المحطة ومن الطلمبة لبناء الارتباط', visKey: 'showFuelingCountStats' },
-            maintenance_schedule: { title: 'جدول الصيانة الدورية الذكي للسيارة', icon: '🔧', desc: 'متابعة مواعيد غيار الزيت والبوجيهات وفلاتر الغاز الطبيعي', visKey: 'showMaintenanceSchedule' },
-            fueling_history: { title: 'سجل التموينات السابقة والإيصالات', icon: '📜', desc: 'سجل العمليات السابقة مع تفاصيل التاريخ والكمية والنقاط', visKey: 'showFuelingHistory' },
-            service_rating: { title: 'تقييم الخدمة ومعاملة الفني', icon: '⭐', desc: 'تقييم النجوم والسرعة والسلوك ونموذج الشكاوى', visKey: 'showServiceRating' },
-            complaints_box: { title: 'صندوق الشكاوى والمقترحات المباشرة', icon: '📨', desc: 'إرسال مقترح أو شكوى مباشرة لإدارة كارجاس', visKey: 'showComplaintsBox' },
-          };
+        {/* Tab: Visibility Matrix Control (Show/Hide in Driver & Tech pages) */}
+        {activeTab === 'visibility' && (
+          <div className="p-6 space-y-6">
+            <div className="border-b border-slate-200 pb-3">
+              <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                <Sliders className="w-5 h-5 text-purple-600" />
+                التحكم الشامل في ظهور وإخفاء محتويات صفحتي العميل والفني
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                يمكنك إخفاء أو إظهار أي عنصر في صفحات المستخدمين بنقرة زر (مثال: إخفاء أيقونة تعديل بيانات السيارة)
+              </p>
+            </div>
 
-          const TECH_SECTION_META: Record<string, { title: string; icon: string; desc: string; visKey?: keyof typeof techVis }> = {
-            shift_stats: { title: 'بطاقة الوردية وإحصائيات المبيعات والأمتار اليومية', icon: '📊', desc: 'إجمالي الأمتار والمبيعات والعمليات المنفذة في وردية الفني', visKey: 'showShiftStats' },
-            welcome_bonus: { title: 'بنك النقاط الترحيبية المتاح للفني لتوزيعه (+25, +50, +100)', icon: '🎁', desc: 'حصة الوردية من النقاط الترحيبية لبناء ولاء العميل للفني والمحطة' },
-            camera_scanner: { title: 'كاميرا مسح كود الـ QR لسيارة العميل واستبدال الهدايا', icon: '📷', desc: 'الماسح الضوئي الذكي لقراءة بيانات السائق أو كود الأمتار المجانية', visKey: 'showCameraScanner' },
-            manual_entry: { title: 'حقل الإدخال اليدوي لرقم اللوحة أو كود الاستبدال', icon: '🔢', desc: 'إمكانية إدخال رقم لوحة السيارة يدوياً في حال تعذر المسح', visKey: 'showManualEntry' },
-            fueling_form: { title: 'نموذج تنفيذ التموين (الطلمبة، الأمتار، العداد الاختياري)', icon: '⛽', desc: 'اختيار رقم الطلمبة وإدخال كمية الأمتار وإتمام التموين أو الاستبدال' },
-            gps_radar: { title: 'رادار فحص نطاق الـ 10 أمتار للـ GPS', icon: '📍', desc: 'التحقق الصارم من التواجد الفعلي داخل المحطة لمنع التلاعب', visKey: 'showGpsRadar' },
-            technician_incentives: { title: 'نظام حوافز ومكافآت ونقاط الفني والدرجات', icon: '🏅', desc: 'حافز التموين ومكافآت السلوك الممتاز', visKey: 'showTechnicianIncentives' },
-          };
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Driver Portal Controls */}
+              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3 text-xs">
+                <h4 className="font-black text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-200">
+                  <span>🚗 محتويات صفحة العميل (السائق):</span>
+                </h4>
 
-          return (
-            <div className="p-6 space-y-6">
-              {/* Header */}
-              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-                <div>
-                  <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                    <Sliders className="w-5 h-5 text-purple-600" />
-                    التحكم في ترتيب ومواضع عناصر وبنرات ومساحات صفحة العميل والفني ومصفوفة الظهور 📱
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    تحكم كامل لمدير النظام: نقل وتحريك العناصر للأعلى والأسفل وتحديد الترتيب الدقيق لكل مساحة وبانر في التطبيق
-                  </p>
-                </div>
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">أيقونة تعديل بيانات السيارة والملف</span>
+                    <span className="text-[10px] text-slate-500">مطلوب افتراضياً إخفاؤها لمنع تعديل السائق لبياناته</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={driverVis.showEditProfile}
+                    onChange={(e) => setDriverVis({ ...driverVis, showEditProfile: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => setVisibilitySubTab('reorder_layout')}
-                    className={`py-2 px-4 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                      visibilitySubTab === 'reorder_layout'
-                        ? 'bg-purple-600 text-white shadow-xs'
-                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                    }`}
-                  >
-                    <span>🎯 ترتيب ومواضع العناصر (تحريك ونقل)</span>
-                  </button>
-                  <button
-                    onClick={() => setVisibilitySubTab('checkboxes')}
-                    className={`py-2 px-4 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                      visibilitySubTab === 'checkboxes'
-                        ? 'bg-purple-600 text-white shadow-xs'
-                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                    }`}
-                  >
-                    <span>👁️ مصفوفة الإظهار والإخفاء السريعة</span>
-                  </button>
-                </div>
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">خريطة وأيقونة أقرب محطة كارجاس</span>
+                    <span className="text-[10px] text-slate-500">إظهار الخريطة ومحدد أقرب محطة وتوجيه GPS</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={driverVis.showNearestStationMap}
+                    onChange={(e) => setDriverVis({ ...driverVis, showNearestStationMap: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">كارت الولاء الذهبي والرصيد</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={driverVis.showGoldenCard}
+                    onChange={(e) => setDriverVis({ ...driverVis, showGoldenCard: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">بنك الهدايا واستبدال النقاط</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={driverVis.showRewardsBank}
+                    onChange={(e) => setDriverVis({ ...driverVis, showRewardsBank: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">جدول الصيانة الدورية الذكي</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={driverVis.showMaintenanceSchedule}
+                    onChange={(e) => setDriverVis({ ...driverVis, showMaintenanceSchedule: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">سجل التموينات السابقة</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={driverVis.showFuelingHistory}
+                    onChange={(e) => setDriverVis({ ...driverVis, showFuelingHistory: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">تقييم الخدمة ومعاملة الفني وقسم الشكاوى</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={driverVis.showServiceRating}
+                    onChange={(e) => setDriverVis({ ...driverVis, showServiceRating: e.target.checked, showComplaintsBox: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">رقم مرات التموين من المحطة ومن الطلمبة</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={driverVis.showFuelingCountStats}
+                    onChange={(e) => setDriverVis({ ...driverVis, showFuelingCountStats: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">بانر العروض والمسابقات وشرح برنامج الولاء للعملاء</span>
+                    <span className="text-[10px] text-slate-500">إظهار البانر التفاعلي أعلى شاشة السائق بالعروض المصاغة بالذكاء الاصطناعي</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={driverVis.showPromotionalBanner}
+                    onChange={(e) => setDriverVis({ ...driverVis, showPromotionalBanner: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
               </div>
 
-              {/* Sub-tab 1: Visual Reordering & Layout Manager */}
-              {visibilitySubTab === 'reorder_layout' && (
-                <div className="space-y-6 animate-in fade-in">
-                  <div className="bg-purple-50 border border-purple-200 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-                    <div className="flex items-center gap-2.5">
-                      <span className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold text-sm">
-                        ↕️
-                      </span>
-                      <div>
-                        <span className="font-bold text-purple-950 block">
-                          لوحة تحريك ونقل ترتيب العناصر في الموبايل
-                        </span>
-                        <span className="text-[11px] text-purple-700">
-                          استخدم أسهم (▲ تحريك لأعلى) و (▼ تحريك لأسفل) لتغيير موضع أي قسم وبانر كما تراه مناسباً
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={handleResetLayoutToDefault}
-                        className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1"
-                        title="استعادة الترتيب النموذجي الافتراضي"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-                        <span>استعادة الترتيب النموذجي</span>
-                      </button>
-                      <button
-                        onClick={handleSaveLayoutSettings}
-                        className="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-1.5 rounded-xl transition shadow-xs flex items-center gap-1"
-                      >
-                        <Save className="w-3.5 h-3.5" />
-                        <span>حفظ الترتيب 💾</span>
-                      </button>
-                    </div>
+              {/* Technician Portal Controls */}
+              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3 text-xs">
+                <h4 className="font-black text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-200">
+                  <span>👷‍♂️ محتويات صفحة فني التموين (الوردية):</span>
+                </h4>
+
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">كاميرا مسح باركود السيارات المباشرة</span>
                   </div>
+                  <input
+                    type="checkbox"
+                    checked={techVis.showCameraScanner}
+                    onChange={(e) => setTechVis({ ...techVis, showCameraScanner: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Driver Portal Section Reorder */}
-                    <div className="bg-slate-50 p-5 rounded-3xl border border-slate-200 space-y-4">
-                      <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl">🚗</span>
-                          <div>
-                            <h4 className="font-black text-slate-900 text-sm">
-                              ترتيب عناصر صفحة العميل (السائق)
-                            </h4>
-                            <span className="text-[11px] text-slate-500 font-mono">
-                              ({driverSectionsOrder.length} عناصر مرتبة من الأعلى للأسفل)
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2.5">
-                        {driverSectionsOrder.map((sectionKey, index) => {
-                          const meta = DRIVER_SECTION_META[sectionKey] || {
-                            title: sectionKey,
-                            icon: '📦',
-                            desc: 'قسم مخصص',
-                          };
-                          const isVis = meta.visKey ? driverVis[meta.visKey] : true;
-
-                          return (
-                            <div
-                              key={sectionKey}
-                              className={`bg-white p-3 rounded-2xl border transition shadow-2xs flex items-center justify-between gap-3 ${
-                                isVis ? 'border-slate-200' : 'border-slate-200/60 opacity-60 bg-slate-50'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                                <span className="w-6 h-6 rounded-full bg-purple-100 text-purple-900 font-mono font-black text-xs flex items-center justify-center shrink-0">
-                                  {index + 1}
-                                </span>
-                                <span className="text-base shrink-0">{meta.icon}</span>
-                                <div className="truncate">
-                                  <span className="font-bold text-slate-900 text-xs block truncate">
-                                    {meta.title}
-                                  </span>
-                                  <span className="text-[10px] text-slate-500 block truncate">
-                                    {meta.desc}
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                {meta.visKey && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setDriverVis({
-                                        ...driverVis,
-                                        [meta.visKey!]: !isVis,
-                                      })
-                                    }
-                                    className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition ${
-                                      isVis
-                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                        : 'bg-slate-100 text-slate-500 border-slate-200'
-                                    }`}
-                                    title={isVis ? 'ظاهر للعميل' : 'مخفي عن العميل'}
-                                  >
-                                    {isVis ? 'ظاهر' : 'مخفي'}
-                                  </button>
-                                )}
-
-                                <div className="flex flex-col gap-0.5">
-                                  <button
-                                    type="button"
-                                    disabled={index === 0}
-                                    onClick={() => moveDriverSection(index, 'up')}
-                                    className="p-1 rounded bg-slate-100 hover:bg-purple-100 text-slate-700 disabled:opacity-30 disabled:hover:bg-slate-100 transition"
-                                    title="تحريك لأعلى"
-                                  >
-                                    <ArrowUp className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={index === driverSectionsOrder.length - 1}
-                                    onClick={() => moveDriverSection(index, 'down')}
-                                    className="p-1 rounded bg-slate-100 hover:bg-purple-100 text-slate-700 disabled:opacity-30 disabled:hover:bg-slate-100 transition"
-                                    title="تحريك لأسفل"
-                                  >
-                                    <ArrowDown className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Technician Portal Section Reorder */}
-                    <div className="bg-slate-50 p-5 rounded-3xl border border-slate-200 space-y-4">
-                      <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl">👷‍♂️</span>
-                          <div>
-                            <h4 className="font-black text-slate-900 text-sm">
-                              ترتيب عناصر صفحة فني التموين (الوردية)
-                            </h4>
-                            <span className="text-[11px] text-slate-500 font-mono">
-                              ({techSectionsOrder.length} عناصر مرتبة من الأعلى للأسفل)
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2.5">
-                        {techSectionsOrder.map((sectionKey, index) => {
-                          const meta = TECH_SECTION_META[sectionKey] || {
-                            title: sectionKey,
-                            icon: '📦',
-                            desc: 'قسم مخصص',
-                          };
-                          const isVis = meta.visKey ? techVis[meta.visKey] : true;
-
-                          return (
-                            <div
-                              key={sectionKey}
-                              className={`bg-white p-3 rounded-2xl border transition shadow-2xs flex items-center justify-between gap-3 ${
-                                isVis ? 'border-slate-200' : 'border-slate-200/60 opacity-60 bg-slate-50'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                                <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-900 font-mono font-black text-xs flex items-center justify-center shrink-0">
-                                  {index + 1}
-                                </span>
-                                <span className="text-base shrink-0">{meta.icon}</span>
-                                <div className="truncate">
-                                  <span className="font-bold text-slate-900 text-xs block truncate">
-                                    {meta.title}
-                                  </span>
-                                  <span className="text-[10px] text-slate-500 block truncate">
-                                    {meta.desc}
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                {meta.visKey && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setTechVis({
-                                        ...techVis,
-                                        [meta.visKey!]: !isVis,
-                                      })
-                                    }
-                                    className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition ${
-                                      isVis
-                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                        : 'bg-slate-100 text-slate-500 border-slate-200'
-                                    }`}
-                                    title={isVis ? 'ظاهر للفني' : 'مخفي عن الفني'}
-                                  >
-                                    {isVis ? 'ظاهر' : 'مخفي'}
-                                  </button>
-                                )}
-
-                                <div className="flex flex-col gap-0.5">
-                                  <button
-                                    type="button"
-                                    disabled={index === 0}
-                                    onClick={() => moveTechSection(index, 'up')}
-                                    className="p-1 rounded bg-slate-100 hover:bg-purple-100 text-slate-700 disabled:opacity-30 disabled:hover:bg-slate-100 transition"
-                                    title="تحريك لأعلى"
-                                  >
-                                    <ArrowUp className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={index === techSectionsOrder.length - 1}
-                                    onClick={() => moveTechSection(index, 'down')}
-                                    className="p-1 rounded bg-slate-100 hover:bg-purple-100 text-slate-700 disabled:opacity-30 disabled:hover:bg-slate-100 transition"
-                                    title="تحريك لأسفل"
-                                  >
-                                    <ArrowDown className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">حقل الإدخال اليدوي لرقم اللوحة</span>
                   </div>
+                  <input
+                    type="checkbox"
+                    checked={techVis.showManualEntry}
+                    onChange={(e) => setTechVis({ ...techVis, showManualEntry: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
 
-                  <div className="flex items-center justify-between pt-3 border-t border-slate-200">
-                    <span className="text-xs text-slate-500">
-                      يتم حفظ ترتيب العناصر فورياً وتطبيقه في واجهات العميل والفني بالموبايل
-                    </span>
-                    <button
-                      onClick={handleSaveLayoutSettings}
-                      className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 px-6 rounded-2xl text-xs transition shadow-md flex items-center gap-1.5"
-                    >
-                      <Save className="w-4 h-4" />
-                      <span>حفظ ترتيب ومواضع الواجهات فوراً 💾</span>
-                    </button>
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">نظام حوافز ومكافآت ونقاط الفني</span>
                   </div>
-                </div>
-              )}
+                  <input
+                    type="checkbox"
+                    checked={techVis.showTechnicianIncentives}
+                    onChange={(e) => setTechVis({ ...techVis, showTechnicianIncentives: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
 
-              {/* Sub-tab 2: Checkboxes Grid (مصفوفة الإظهار والإخفاء) */}
-              {visibilitySubTab === 'checkboxes' && (
-                <div className="space-y-6 animate-in fade-in">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Driver Portal Controls */}
-                    <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3 text-xs">
-                      <h4 className="font-black text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-200">
-                        <span>🚗 محتويات صفحة العميل (السائق):</span>
-                      </h4>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">أيقونة تعديل بيانات السيارة والملف</span>
-                          <span className="text-[10px] text-slate-500">مطلوب افتراضياً إخفاؤها لمنع تعديل السائق لبياناته</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={driverVis.showEditProfile}
-                          onChange={(e) => setDriverVis({ ...driverVis, showEditProfile: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">خريطة وأيقونة أقرب محطة كارجاس</span>
-                          <span className="text-[10px] text-slate-500">إظهار الخريطة ومحدد أقرب محطة وتوجيه GPS</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={driverVis.showNearestStationMap}
-                          onChange={(e) => setDriverVis({ ...driverVis, showNearestStationMap: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">كارت الولاء الذهبي والرصيد</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={driverVis.showGoldenCard}
-                          onChange={(e) => setDriverVis({ ...driverVis, showGoldenCard: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">بنك الهدايا واستبدال النقاط</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={driverVis.showRewardsBank}
-                          onChange={(e) => setDriverVis({ ...driverVis, showRewardsBank: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">جدول الصيانة الدورية الذكي</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={driverVis.showMaintenanceSchedule}
-                          onChange={(e) => setDriverVis({ ...driverVis, showMaintenanceSchedule: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">سجل التموينات السابقة</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={driverVis.showFuelingHistory}
-                          onChange={(e) => setDriverVis({ ...driverVis, showFuelingHistory: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">تقييم الخدمة ومعاملة الفني وقسم الشكاوى</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={driverVis.showServiceRating}
-                          onChange={(e) => setDriverVis({ ...driverVis, showServiceRating: e.target.checked, showComplaintsBox: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">رقم مرات التموين من المحطة ومن الطلمبة</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={driverVis.showFuelingCountStats}
-                          onChange={(e) => setDriverVis({ ...driverVis, showFuelingCountStats: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">بانر العروض والمسابقات وشرح برنامج الولاء للعملاء</span>
-                          <span className="text-[10px] text-slate-500">إظهار البانر التفاعلي أعلى شاشة السائق بالعروض المصاغة بالذكاء الاصطناعي</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={driverVis.showPromotionalBanner}
-                          onChange={(e) => setDriverVis({ ...driverVis, showPromotionalBanner: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-                    </div>
-
-                    {/* Technician Portal Controls */}
-                    <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3 text-xs">
-                      <h4 className="font-black text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-200">
-                        <span>👷‍♂️ محتويات صفحة فني التموين (الوردية):</span>
-                      </h4>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">كاميرا مسح باركود السيارات المباشرة</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={techVis.showCameraScanner}
-                          onChange={(e) => setTechVis({ ...techVis, showCameraScanner: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">حقل الإدخال اليدوي لرقم اللوحة</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={techVis.showManualEntry}
-                          onChange={(e) => setTechVis({ ...techVis, showManualEntry: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">نظام حوافز ومكافآت ونقاط الفني</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={techVis.showTechnicianIncentives}
-                          onChange={(e) => setTechVis({ ...techVis, showTechnicianIncentives: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">رادار فحص نطاق الـ 10 أمتار للـ GPS</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={techVis.showGpsRadar}
-                          onChange={(e) => setTechVis({ ...techVis, showGpsRadar: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">إحصائيات إنجاز الوردية وإجمالي المبيعات</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={techVis.showShiftStats}
-                          onChange={(e) => setTechVis({ ...techVis, showShiftStats: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-
-                      <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                        <div>
-                          <span className="font-bold text-slate-900 block">رقم مرات التموين من المحطة ومن الطلمبة</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={techVis.showFuelingCountStats}
-                          onChange={(e) => setTechVis({ ...techVis, showFuelingCountStats: e.target.checked })}
-                          className="w-5 h-5 text-purple-600 rounded"
-                        />
-                      </label>
-                    </div>
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">رادار فحص نطاق الـ 10 أمتار للـ GPS</span>
                   </div>
+                  <input
+                    type="checkbox"
+                    checked={techVis.showGpsRadar}
+                    onChange={(e) => setTechVis({ ...techVis, showGpsRadar: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
 
-                  <button
-                    onClick={() => handleSaveAllSettings()}
-                    className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-2xl text-xs transition shadow-md"
-                  >
-                    حفظ مصفوفة الظهور والإخفاء فوراً 💾
-                  </button>
-                </div>
-              )}
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">إحصائيات إنجاز الوردية وإجمالي المبيعات</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={techVis.showShiftStats}
+                    onChange={(e) => setTechVis({ ...techVis, showShiftStats: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                  <div>
+                    <span className="font-bold text-slate-900 block">رقم مرات التموين من المحطة ومن الطلمبة</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={techVis.showFuelingCountStats}
+                    onChange={(e) => setTechVis({ ...techVis, showFuelingCountStats: e.target.checked })}
+                    className="w-5 h-5 text-purple-600 rounded"
+                  />
+                </label>
+              </div>
             </div>
-          );
-        })()}
 
+            <button
+              onClick={() => handleSaveAllSettings()}
+              className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-2xl text-xs transition shadow-md"
+            >
+              حفظ مصفوفة الظهور والإخفاء فوراً 💾
+            </button>
+          </div>
+        )}
 
         {/* Tab: Station Sales, ROI, & Promotion Budget Allocation */}
-        {activeTab === 'sales_budget' && (() => {
+        {(activeTab as string) === 'sales_budget' && (() => {
           // استخراج كافة الشهور المتوفرة في سجلات المبيعات
           const allMonthsSet = new Set<string>();
           salesRecords.forEach((r) => {
@@ -4446,172 +4037,61 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               {/* Sub-view 2: Budget Allocation & ROI Settings */}
               {salesSubTab === 'allocation' && (
                 <div className="space-y-6">
-                  {/* Master Budget Criteria & Points Formula Control Box */}
-                  <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 rounded-3xl border border-indigo-900/60 shadow-lg space-y-4">
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-indigo-800/40 pb-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">
-                            معايير الموازنة الرسمية
-                          </span>
-                          <span className="text-xs font-bold text-indigo-200">
-                            التحكم الكامل في تكلفة النقطة والمعادلة الشاملة
-                          </span>
-                        </div>
-                        <h4 className="text-base font-black text-white mt-1">
-                          معادلة احتساب نقاط الولاء وتكلفة النقطة على الشركة 🧮
-                        </h4>
-                      </div>
-                      <span className="font-mono bg-white/10 text-amber-300 font-bold px-3 py-1 rounded-xl text-xs border border-white/10">
-                        تكلفة النقطة: {loyaltyModel.costPerPointEgp} ج | سعر المتر: {pointsFormula.gasPricePerMeter} ج
-                      </span>
+                  {/* ROI & Point Cost Settings */}
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                      <label className="block font-bold text-slate-700 text-xs mb-1">
+                        نظام الولاء النشط
+                      </label>
+                      <select
+                        value={loyaltyModel.activeModelName}
+                        onChange={(e) => setLoyaltyModel({ ...loyaltyModel, activeModelName: e.target.value as any })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs font-bold"
+                      >
+                        <option value="قياسي 1:1">قياسي 1 نقطة لكل متر</option>
+                        <option value="ترويجي للمحطات المنخفضة">ترويجي ومضاعف للمحطات المنخفضة</option>
+                        <option value="باقة التاكسي والشركات">باقة التاكسي والشركات</option>
+                        <option value="أوقات غير الذروة">حوافز أوقات غير الذروة</option>
+                      </select>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
-                        <label className="block font-bold text-amber-300 text-[11px]">
-                          قيمة تكلفة النقطة بالجنيه (Cost/Point):
-                        </label>
-                        <input
-                          type="number"
-                          step="0.05"
-                          value={loyaltyModel.costPerPointEgp}
-                          onChange={(e) => {
-                            const val = Number(e.target.value);
-                            setLoyaltyModel({ ...loyaltyModel, costPerPointEgp: val });
-                            setPointsFormula({ ...pointsFormula, pointsToEgpRedemptionRatio: val });
-                          }}
-                          className="w-full bg-slate-900 text-amber-300 border border-amber-400/30 rounded-xl p-2 font-mono font-black text-sm"
-                        />
-                        <span className="text-[10px] text-slate-400 block">
-                          تعتمد عليها كافة معادلات الموازنة واستبدال الهدايا
-                        </span>
-                      </div>
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                      <label className="block font-bold text-slate-700 text-xs mb-1">
+                        تكلفة النقطة على الشركة (جنية)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.05"
+                        value={loyaltyModel.costPerPointEgp}
+                        onChange={(e) => setLoyaltyModel({ ...loyaltyModel, costPerPointEgp: Number(e.target.value) })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs font-mono font-black"
+                      />
+                    </div>
 
-                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
-                        <label className="block font-bold text-slate-200 text-[11px]">
-                          إجمالي موازنة الترويج المعتمدة (جنية):
-                        </label>
-                        <input
-                          type="number"
-                          value={loyaltyModel.totalPromotionalBudgetEgp}
-                          onChange={(e) =>
-                            setLoyaltyModel({ ...loyaltyModel, totalPromotionalBudgetEgp: Number(e.target.value) })
-                          }
-                          className="w-full bg-slate-900 text-emerald-300 border border-white/20 rounded-xl p-2 font-mono font-black text-sm"
-                        />
-                        <span className="text-[10px] text-slate-400 block">
-                          الموازنة الإجمالية الموجهة للمحطات والحملات
-                        </span>
-                      </div>
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                      <label className="block font-bold text-slate-700 text-xs mb-1">
+                        العائد المتوقع من الولاء (%)
+                      </label>
+                      <input
+                        type="number"
+                        value={loyaltyModel.expectedMarginGainPct}
+                        onChange={(e) => setLoyaltyModel({ ...loyaltyModel, expectedMarginGainPct: Number(e.target.value) })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs font-mono font-black"
+                      />
+                    </div>
 
-                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
-                        <label className="block font-bold text-slate-200 text-[11px]">
-                          سعر متر الغاز الطبيعي المعتمد (جنية):
-                        </label>
-                        <input
-                          type="number"
-                          step="0.5"
-                          value={pointsFormula.gasPricePerMeter}
-                          onChange={(e) => {
-                            const val = Number(e.target.value);
-                            setPointsFormula({ ...pointsFormula, gasPricePerMeter: val });
-                            setEditGasPrice(val);
-                          }}
-                          className="w-full bg-slate-900 text-white border border-white/20 rounded-xl p-2 font-mono font-black text-sm"
-                        />
-                        <span className="text-[10px] text-slate-400 block">
-                          السعر الرسمي للمتر (13 ج/م³)
-                        </span>
-                      </div>
-
-                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
-                        <label className="block font-bold text-slate-200 text-[11px]">
-                          معدل النقاط الأساسي لكل متر:
-                        </label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={pointsFormula.basePointsPerMeter}
-                          onChange={(e) => {
-                            const val = Number(e.target.value);
-                            setPointsFormula({ ...pointsFormula, basePointsPerMeter: val });
-                            setEditPointsRatio(val);
-                          }}
-                          className="w-full bg-slate-900 text-white border border-white/20 rounded-xl p-2 font-mono font-black text-sm"
-                        />
-                        <span className="text-[10px] text-slate-400 block">
-                          المعيار الأساسي (1 متر = 1 نقطة)
-                        </span>
-                      </div>
-
-                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
-                        <label className="block font-bold text-slate-200 text-[11px]">
-                          مضاعف الشريحة البرونزية / العادية:
-                        </label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={pointsFormula.tierBronzeMultiplier}
-                          onChange={(e) =>
-                            setPointsFormula({ ...pointsFormula, tierBronzeMultiplier: Number(e.target.value) })
-                          }
-                          className="w-full bg-slate-900 text-white border border-white/20 rounded-xl p-2 font-mono font-bold"
-                        />
-                      </div>
-
-                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
-                        <label className="block font-bold text-slate-200 text-[11px]">
-                          مضاعف الشريحة الفضية:
-                        </label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={pointsFormula.tierSilverMultiplier}
-                          onChange={(e) =>
-                            setPointsFormula({ ...pointsFormula, tierSilverMultiplier: Number(e.target.value) })
-                          }
-                          className="w-full bg-slate-900 text-white border border-white/20 rounded-xl p-2 font-mono font-bold"
-                        />
-                      </div>
-
-                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
-                        <label className="block font-bold text-amber-300 text-[11px]">
-                          مضاعف كارت الولاء الذهبي:
-                        </label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={pointsFormula.tierGoldMultiplier}
-                          onChange={(e) =>
-                            setPointsFormula({ ...pointsFormula, tierGoldMultiplier: Number(e.target.value) })
-                          }
-                          className="w-full bg-slate-900 text-amber-300 border border-amber-400/30 rounded-xl p-2 font-mono font-bold"
-                        />
-                      </div>
-
-                      <div className="bg-white/10 p-3.5 rounded-2xl border border-white/10 space-y-1">
-                        <label className="block font-bold text-emerald-300 text-[11px]">
-                          رصيد نقاط الترحيب للفني / وردية:
-                        </label>
-                        <input
-                          type="number"
-                          value={pointsFormula.technicianWelcomePointsPerShift}
-                          onChange={(e) =>
-                            setPointsFormula({
-                              ...pointsFormula,
-                              technicianWelcomePointsPerShift: Number(e.target.value),
-                            })
-                          }
-                          className="w-full bg-slate-900 text-emerald-300 border border-emerald-400/30 rounded-xl p-2 font-mono font-bold"
-                        />
-                        <span className="text-[10px] text-slate-400 block">
-                          حصة الفني لتوزيعها (+25، +50، +100)
-                        </span>
-                      </div>
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                      <label className="block font-bold text-slate-700 text-xs mb-1">
+                        إجمالي موازنة الترويج (جنية)
+                      </label>
+                      <input
+                        type="number"
+                        value={loyaltyModel.totalPromotionalBudgetEgp}
+                        onChange={(e) => setLoyaltyModel({ ...loyaltyModel, totalPromotionalBudgetEgp: Number(e.target.value) })}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs font-mono font-black"
+                      />
                     </div>
                   </div>
-
 
                   {/* Detected Period & File Info Banner */}
                   <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
@@ -4813,12 +4293,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   }}
                   className={`py-2 px-4 rounded-xl text-xs font-black transition flex items-center gap-2 ${
                     effectivePromoTab === 'campaigns'
-                      ? 'bg-amber-500 text-slate-950 shadow-xs'
+                      ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md font-black'
                       : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                   }`}
                 >
                   <Sparkles className="w-4 h-4 text-amber-600" />
-                  <span>ورشة العروض والمسابقات بالذكاء الاصطناعي ({campaigns.length})</span>
+                  <span>ورشة العروض والمسابقات وصياغة البانر 📢 ({campaigns.length})</span>
                 </button>
 
                 <button
@@ -4829,12 +4309,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   }}
                   className={`py-2 px-4 rounded-xl text-xs font-black transition flex items-center gap-2 ${
                     effectivePromoTab === 'calculator'
-                      ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-xs'
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                      ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md font-black'
+                      : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200'
                   }`}
                 >
                   <Calculator className="w-4 h-4 text-emerald-500" />
-                  <span>حاسبة نقاط الولاء ودراسة الجدوى الاقتصادية 🧮 (باقة المئوية وفر 10.5 ج)</span>
+                  <span>حاسبة نقاط الولاء وتعديل المعيار الاقتصادي الرسمي 🧮⚙️</span>
                 </button>
 
                 <button
@@ -4869,6 +4349,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   <span>بنك الأفكار والمراجع التسويقية والروابط 💡 ({ideasBank.length})</span>
                 </button>
               </div>
+
+              {/* Sub-Tab 0: Master Formula & Cost Per Point Control */}
+              {(effectivePromoTab as string) === 'formula_engine' && (
+                <div className="space-y-6 animate-in fade-in">
+                  <PromotionsFormulaManager />
+                </div>
+              )}
 
               {/* Sub-Tab 1: Campaigns */}
               {effectivePromoTab === 'campaigns' && (
@@ -5218,30 +4705,33 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       </div>
 
                       {/* Card Footer Actions */}
-                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5 flex-wrap">
                         <div className="flex items-center gap-1.5">
                           <button
+                            type="button"
+                            onClick={() => setEditingCampaign(camp)}
+                            className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black px-2.5 py-1.5 rounded-xl text-xs flex items-center gap-1 transition shadow-xs"
+                            title="تعديل العرض وصيغة البانر"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>تعديل البانر ✏️</span>
+                          </button>
+
+                          <button
+                            type="button"
                             onClick={() => handleToggleCampaign(camp.id)}
-                            className={`px-3 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1 ${
+                            className={`px-2.5 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1 ${
                               camp.isActive
                                 ? 'bg-amber-100 text-amber-900 hover:bg-amber-200'
                                 : 'bg-emerald-600 text-white hover:bg-emerald-700'
                             }`}
                           >
-                            {camp.isActive ? 'إخفاء من البانر' : 'تفعيل بالبانر 🚀'}
-                          </button>
-
-                          <button
-                            onClick={() => handleStartEditCampaign(camp)}
-                            className="bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold px-3 py-1.5 rounded-xl border border-blue-200 transition flex items-center gap-1"
-                            title="تعديل تفاصيل الحملة أو المسابقة"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                            <span>تعديل ✏️</span>
+                            {camp.isActive ? 'إخفاء' : 'تفعيل بالبانر 🚀'}
                           </button>
                         </div>
 
                         <button
+                          type="button"
                           onClick={() => handleDeleteCampaign(camp.id)}
                           className="text-rose-500 hover:text-rose-700 p-1.5 rounded-lg transition"
                           title="حذف العرض"
@@ -5253,290 +4743,437 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   </div>
                 ))}
               </div>
-            </div>
 
-            {/* Edit Campaign Modal */}
-            {editingCampaign && (
-              <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-                <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 my-8 space-y-4 max-h-[90vh] overflow-y-auto">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                    <div className="flex items-center gap-2">
-                      <span className="w-9 h-9 rounded-xl bg-blue-100 text-blue-800 flex items-center justify-center font-bold text-base">
-                        ✏️
+              {/* Modal: Edit Campaign & Banner Copy (التحكم في صيغة البانر وتعديل العروض) */}
+              {editingCampaign && (
+                <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white rounded-3xl max-w-3xl w-full border border-slate-200 shadow-2xl p-6 space-y-5 animate-in zoom-in-95 my-8 max-h-[90vh] overflow-y-auto">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-700 flex items-center justify-center font-bold">
+                          ✏️
+                        </div>
+                        <div>
+                          <h4 className="font-black text-base text-slate-900">
+                            التحكم في صيغة البانر وتعديل العرض الترويجي
+                          </h4>
+                          <p className="text-xs text-slate-500">
+                            تعديل الصياغة الكاملة والنصوص والمكافأة وخلفية البانر المعروض للسائقين
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setEditingCampaign(null)}
+                        className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    {/* Live Interactive Banner Preview */}
+                    <div className="space-y-1.5">
+                      <span className="text-xs font-black text-slate-700 block">
+                        👁️ معاينة شكل وصيغة البانر الحية لحظياً:
                       </span>
-                      <div>
-                        <h4 className="font-black text-sm text-slate-900">
-                          تعديل الحملة / المسابقة المسجلة
-                        </h4>
-                        <p className="text-[11px] text-slate-500">
-                          تعديل فوري لكافة نصوص وبيانات وموازنة ومكافأة الحملة المعروضة للعميل
-                        </p>
+                      <div className={`p-5 rounded-2xl text-white shadow-lg bg-gradient-to-r ${editingCampaign.bannerGradient || 'from-blue-900 to-slate-900'} relative overflow-hidden transition-all duration-300`}>
+                        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                          <div className="space-y-2 max-w-xl">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full">
+                                {editingCampaign.badge || 'عرض خاص'}
+                              </span>
+                              <span className="bg-white/20 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                مكافأة: +{editingCampaign.pointsReward} نقطة ({editingCampaign.financialEquivalentEgp} ج)
+                              </span>
+                            </div>
+                            <h4 className="text-lg font-black text-white">{editingCampaign.title || 'عنوان العرض'}</h4>
+                            <p className="text-xs text-slate-200 leading-relaxed font-light">{editingCampaign.aiGeneratedCopy || editingCampaign.rawIdea}</p>
+                            <div className="bg-white/10 p-2.5 rounded-xl border border-white/10 text-[11px] text-slate-300">
+                              <span className="text-amber-300 font-bold block mb-0.5">💡 شرح برنامج الولاء:</span>
+                              {editingCampaign.explanationOfLoyalty || 'برنامج ولاء كارجاس بيقدر تعبك وشغلك...'}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col items-center gap-2 w-full md:w-auto">
+                            <button className="w-full md:w-auto bg-amber-400 text-slate-950 font-black text-xs px-5 py-2.5 rounded-xl shadow-md">
+                              {editingCampaign.buttonText || 'فول واكسب الآن ⛽'}
+                            </button>
+                            <span className="text-[10px] text-slate-300">مخصص مالي: {editingCampaign.allocatedBudgetItemEgp?.toLocaleString() || 0} ج</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setEditingCampaign(null)}
-                      className="text-slate-400 hover:text-slate-600 p-1 rounded-lg text-lg font-bold"
-                    >
-                      ✕
-                    </button>
-                  </div>
 
-                  <form onSubmit={handleSaveEditedCampaign} className="space-y-4 text-xs">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="sm:col-span-2">
-                        <label className="block font-bold text-slate-700 mb-1">
-                          عنوان العرض / المسابقة البارز:
-                        </label>
+                    {/* Form fields */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                      <div className="space-y-1">
+                        <label className="font-bold text-slate-800 block">عنوان العرض الرئيسي:</label>
                         <input
                           type="text"
-                          required
                           value={editingCampaign.title}
                           onChange={(e) => setEditingCampaign({ ...editingCampaign, title: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold"
                         />
                       </div>
 
-                      <div className="sm:col-span-2">
-                        <label className="block font-bold text-slate-700 mb-1">
-                          الشرح الترويجي المختصر (Subtitle):
-                        </label>
+                      <div className="space-y-1">
+                        <label className="font-bold text-slate-800 block">العنوان الفرعي / الوصف المختصر:</label>
                         <input
                           type="text"
                           value={editingCampaign.subtitle}
                           onChange={(e) => setEditingCampaign({ ...editingCampaign, subtitle: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs"
                         />
                       </div>
 
-                      <div>
-                        <label className="block font-bold text-slate-700 mb-1">التصنيف:</label>
-                        <select
-                          value={editingCampaign.category}
-                          onChange={(e) => setEditingCampaign({ ...editingCampaign, category: e.target.value as any })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold"
-                        >
-                          <option value="مسابقة">مسابقة وتحدي 🏆</option>
-                          <option value="مضاعفة نقاط">مضاعفة نقاط الولاء ⭐</option>
-                          <option value="عرض ترويجي">عرض ترويجي خاص 🔥</option>
-                          <option value="خصم خدمات">خصومات الزيوت والصيانة 🔧</option>
-                          <option value="شرح برنامج الولاء">شرح برنامج ولاء كارجاس 💎</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block font-bold text-slate-700 mb-1">شارة البانر (Badge):</label>
-                        <input
-                          type="text"
-                          value={editingCampaign.badge}
-                          onChange={(e) => setEditingCampaign({ ...editingCampaign, badge: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold"
-                          placeholder="مثلاً: مسابقة نشطة 🏆 أو عرض خاص 🔥"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block font-bold text-slate-700 mb-1">
-                          عدد نقاط المكافأة للسائق:
-                        </label>
-                        <input
-                          type="number"
-                          required
-                          value={editingCampaign.pointsReward}
-                          onChange={(e) => {
-                            const pts = Number(e.target.value);
-                            const costPerPoint = loyaltyModel.costPerPointEgp || 0.35;
-                            const equiv = Number((pts * costPerPoint).toFixed(1));
-                            setEditingCampaign({
-                              ...editingCampaign,
-                              pointsReward: pts,
-                              financialEquivalentEgp: equiv,
-                            });
-                          }}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono font-black text-amber-700"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block font-bold text-slate-700 mb-1">
-                          المقابل المالي بالجنية (معايير الموازنة):
-                        </label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={editingCampaign.financialEquivalentEgp}
-                          onChange={(e) => setEditingCampaign({ ...editingCampaign, financialEquivalentEgp: Number(e.target.value) })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono font-bold"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block font-bold text-slate-700 mb-1">
-                          المخصص المالي للبند (جنية):
-                        </label>
-                        <input
-                          type="number"
-                          value={editingCampaign.allocatedBudgetItemEgp}
-                          onChange={(e) => setEditingCampaign({ ...editingCampaign, allocatedBudgetItemEgp: Number(e.target.value) })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono font-bold"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block font-bold text-slate-700 mb-1">
-                          عدد العملاء المستهدفين:
-                        </label>
-                        <input
-                          type="number"
-                          value={editingCampaign.targetDriversCount}
-                          onChange={(e) => setEditingCampaign({ ...editingCampaign, targetDriversCount: Number(e.target.value) })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono font-bold"
-                        />
-                      </div>
-
-                      <div className="sm:col-span-2">
-                        <label className="block font-bold text-slate-700 mb-1">
-                          نص الصياغة الإعلانية والترويجية الكاملة:
+                      <div className="space-y-1 md:col-span-2">
+                        <label className="font-bold text-slate-800 block">
+                          صيغة البانر الترويجي لـ "مُعِين" (النص المشوق المعروض للسائقين بالكامل):
                         </label>
                         <textarea
                           rows={3}
-                          value={editingCampaign.aiGeneratedCopy || editingCampaign.rawIdea}
+                          value={editingCampaign.aiGeneratedCopy}
                           onChange={(e) => setEditingCampaign({ ...editingCampaign, aiGeneratedCopy: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 leading-relaxed"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs leading-relaxed font-sans"
                         />
                       </div>
 
-                      <div className="sm:col-span-2">
-                        <label className="block font-bold text-slate-700 mb-1">
-                          شرح برنامج كارجاس للولاء المرتبط بالعرض:
+                      <div className="space-y-1 md:col-span-2">
+                        <label className="font-bold text-slate-800 block">
+                          صيغة شرح برنامج الولاء في البانر:
                         </label>
                         <textarea
                           rows={2}
                           value={editingCampaign.explanationOfLoyalty}
                           onChange={(e) => setEditingCampaign({ ...editingCampaign, explanationOfLoyalty: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 leading-relaxed"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs leading-relaxed font-sans"
                         />
                       </div>
 
-                      <div>
-                        <label className="block font-bold text-slate-700 mb-1">نص زر التفاعل:</label>
+                      <div className="space-y-1">
+                        <label className="font-bold text-slate-800 block">شارة البانر (Badge):</label>
+                        <input
+                          type="text"
+                          value={editingCampaign.badge}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, badge: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="font-bold text-slate-800 block">نص زر التفاعل (Call to Action):</label>
                         <input
                           type="text"
                           value={editingCampaign.buttonText}
                           onChange={(e) => setEditingCampaign({ ...editingCampaign, buttonText: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold"
                         />
                       </div>
 
-                      <div>
-                        <label className="block font-bold text-slate-700 mb-1">إجراء الزر التفاعلي:</label>
+                      <div className="space-y-1">
+                        <label className="font-bold text-slate-800 block">مكافأة النقاط للسائق:</label>
+                        <input
+                          type="number"
+                          value={editingCampaign.pointsReward}
+                          onChange={(e) => {
+                            const pts = Number(e.target.value);
+                            setEditingCampaign({
+                              ...editingCampaign,
+                              pointsReward: pts,
+                              financialEquivalentEgp: Number((pts * (loyaltyModel.costPerPointEgp || 0.35)).toFixed(1)),
+                            });
+                          }}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono font-bold"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="font-bold text-slate-800 block">المخصص المالي للبند (جنية):</label>
+                        <input
+                          type="number"
+                          value={editingCampaign.allocatedBudgetItemEgp}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, allocatedBudgetItemEgp: Number(e.target.value) })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono font-bold"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="font-bold text-slate-800 block">تدرج لون خلفية البانر:</label>
                         <select
-                          value={editingCampaign.buttonAction}
-                          onChange={(e) => setEditingCampaign({ ...editingCampaign, buttonAction: e.target.value as any })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold"
+                          value={editingCampaign.bannerGradient}
+                          onChange={(e) => setEditingCampaign({ ...editingCampaign, bannerGradient: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold"
                         >
-                          <option value="navigate_map">التوجه لأقرب محطة (وصلني) 🗺️</option>
-                          <option value="view_rewards">فتح بنك المكافآت 🎁</option>
-                          <option value="open_fueling">كود التموين والولاء ⛽</option>
-                          <option value="view_details">عرض تفاصيل العرض ℹ️</option>
+                          <option value="from-blue-900 via-indigo-900 to-slate-900">أزرق ملكي ونيلي داكن 🔵</option>
+                          <option value="from-emerald-900 via-teal-900 to-slate-900">زمردي وتيلي بترولي 🟢</option>
+                          <option value="from-amber-900 via-amber-950 to-slate-900">كهرماني وعنبري ذهبي 🟡</option>
+                          <option value="from-purple-950 via-slate-900 to-indigo-950">موف داكن ونيلي فاخر 🟣</option>
+                          <option value="from-slate-900 via-slate-800 to-slate-950">رمادي داكن وفحمي احترافي ⚫</option>
                         </select>
                       </div>
 
-                      <div>
-                        <label className="block font-bold text-slate-700 mb-1">تاريخ البدء:</label>
-                        <input
-                          type="date"
-                          value={editingCampaign.startDate}
-                          onChange={(e) => setEditingCampaign({ ...editingCampaign, startDate: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block font-bold text-slate-700 mb-1">تاريخ الانتهاء:</label>
-                        <input
-                          type="date"
-                          value={editingCampaign.endDate}
-                          onChange={(e) => setEditingCampaign({ ...editingCampaign, endDate: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5"
-                        />
-                      </div>
-
-                      <div className="sm:col-span-2">
-                        <label className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer">
+                      <div className="space-y-1 flex flex-col justify-end">
+                        <label className="flex items-center gap-2 cursor-pointer bg-slate-50 border border-slate-200 p-2.5 rounded-xl font-bold">
                           <input
                             type="checkbox"
                             checked={editingCampaign.isActive}
                             onChange={(e) => setEditingCampaign({ ...editingCampaign, isActive: e.target.checked })}
-                            className="w-4 h-4 text-emerald-600 rounded"
+                            className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
                           />
-                          <span className="font-bold text-slate-900">
-                            تفعيل العرض وإظهاره فوراً في بانر صفحة العميل الرئيسية
-                          </span>
+                          <span>تفعيل وظهور العرض في البانر التفاعلي</span>
                         </label>
                       </div>
                     </div>
 
+                    {/* Actions */}
                     <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                       <button
                         type="button"
                         onClick={() => setEditingCampaign(null)}
-                        className="px-4 py-2 rounded-xl text-slate-600 bg-slate-100 hover:bg-slate-200 font-bold transition"
+                        className="px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
                       >
-                        إلغاء
+                        إلغاء التعديل
                       </button>
                       <button
-                        type="submit"
-                        className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black shadow-md transition flex items-center gap-1.5"
+                        type="button"
+                        onClick={() => {
+                          const updatedList = campaigns.map((c) => (c.id === editingCampaign.id ? editingCampaign : c));
+                          setCampaigns(updatedList);
+                          savePromotionalCampaigns(updatedList);
+                          setEditingCampaign(null);
+                          alert(`✅ تم تحديث صيغة البانر وحفظ تعديلات العرض [${editingCampaign.title}] بنجاح!`);
+                        }}
+                        className="px-6 py-2.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white shadow-md transition flex items-center gap-1.5"
                       >
-                        <Save className="w-4 h-4" />
-                        <span>حفظ التعديلات فوراً ✅</span>
+                        <Check className="w-4 h-4" />
+                        <span>حفظ وتثبيت تعديلات البانر فوراً 💾</span>
                       </button>
                     </div>
-                  </form>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
 
-
-        {/* Sub-Tab 2: Loyalty Points Calculator & Economic Feasibility (حاسبة نقاط الولاء.html) */}
+        {/* Sub-Tab 2: Loyalty Points Calculator & Official Economic Standard Customizer */}
         {effectivePromoTab === 'calculator' && (() => {
+          const gasPrice = officialGasPrice;
+          const costPerPoint = officialCostPerPoint;
+          const savingsPerMeter = officialGasolineSavingsPerMeter;
+          const marginGain = officialMarginGainPct;
+          const rewardValPerPoint = customerRewardPerPointEgp;
+
           const totalPoints = Math.round(calcFuelMeters * calcMultiplier);
-          const cargasCostEgp = Number((totalPoints * calcCostPerPoint).toFixed(2));
-          const customerRewardValueEgp = Number((totalPoints * 0.50).toFixed(2));
-          const freeMetersEquivalent = Number((customerRewardValueEgp / calcGasPrice).toFixed(1));
-          const cargasTotalRevenueEgp = Number((calcFuelMeters * calcGasPrice).toFixed(2));
-          const driverSavingsVsGasolineEgp = Number((calcFuelMeters * calcGasolineSavingsPerMeter).toFixed(2));
+          const cargasCostEgp = Number((totalPoints * costPerPoint).toFixed(2));
+          const customerRewardValueEgp = Number((totalPoints * rewardValPerPoint).toFixed(2));
+          const freeMetersEquivalent = Number((customerRewardValueEgp / gasPrice).toFixed(1));
+          const cargasTotalRevenueEgp = Number((calcFuelMeters * gasPrice).toFixed(2));
+          const driverSavingsVsGasolineEgp = Number((calcFuelMeters * savingsPerMeter).toFixed(2));
           const loyaltyCostPct = cargasTotalRevenueEgp > 0 ? Number(((cargasCostEgp / cargasTotalRevenueEgp) * 100).toFixed(2)) : 0;
-          const corporateMarginGainPct = 28;
+          const corporateMarginGainPct = marginGain;
+
+          const handleSaveOfficialEconomicStandard = () => {
+            const updatedModel: LoyaltyCostModel = {
+              ...loyaltyModel,
+              costPerPointEgp: officialCostPerPoint,
+              expectedMarginGainPct: officialMarginGainPct,
+              officialGasPrice,
+              officialCostPerPoint,
+              officialGasolineSavingsPerMeter,
+              officialMarginGainPct,
+              centennialMeters,
+              centennialPoints,
+              centennialRewardValueEgp,
+              customerRewardPerPointEgp,
+            };
+            setLoyaltyModel(updatedModel);
+            setCalcGasPrice(officialGasPrice);
+            setCalcCostPerPoint(officialCostPerPoint);
+            setCalcGasolineSavingsPerMeter(officialGasolineSavingsPerMeter);
+            
+            const updatedConfig: AppConfig = {
+              ...config,
+              gasPricePerMeter: officialGasPrice,
+              loyaltyCostModel: updatedModel,
+            };
+            onUpdateConfig(updatedConfig);
+            saveAppConfig(updatedConfig);
+            setIsEditingEconomicStandard(false);
+            alert('✅ تم اعتماد وحفظ المعيار الاقتصادي الرسمي الجديد بنجاح في المنظومة والحاسبة!');
+          };
+
+          const handleResetOfficialEconomicStandard = () => {
+            setOfficialGasPrice(13.0);
+            setOfficialCostPerPoint(0.35);
+            setOfficialGasolineSavingsPerMeter(10.5);
+            setOfficialMarginGainPct(28);
+            setCentennialMeters(108);
+            setCentennialPoints(100);
+            setCentennialRewardValueEgp(50);
+            setCustomerRewardPerPointEgp(0.50);
+          };
 
           return (
             <div className="space-y-6 animate-in fade-in">
-              {/* Centennial Package & Core Economics Hero Banner */}
+              {/* Centennial Package & Core Economics Hero Banner with Customizer Toggle */}
               <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white p-6 rounded-3xl border border-emerald-800/60 shadow-lg space-y-4">
                 <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-emerald-800/40 pb-4">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                        المعيار الاقتصادي الرسمي لكارجاس
+                        المعيار الاقتصادي الرسمي المعتمد لكارجاس
                       </span>
                       <span className="text-emerald-300 font-mono text-xs">معايير ملف حاسبة نقاط الولاء</span>
                     </div>
                     <h4 className="text-lg font-black text-white">
-                      🧮 حاسبة نقاط الولاء والجدوى الاقتصادية (13 ج/م³ • 0.35 ج/نقطة • وفر 10.5 ج/م³)
+                      🧮 حاسبة نقاط الولاء والجدوى الاقتصادية ({officialGasPrice} ج/م³ • {officialCostPerPoint} ج/نقطة • وفر {officialGasolineSavingsPerMeter} ج/م³)
                     </h4>
                     <p className="text-xs text-slate-300 max-w-3xl leading-relaxed">
-                      نموذج مالي واقتصادي دقيق: كل متر غاز طبيعي يمنح نقطة ولاء (أو أكثر حسب مضاعف المحطة)، وتكلفة النقطة 0.35 ج فقط على الشركة، بينما يحقق السائق وفراً حقيقياً قدره 10.50 ج لكل متر مقارنة ببنزين 92/95، مع باقة المئوية المعتمدة (108 م³ / 100 نقطة) ونمو ربحي مستهدف +28%.
+                      نموذج مالي واقتصادي دقيق: كل متر غاز طبيعي يمنح نقطة ولاء، وتكلفة النقطة {officialCostPerPoint} ج على الشركة، بينما يحقق السائق وفراً قدره {officialGasolineSavingsPerMeter} ج لكل متر مقارنة بالبنزين، مع باقة المئوية المعتمدة ({centennialMeters} م³ / {centennialPoints} نقطة) ونمو ربحي مستهدف +{corporateMarginGainPct}%.
                     </p>
                   </div>
 
-                  <div className="bg-emerald-900/40 border border-emerald-500/40 p-3 rounded-2xl text-center shrink-0">
-                    <span className="text-[10px] text-emerald-200 block">نمو هامش أرباح الشركة</span>
-                    <span className="font-mono font-black text-amber-300 text-xl">+{corporateMarginGainPct}%</span>
-                    <span className="text-[10px] text-slate-300 block">Margin Gain</span>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="bg-emerald-900/40 border border-emerald-500/40 p-3 rounded-2xl text-center">
+                      <span className="text-[10px] text-emerald-200 block">نمو هامش أرباح الشركة</span>
+                      <span className="font-mono font-black text-amber-300 text-xl">+{corporateMarginGainPct}%</span>
+                      <span className="text-[10px] text-slate-300 block">Margin Gain</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingEconomicStandard(!isEditingEconomicStandard)}
+                      className={`px-4 py-3 rounded-2xl text-xs font-black transition flex flex-col items-center gap-1 shadow-md border ${
+                        isEditingEconomicStandard
+                          ? 'bg-rose-500 hover:bg-rose-600 text-white border-rose-400'
+                          : 'bg-amber-500 hover:bg-amber-600 text-slate-950 border-amber-400'
+                      }`}
+                    >
+                      <Sliders className="w-5 h-5" />
+                      <span>{isEditingEconomicStandard ? 'إغلاق التعديل ✖️' : 'تعديل المعيار الاقتصادي ⚙️'}</span>
+                    </button>
                   </div>
                 </div>
+
+                {/* Economic Standard Interactive Customizer Panel */}
+                {isEditingEconomicStandard && (
+                  <div className="bg-slate-900/90 border-2 border-amber-400/80 rounded-2xl p-5 space-y-4 animate-in fade-in">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-amber-400 font-black text-sm flex items-center gap-1.5">
+                          <Sliders className="w-4 h-4" />
+                          <span>تعديل معايير المعيار الاقتصادي الرسمي لكارجاس (تحكم مدير النظام):</span>
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleResetOfficialEconomicStandard}
+                          className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 border border-slate-700"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>استعادة المعيار النموذجي الافتراضي</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveOfficialEconomicStandard}
+                          className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black px-4 py-1.5 rounded-xl text-xs transition shadow-md flex items-center gap-1"
+                        >
+                          <Save className="w-4 h-4" />
+                          <span>اعتماد وحفظ المعيار الاقتصادي للنظام 💾</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div>
+                        <label className="block text-emerald-200 font-bold mb-1">سعر المتر الرسمي (ج/م³):</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={officialGasPrice}
+                          onChange={(e) => setOfficialGasPrice(Math.max(1, Number(e.target.value)))}
+                          className="w-full bg-slate-950 border border-emerald-600/50 rounded-xl p-2 text-white font-mono font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-emerald-200 font-bold mb-1">تكلفة النقطة بالجنيه على الشركة:</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={officialCostPerPoint}
+                          onChange={(e) => setOfficialCostPerPoint(Math.max(0.01, Number(e.target.value)))}
+                          className="w-full bg-slate-950 border border-emerald-600/50 rounded-xl p-2 text-amber-300 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-emerald-200 font-bold mb-1">وفر السائق لكل متر عن البنزين:</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={officialGasolineSavingsPerMeter}
+                          onChange={(e) => setOfficialGasolineSavingsPerMeter(Math.max(0.1, Number(e.target.value)))}
+                          className="w-full bg-slate-950 border border-emerald-600/50 rounded-xl p-2 text-cyan-300 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-emerald-200 font-bold mb-1">نمو هامش أرباح الشركة (%):</label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={officialMarginGainPct}
+                          onChange={(e) => setOfficialMarginGainPct(Number(e.target.value))}
+                          className="w-full bg-slate-950 border border-emerald-600/50 rounded-xl p-2 text-emerald-300 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-emerald-200 font-bold mb-1">أمتار باقة المئوية (م³):</label>
+                        <input
+                          type="number"
+                          value={centennialMeters}
+                          onChange={(e) => setCentennialMeters(Math.max(1, Number(e.target.value)))}
+                          className="w-full bg-slate-950 border border-emerald-600/50 rounded-xl p-2 text-white font-mono font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-emerald-200 font-bold mb-1">نقاط باقة المئوية (نقطة):</label>
+                        <input
+                          type="number"
+                          value={centennialPoints}
+                          onChange={(e) => setCentennialPoints(Math.max(1, Number(e.target.value)))}
+                          className="w-full bg-slate-950 border border-emerald-600/50 rounded-xl p-2 text-amber-300 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-emerald-200 font-bold mb-1">قيمة مكافأة باقة المئوية (ج):</label>
+                        <input
+                          type="number"
+                          value={centennialRewardValueEgp}
+                          onChange={(e) => setCentennialRewardValueEgp(Math.max(1, Number(e.target.value)))}
+                          className="w-full bg-slate-950 border border-emerald-600/50 rounded-xl p-2 text-emerald-300 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-emerald-200 font-bold mb-1">قيمة النقطة للعميل (ج/نقطة):</label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          value={customerRewardPerPointEgp}
+                          onChange={(e) => setCustomerRewardPerPointEgp(Math.max(0.01, Number(e.target.value)))}
+                          className="w-full bg-slate-950 border border-emerald-600/50 rounded-xl p-2 text-amber-200 font-mono font-bold"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Centennial Package Special Callout */}
                 <div className="bg-white/10 backdrop-blur-xs p-4 rounded-2xl border border-white/15 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
@@ -5547,15 +5184,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     <div>
                       <span className="font-black text-amber-300 text-sm block">باقة المئوية المعتمدة (Centennial Loyalty Tier):</span>
                       <span className="text-slate-200 text-xs">
-                        استهلاك <strong className="text-white">108 متر غاز</strong> يمنح السائق <strong className="text-amber-300">100 نقطة</strong> (هدية بقيمة 50 ج أو 3.85 م³ غاز مجاني)، بتكلفة فعلية على كارجاس <strong className="text-emerald-300">35 ج فقط</strong> (2.49% من المبيعات)، مع وفر صافٍ للسائق قدره <strong className="text-cyan-300">1,134 ج</strong> مقارنة بالبنزين!
+                        استهلاك <strong className="text-white">{centennialMeters} متر غاز</strong> يمنح السائق <strong className="text-amber-300">{centennialPoints} نقطة</strong> (هدية بقيمة {centennialRewardValueEgp} ج)، بتكلفة فعلية على كارجاس <strong className="text-emerald-300">{(centennialPoints * officialCostPerPoint).toFixed(1)} ج فقط</strong> ({((centennialPoints * officialCostPerPoint) / (centennialMeters * officialGasPrice) * 100).toFixed(2)}% من المبيعات)، مع وفر صافٍ للسائق قدره <strong className="text-cyan-300">{(centennialMeters * officialGasolineSavingsPerMeter).toLocaleString()} ج</strong> مقارنة بالبنزين!
                       </span>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => {
-                      setCalcFuelMeters(108);
-                      setCalcMultiplier(0.9259);
+                      setCalcFuelMeters(centennialMeters);
+                      setCalcMultiplier(centennialPoints / centennialMeters);
                       setCalcPresetType('centennial');
                     }}
                     className="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-4 py-2 rounded-xl text-xs transition shrink-0 shadow-sm"
@@ -6068,37 +5705,158 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </button>
             </form>
 
-            {/* Active Rewards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {rewards.map((r) => (
-                <div key={r.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between space-y-3">
+            {/* Active Rewards Filter & Toolbar */}
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Gift className="w-5 h-5 text-emerald-600" />
                   <div>
-                    <div className="flex items-center justify-between">
-                      <span className="font-black text-sm text-slate-900">{r.title}</span>
-                      <span className="bg-amber-100 text-amber-900 text-xs font-black px-2 py-0.5 rounded-full">
-                        {r.pointsCost} نقطة
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">{r.description}</p>
-                    {r.freeMetersEquivalent && (
-                      <span className="inline-block mt-2 text-[10px] bg-emerald-50 text-emerald-800 font-bold px-2 py-0.5 rounded border border-emerald-200">
-                        ⛽ يعادل {r.freeMetersEquivalent} م³ غاز طبيعي
-                      </span>
-                    )}
-                  </div>
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                    <span className="text-[10px] text-slate-400 font-mono">{r.valueText}</span>
-                    <button
-                      onClick={() => handleDeleteReward(r.id)}
-                      className="text-rose-600 hover:text-rose-800 text-xs font-bold flex items-center gap-1"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>حذف</span>
-                    </button>
+                    <h4 className="font-black text-sm text-slate-900">
+                      قائمة بنك الهدايا والمكافآت المعتمدة ({rewards.length} هدية وكوبون)
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      نظام حوافز يعتمد على المنتجات العينية، الزيوت، الصيانة، الفحص، وكوبونات الشركاء
+                    </p>
                   </div>
                 </div>
-              ))}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirm('هل ترغب في استعادة كتالوج الـ 100 هدية المعتمد بالكامل؟')) {
+                      saveRewards(REWARDS_100_CATALOG);
+                      onUpdateRewards(REWARDS_100_CATALOG);
+                    }
+                  }}
+                  className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold text-xs px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 active:scale-95"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-amber-600" />
+                  <span>استعادة بنك الـ 100 هدية المعتمد 🔄</span>
+                </button>
+              </div>
+
+              {/* Search & Category Pills */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    placeholder="ابحث في الـ 100 هدية (بالاسم، الكوبون، الزيت، الصيانة)..."
+                    value={rewardSearchFilter}
+                    onChange={(e) => setRewardSearchFilter(e.target.value)}
+                    className="w-full bg-white border border-slate-300 rounded-xl pr-3 pl-8 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  {rewardSearchFilter && (
+                    <button
+                      onClick={() => setRewardSearchFilter('')}
+                      className="absolute left-2.5 top-2.5 text-slate-400 hover:text-slate-600 text-xs"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs">
+                  {[
+                    { id: 'all', label: 'الكل' },
+                    { id: 'oil', label: '🛢️ زيوت ومحركات' },
+                    { id: 'maintenance', label: '🔧 صيانة وفلاتر' },
+                    { id: 'inspection', label: '🛡️ فحص أسطوانات' },
+                    { id: 'third_party_discount', label: '🏷️ كوبونات شركاء' },
+                    { id: 'services_goods', label: '✨ إكسسوارات وسلع' },
+                  ].map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setRewardCategoryFilter(cat.id)}
+                      className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition ${
+                        rewardCategoryFilter === cat.id
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
+
+            {/* Active Rewards Grid */}
+            {(() => {
+              const filtered = rewards.filter((r) => {
+                const q = rewardSearchFilter.trim().toLowerCase();
+                const matchSearch =
+                  !q ||
+                  r.title.toLowerCase().includes(q) ||
+                  r.description.toLowerCase().includes(q) ||
+                  (r.partnerName && r.partnerName.toLowerCase().includes(q));
+
+                const matchCat =
+                  rewardCategoryFilter === 'all' ||
+                  r.category === rewardCategoryFilter ||
+                  (rewardCategoryFilter === 'third_party_discount' && r.category === 'discount_coupon');
+
+                return matchSearch && matchCat;
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-8 text-center text-xs text-slate-500">
+                    لا توجد هدايا مطابقة لمعايير البحث الحالية.
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filtered.map((r) => (
+                    <div
+                      key={r.id}
+                      className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs hover:border-emerald-300 transition flex flex-col justify-between space-y-3"
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="font-black text-sm text-slate-900 leading-snug">{r.title}</span>
+                          <span className="bg-amber-100 text-amber-900 text-xs font-black px-2.5 py-1 rounded-full border border-amber-200 shrink-0">
+                            {r.pointsCost} نقطة
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">{r.description}</p>
+                        
+                        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                          {r.estimatedEgpValue && (
+                            <span className="text-[10px] bg-amber-50 text-amber-900 font-bold px-2 py-0.5 rounded border border-amber-200">
+                              🎁 القيمة: {r.estimatedEgpValue} ج
+                            </span>
+                          )}
+                          {r.partnerName && (
+                            <span className="text-[10px] bg-indigo-50 text-indigo-900 font-bold px-2 py-0.5 rounded border border-indigo-200">
+                              🤝 الشريك: {r.partnerName}
+                            </span>
+                          )}
+                          {r.discountPercentage && (
+                            <span className="text-[10px] bg-rose-50 text-rose-900 font-bold px-2 py-0.5 rounded border border-rose-200">
+                              🏷️ خصم {r.discountPercentage}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                        <span className="text-[11px] text-slate-600 font-bold">{r.valueText}</span>
+                        <button
+                          onClick={() => handleDeleteReward(r.id)}
+                          className="text-rose-600 hover:text-rose-800 text-xs font-bold flex items-center gap-1 p-1 hover:bg-rose-50 rounded-lg transition"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>حذف</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -6716,26 +6474,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         <span className="text-[10px] text-slate-500 block">⭐ {member.averageBehaviorRating || 4.9}</span>
                       </td>
                       <td className="p-3 text-center">
-                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                          <button
-                            onClick={() => sendPinViaWhatsApp(member)}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-xl transition flex items-center justify-center gap-1 shadow-xs"
-                            title="إرسال رابط الوردية اليومية عبر الواتساب"
-                          >
-                            <Send className="w-3 h-3" />
-                            <span>واتساب 📲</span>
-                          </button>
-                          <button
-                            onClick={() => copyTechnicianLoginLink(member)}
-                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold px-2 py-1.5 rounded-xl transition flex items-center justify-center gap-1 border border-slate-200"
-                            title="نسخ رابط الدخول المباشر للفني"
-                          >
-                            <Copy className="w-3 h-3" />
-                            <span>نسخ الرابط 📋</span>
-                          </button>
-                        </div>
+                        <button
+                          onClick={() => sendPinViaWhatsApp(member)}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl transition flex items-center justify-center gap-1.5 mx-auto shadow-xs"
+                        >
+                          <Send className="w-3 h-3" />
+                          <span>إرسال كود الـ PIN 📲</span>
+                        </button>
                       </td>
-
                     </tr>
                   ))}
                 </tbody>
@@ -6971,12 +6717,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">كلمة سر المدير (0000)</label>
+                  <label className="block font-bold text-slate-700 mb-1">كلمة سر المدير العام (0000)</label>
                   <input
                     type="text"
                     value={editAdminPin}
                     onChange={(e) => setEditAdminPin(e.target.value)}
                     className="w-full bg-slate-50 border-2 border-rose-300 rounded-xl p-2.5 text-xs font-mono font-bold text-center tracking-widest text-rose-700"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">الرقم السري للمالية (1234)</label>
+                  <input
+                    type="text"
+                    value={editFinancePin}
+                    onChange={(e) => setEditFinancePin(e.target.value)}
+                    className="w-full bg-slate-50 border-2 border-emerald-400 rounded-xl p-2.5 text-xs font-mono font-bold text-center tracking-widest text-emerald-800"
                   />
                 </div>
               </div>

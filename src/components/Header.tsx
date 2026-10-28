@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Fuel, Moon, Sun, Lock, ShieldCheck, UserCheck, Wrench, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Fuel, Moon, Sun, Lock, ShieldCheck, UserCheck, Wrench, Sparkles, CheckCircle2, DollarSign } from 'lucide-react';
 import { AppConfig, UserRole } from '../types';
 
 interface HeaderProps {
@@ -111,6 +111,20 @@ export const Header: React.FC<HeaderProps> = ({
                   <span>لوحة التحكم</span>
                 </button>
 
+                {/* Financial Portal Tab */}
+                <button
+                  onClick={() => onRoleChange('finance')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
+                    currentRole === 'finance'
+                      ? 'bg-teal-600 text-white shadow-sm'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                  }`}
+                  title="صفحة الإدارة المالية"
+                >
+                  <DollarSign className="w-3.5 h-3.5 text-teal-300" />
+                  <span className="hidden sm:inline">المالية</span>
+                </button>
+
                 {/* Preview Driver View */}
                 <button
                   onClick={() => onRoleChange('driver')}
@@ -140,6 +154,21 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               </div>
             ) : null}
+
+            {/* Quick Financial Management Portal Access Button */}
+            <button
+              onClick={() => onRoleChange('finance')}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-bold transition shadow-xs active:scale-95 border ${
+                currentRole === 'finance'
+                  ? 'bg-emerald-700 text-white border-emerald-600 shadow-sm font-black'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+              }`}
+              title="دخول بوابة الإدارة المالية المعتمدة (برقم سري)"
+            >
+              <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="hidden sm:inline">بوابة المالية 💼</span>
+              <span className="sm:hidden">المالية</span>
+            </button>
 
             {/* Dark / Light Toggle */}
             <button

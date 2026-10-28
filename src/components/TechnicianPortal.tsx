@@ -27,6 +27,9 @@ import {
   Smile,
   Coins,
   Medal,
+  Gauge,
+  Zap,
+  Gift,
 } from 'lucide-react';
 import {
   AppConfig,
@@ -34,19 +37,36 @@ import {
   FuelingTransaction,
   TechnicianCrewMember,
   AntiFraudLog,
+  FuelingSession,
+  RewardRedemption,
+  SectionLayoutItem,
+  SectionColSpan,
+  SectionHeightMode,
 } from '../types';
 import { parseDriverQrData } from '../services/qrService';
 import {
   saveTransactions,
   saveDriverProfile,
+  getDriverProfile,
   saveStationCrew,
   addFraudLog,
   getDriverStationAndPumpFuelingCounts,
   getRedemptions,
   saveRedemptions,
-  calculateFuelingPoints,
+  getFuelingSessions,
+  saveFuelingSessions,
+  DEFAULT_TECHNICIAN_SECTIONS,
+  getTransactions,
 } from '../services/storageService';
-
+import { RefuelingTechnicianPortal } from './RefuelingTechnicianPortal';
+import { TechnicianQrScanner } from './TechnicianQrScanner';
+import { ScadaLiveFuelingScreen } from './ScadaLiveFuelingScreen';
+import { simulateScadaSignal } from '../services/scadaService';
+import {
+  DynamicInPageLayoutEditor,
+  SectionEditControls,
+  AdminPinVerifyModal,
+} from './DynamicInPageLayoutEditor';
 
 interface TechnicianPortalProps {
   config: AppConfig;
@@ -56,6 +76,7 @@ interface TechnicianPortalProps {
   onUpdateCrew: (crew: TechnicianCrewMember[]) => void;
   onUpdateDriver: (driver: DriverProfile) => void;
   onUpdateTransactions: (txs: FuelingTransaction[]) => void;
+  onUpdateConfig?: (config: AppConfig) => void;
 }
 
 export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
@@ -66,7 +87,102 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
   onUpdateCrew,
   onUpdateDriver,
   onUpdateTransactions,
+  onUpdateConfig,
 }) => {
+  // Dynamic In-Page Layout Customization State (5-Clicks Gesture by Admin)
+  const [isLayoutEditMode, setIsLayoutEditMode] = useState(false);
+  const [isAdminPinModalOpen, setIsAdminPinModalOpen] = useState(false);
+  const [clickCount, setClickCount] = useState(0);
+  const [lastClickTime, setLastClickTime] = useState(0);
+
+  // Sections State (التحكم المباشر في ترتيب ومقاسات وإظهار/إخفاء المساحات)
+  const [techSections, setTechSections] = useState<SectionLayoutItem[]>(() => {
+    return config.layoutSettings?.technicianSections && config.layoutSettings.technicianSections.length > 0
+      ? config.layoutSettings.technicianSections
+      : DEFAULT_TECHNICIAN_SECTIONS;
+  });
+
+  useEffect(() => {
+    if (config.layoutSettings?.technicianSections && config.layoutSettings.technicianSections.length > 0) {
+      setTechSections(config.layoutSettings.technicianSections);
+    }
+  }, [config.layoutSettings?.technicianSections]);
+
+  const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
+
+  // 5-Clicks Handler on Any Page Space (بالضغط على الصفحة خمس مرات متتالية)
+  const handlePageTapGesture = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button, input, textarea, select, a, [draggable]')) return;
+
+    const now = Date.now();
+    if (now - lastClickTime < 2500) {
+      const nextCount = clickCount + 1;
+      setClickCount(nextCount);
+      if (nextCount >= 5) {
+        setClickCount(0);
+        setIsAdminPinModalOpen(true);
+      }
+    } else {
+      setClickCount(1);
+    }
+    setLastClickTime(now);
+  };
+
+  // Section Ordering & Resizing Handlers
+  const handleMoveUp = (id: string) => {
+    const sorted = [...techSections].sort((a, b) => a.order - b.order);
+    const index = sorted.findIndex((s) => s.id === id);
+    if (index <= 0) return;
+    const prev = sorted[index - 1];
+    const curr = sorted[index];
+    const prevOrder = prev.order;
+    prev.order = curr.order;
+    curr.order = prevOrder;
+    setTechSections([...techSections]);
+  };
+
+  const handleMoveDown = (id: string) => {
+    const sorted = [...techSections].sort((a, b) => a.order - b.order);
+    const index = sorted.findIndex((s) => s.id === id);
+    if (index === -1 || index >= sorted.length - 1) return;
+    const next = sorted[index + 1];
+    const curr = sorted[index];
+    const nextOrder = next.order;
+    next.order = curr.order;
+    curr.order = nextOrder;
+    setTechSections([...techSections]);
+  };
+
+  const handleChangeColSpan = (id: string, colSpan: SectionColSpan) => {
+    setTechSections(techSections.map((s) => (s.id === id ? { ...s, colSpan } : s)));
+  };
+
+  const handleChangeHeightMode = (id: string, heightMode: SectionHeightMode) => {
+    setTechSections(techSections.map((s) => (s.id === id ? { ...s, heightMode } : s)));
+  };
+
+  const handleToggleVisibility = (id: string) => {
+    setTechSections(techSections.map((s) => (s.id === id ? { ...s, visible: !s.visible } : s)));
+  };
+
+  const handleDragStart = (id: string) => {
+    setDraggedSectionId(id);
+  };
+
+  const handleDrop = (targetId: string) => {
+    if (!draggedSectionId || draggedSectionId === targetId) return;
+    const sorted = [...techSections].sort((a, b) => a.order - b.order);
+    const sourceIndex = sorted.findIndex((s) => s.id === draggedSectionId);
+    const targetIndex = sorted.findIndex((s) => s.id === targetId);
+    if (sourceIndex === -1 || targetIndex === -1) return;
+    const [moved] = sorted.splice(sourceIndex, 1);
+    sorted.splice(targetIndex, 0, moved);
+    const reordered = sorted.map((s, idx) => ({ ...s, order: idx + 1 }));
+    setTechSections(reordered);
+    setDraggedSectionId(null);
+  };
+
   // Session & Shift State
   const [activeTechnician, setActiveTechnician] = useState<TechnicianCrewMember | null>(() => {
     return stationCrew.find((c) => c.isShiftActive) || null;
@@ -85,6 +201,31 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
   const [manualCodeInput, setManualCodeInput] = useState('');
   const [scannedDriver, setScannedDriver] = useState<any | null>(null);
 
+  // SCADA Active Session & History State
+  const [activeScadaSession, setActiveScadaSession] = useState<FuelingSession | null>(() => {
+    const all = getFuelingSessions();
+    return all.find((s) => s.status === 'IN_PROGRESS') || null;
+  });
+  const [recentSessions, setRecentSessions] = useState<FuelingSession[]>(getFuelingSessions);
+
+  // Listen to SCADA session updates in real-time
+  useEffect(() => {
+    const handleSessionsChange = () => {
+      const all = getFuelingSessions();
+      setRecentSessions(all);
+      const active = all.find((s) => s.status === 'IN_PROGRESS') || null;
+      setActiveScadaSession(active);
+    };
+
+    window.addEventListener('cargas_sessions_updated', handleSessionsChange);
+    window.addEventListener('cargas_scada_session_completed', handleSessionsChange);
+
+    return () => {
+      window.removeEventListener('cargas_sessions_updated', handleSessionsChange);
+      window.removeEventListener('cargas_scada_session_completed', handleSessionsChange);
+    };
+  }, []);
+
   // Fueling Transaction Form
   const [selectedPump, setSelectedPump] = useState<number>(1);
   const [gasMetersInput, setGasMetersInput] = useState<string>('18.0');
@@ -97,6 +238,9 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
   // Video element ref for real camera feed
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // View Mode: Direct Meter Fueling (Supabase DB) vs QR Loyalty Scanner
+  const [technicianActiveView, setTechnicianActiveView] = useState<'refueling_meter' | 'loyalty_scanner'>('refueling_meter');
 
   const vt = config.visibility.technician;
 
@@ -166,28 +310,6 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
       }
     };
   }, []);
-
-  // Check URL parameters for direct WhatsApp login
-  useEffect(() => {
-    try {
-      const urlParams = new URLSearchParams(window.location.search);
-      const techIdFromUrl = urlParams.get('techId');
-      const pinFromUrl = urlParams.get('pin');
-      if (techIdFromUrl && pinFromUrl && stationCrew.length > 0 && !activeTechnician) {
-        const tech = stationCrew.find(
-          (c) => c.id === techIdFromUrl || c.phone.replace(/\D/g, '') === techIdFromUrl.replace(/\D/g, '')
-        );
-        if (tech && pinFromUrl.trim() === tech.dailyPin.trim()) {
-          const updatedCrew = stationCrew.map((c) =>
-            c.id === tech.id ? { ...c, isShiftActive: true } : c
-          );
-          setActiveTechnician({ ...tech, isShiftActive: true });
-          onUpdateCrew(updatedCrew);
-          saveStationCrew(updatedCrew);
-        }
-      }
-    } catch {}
-  }, [stationCrew]);
 
   // Handle Technician Shift Login
   const handleShiftLogin = (e: React.FormEvent) => {
@@ -290,68 +412,6 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
     }
   };
 
-  // Grant Technician Welcome Bonus Points to Customer
-  const handleGrantWelcomePoints = (points: number) => {
-    if (!activeTechnician) return;
-    const targetDriver = scannedDriver?.isValid ? scannedDriver : currentDriver;
-    const availableQuota =
-      activeTechnician.welcomePointsQuota !== undefined
-        ? activeTechnician.welcomePointsQuota
-        : (config.pointsFormula?.technicianWelcomePointsPerShift || 350);
-
-    if (availableQuota < points) {
-      alert(`رصيد النقاط الترحيبية المتاح لك في الوردية (${availableQuota} نقطة) لا يكفي لمنح ${points} نقطة.`);
-      return;
-    }
-
-    const newQuota = availableQuota - points;
-    const newDistributed = (activeTechnician.welcomePointsDistributed || 0) + points;
-
-    const updatedCrew = stationCrew.map((c) =>
-      c.id === activeTechnician.id
-        ? {
-            ...c,
-            welcomePointsQuota: newQuota,
-            welcomePointsDistributed: newDistributed,
-            technicianPoints: (c.technicianPoints || 300) + 10,
-          }
-        : c
-    );
-
-    const nextTech = {
-      ...activeTechnician,
-      welcomePointsQuota: newQuota,
-      welcomePointsDistributed: newDistributed,
-      technicianPoints: (activeTechnician.technicianPoints || 300) + 10,
-    };
-
-    setActiveTechnician(nextTech);
-    onUpdateCrew(updatedCrew);
-    saveStationCrew(updatedCrew);
-
-    const updatedDriver: DriverProfile = {
-      ...currentDriver,
-      points: currentDriver.points + points,
-    };
-    onUpdateDriver(updatedDriver);
-    saveDriverProfile(updatedDriver);
-
-    try {
-      confetti({
-        particleCount: 75,
-        spread: 60,
-        origin: { y: 0.6 },
-        colors: ['#f59e0b', '#10b981', '#3b82f6'],
-      });
-    } catch {}
-
-    alert(
-      `🎉 تم بنجاح إهداء ${points} نقطة ترحيبية للعميل ${targetDriver.name || currentDriver.name} بمحفظته الإلكترونية!\n` +
-      `• رصيدك المتبقي من حصة الوردية: ${newQuota} نقطة.\n` +
-      `• تم إضافة +10 نقاط تقييم امتياز لرصيدك الفني تقديراً لخدمتك الممتازة!`
-    );
-  };
-
   // Execute Fueling Transaction
   const handleExecuteFueling = (e: React.FormEvent) => {
     e.preventDefault();
@@ -393,13 +453,12 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
       setFraudWarning('');
     }
 
-    const currentOdo = odometerInput.trim() ? parseInt(odometerInput, 10) : (scannedDriver.odometer || currentDriver.odometerKm || 0);
+    const currentOdo = parseInt(odometerInput) || scannedDriver.odometer || 0;
     const pricePerMeter = config.gasPricePerMeter || 13;
     // For free meters redemption: Driver pays 0 EGP, full value calculated for technician & station credit
     const totalAmount = isRedemption ? 0 : parseFloat((meters * pricePerMeter).toFixed(2));
     const calculatedCreditEgp = parseFloat((meters * pricePerMeter).toFixed(2));
-    const pointsEarned = isRedemption ? 0 : calculateFuelingPoints(meters, config, 1.0, currentDriver.tier || 'bronze');
-
+    const pointsEarned = isRedemption ? 0 : Math.floor(meters * (config.pointsPerMeter || 1));
 
     // Calculate Driver Fueling Frequency for Station and Pump
     const { stationCount, pumpCount } = getDriverStationAndPumpFuelingCounts(
@@ -465,21 +524,19 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
     onUpdateTransactions(updatedTxs);
     saveTransactions(updatedTxs);
 
-    // Update Driver Profile Points & Maintenance (only adjust maintenance if odometer was explicitly provided)
-    const updatedMaintenance = odometerInput.trim() && currentOdo > 0
-      ? currentDriver.maintenanceSchedule.map((item) => {
-          const nextDue = item.nextDueKm;
-          const kmRemaining = nextDue - currentOdo;
-          let status: 'ok' | 'due_soon' | 'overdue' = 'ok';
-          if (kmRemaining <= 0) status = 'overdue';
-          else if (kmRemaining <= 1000) status = 'due_soon';
-          return { ...item, status };
-        })
-      : currentDriver.maintenanceSchedule;
+    // Update Driver Profile Points & Maintenance
+    const updatedMaintenance = currentDriver.maintenanceSchedule.map((item) => {
+      const nextDue = item.nextDueKm;
+      const kmRemaining = nextDue - currentOdo;
+      let status: 'ok' | 'due_soon' | 'overdue' = 'ok';
+      if (kmRemaining <= 0) status = 'overdue';
+      else if (kmRemaining <= 1000) status = 'due_soon';
+      return { ...item, status };
+    });
 
     const updatedDriver: DriverProfile = {
       ...currentDriver,
-      odometerKm: odometerInput.trim() && currentOdo > 0 ? Math.max(currentDriver.odometerKm, currentOdo) : currentDriver.odometerKm,
+      odometerKm: Math.max(currentDriver.odometerKm, currentOdo),
       points: isRedemption ? currentDriver.points : currentDriver.points + pointsEarned,
       totalMetersFueled: currentDriver.totalMetersFueled + meters,
       totalSpentEgp: currentDriver.totalSpentEgp + totalAmount,
@@ -632,7 +689,18 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
 
   // Active Technician Workspace
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" onClick={handlePageTapGesture}>
+      {/* In-Page Dynamic Layout Editor Toolbar (نشط بالضغط 5 مرات متتالية لمدير النظام) */}
+      <DynamicInPageLayoutEditor
+        pageType="technician"
+        config={config}
+        onUpdateConfig={onUpdateConfig}
+        onSectionsChange={(updated) => setTechSections(updated)}
+        currentSections={techSections}
+        isEditMode={isLayoutEditMode}
+        onToggleEditMode={(enabled) => setIsLayoutEditMode(enabled)}
+      />
+
       {/* Shift Status Header */}
       <div className="bg-white rounded-3xl p-5 shadow-xs border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -732,509 +800,478 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
         </div>
       )}
 
-      {/* Technician Shift Welcome Bonus Points Quota (رصيد نقاط ترحيبية في يد الفني يوزعها على العميل) */}
-      {(() => {
-        const availableQuota =
-          activeTechnician.welcomePointsQuota !== undefined
-            ? activeTechnician.welcomePointsQuota
-            : (config.pointsFormula?.technicianWelcomePointsPerShift || 350);
-        const distributed = activeTechnician.welcomePointsDistributed || 0;
-        const targetDriverName = scannedDriver?.name || currentDriver.name;
+      {/* Subtab View Mode Switcher */}
+      <div className="bg-white dark:bg-slate-900 p-2 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setTechnicianActiveView('refueling_meter')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition ${
+              technicianActiveView === 'refueling_meter'
+                ? 'bg-emerald-600 text-white shadow-md'
+                : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Fuel className="w-4 h-4" />
+            <span>تسجيل التموين الفوري (قراءات العدادات واللوحات) ⚡</span>
+          </button>
 
-        return (
-          <div className="bg-gradient-to-r from-blue-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-5 shadow-lg border border-blue-800/60 space-y-3">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-amber-400/20 text-amber-300 flex items-center justify-center text-2xl font-black shrink-0 border border-amber-400/30">
-                  🎁
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded-full uppercase">
-                      حصة الفني الترحيبية
-                    </span>
-                    <span className="text-xs text-blue-200 font-bold">
-                      بناء الارتباط والولاء مع السائق والمحطة
-                    </span>
-                  </div>
-                  <h3 className="text-sm font-black text-white mt-0.5">
-                    رصيد النقاط الترحيبية المتاح لك في الوردية: <span className="font-mono text-amber-300 text-base">{availableQuota} نقطة</span>
-                  </h3>
-                  <p className="text-[11px] text-slate-300">
-                    يمكنك إهداء نقاط ترحيبية مباشرة للعميل {targetDriverName} لتشجيعه على تكرار التموين بمحطتك
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 bg-white/10 backdrop-blur-xs px-3 py-2 rounded-2xl border border-white/10 text-center">
-                <div>
-                  <span className="text-[10px] text-slate-300 block">تم توزيعه اليوم</span>
-                  <span className="font-mono font-black text-emerald-300 text-sm">{distributed} نقطة</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Quick Grant Buttons */}
-            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/10">
-              <span className="text-[11px] font-bold text-slate-300 ml-1">إهداء نقاط ترحيبية فورية:</span>
-              <button
-                type="button"
-                onClick={() => handleGrantWelcomePoints(25)}
-                disabled={availableQuota < 25}
-                className="bg-amber-400 hover:bg-amber-500 disabled:opacity-40 text-slate-950 font-black text-xs px-3.5 py-1.5 rounded-xl transition shadow-xs flex items-center gap-1 active:scale-95"
-              >
-                <span>+25 نقطة ترحيبية ⭐</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleGrantWelcomePoints(50)}
-                disabled={availableQuota < 50}
-                className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white font-black text-xs px-3.5 py-1.5 rounded-xl transition shadow-xs flex items-center gap-1 active:scale-95"
-              >
-                <span>+50 نقطة كارجاس 🎁</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleGrantWelcomePoints(100)}
-                disabled={availableQuota < 100}
-                className="bg-blue-500 hover:bg-blue-600 disabled:opacity-40 text-white font-black text-xs px-3.5 py-1.5 rounded-xl transition shadow-xs flex items-center gap-1 active:scale-95"
-              >
-                <span>+100 نقطة بونص عالي 🚀</span>
-              </button>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Main Grid: QR Scanner / Vehicle Identification + Fueling & Billing Entry */}
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* Step 1: Vehicle & Customer QR Scan (5 cols) */}
-        <div className="lg:col-span-5 bg-white rounded-3xl p-6 shadow-xs border border-slate-200 space-y-4">
-          <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
-            <div>
-              <h3 className="font-black text-sm text-slate-900 flex items-center gap-2">
-                <Camera className="w-4 h-4 text-blue-600" />
-                الخطوة 1: مسح QR كود سيارة العميل
-              </h3>
-              <p className="text-[11px] text-slate-500">
-                امسح الكود المعروض على هاتف السائق للتعرف على السيارة
-              </p>
-            </div>
-          </div>
-
-          {/* Camera Frame */}
-          {vt.showCameraScanner && (
-            <div className="relative rounded-2xl overflow-hidden bg-slate-900 aspect-video flex items-center justify-center border-2 border-dashed border-slate-300">
-              {isCameraActive ? (
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="text-center p-4 text-slate-300 space-y-2">
-                  <QrCode className="w-12 h-12 mx-auto text-blue-400 opacity-80" />
-                  <p className="text-xs font-medium">الكاميرا متوقفة حالياً</p>
-                </div>
-              )}
-
-              {isCameraActive && (
-                <div className="absolute inset-0 border-2 border-emerald-400 m-8 rounded-xl pointer-events-none animate-pulse flex items-center justify-center">
-                  <span className="bg-emerald-950/80 text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded">
-                    وجّه الكاميرا نحو باركود السائق
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Camera Controls */}
-          {vt.showCameraScanner && (
-            <div className="flex gap-2">
-              {!isCameraActive ? (
-                <button
-                  type="button"
-                  onClick={startCamera}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 transition"
-                >
-                  <Camera className="w-4 h-4" />
-                  <span>تشغيل الكاميرا المباشرة</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={stopCamera}
-                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 transition"
-                >
-                  <span>إيقاف الكاميرا</span>
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => handleScanDriver()}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition"
-                title="محاكاة مسح سيارة السائق النشطة فوراً"
-              >
-                مسح تجريبي سريع ⚡
-              </button>
-            </div>
-          )}
-
-          {/* Manual Plate Search */}
-          {vt.showManualEntry && (
-            <div className="pt-2">
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                أو إدخال رقم اللوحة / كود السيارة يدوياً:
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={manualCodeInput}
-                  onChange={(e) => setManualCodeInput(e.target.value)}
-                  placeholder="مثال: ق ط د 7842"
-                  className="flex-1 bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => handleScanDriver(manualCodeInput)}
-                  className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-3 py-2 rounded-xl transition"
-                >
-                  تأكيد
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Scanned Vehicle Card */}
-          {scannedDriver && (
-            <div className={`p-4 rounded-2xl space-y-2 animate-in fade-in border-2 ${
-              scannedDriver.isRewardRedemption
-                ? 'bg-amber-50/90 border-amber-400'
-                : 'bg-emerald-50/70 border-emerald-400'
-            }`}>
-              <div className="flex items-center justify-between border-b pb-2 border-inherit">
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                  scannedDriver.isRewardRedemption
-                    ? 'bg-amber-500 text-slate-950 font-black'
-                    : 'bg-emerald-600 text-white'
-                }`}>
-                  {scannedDriver.isRewardRedemption ? '🎁 قسيمة أمتار مجانية (ولاء كارجاس) ✓' : 'تم التعرف على السيارة بنجاح ✓'}
-                </span>
-                <span className="font-mono text-xs font-bold text-slate-900">
-                  {scannedDriver.redemptionCode || scannedDriver.driverId}
-                </span>
-              </div>
-
-              {scannedDriver.isRewardRedemption ? (
-                <div className="space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-600 font-bold">اسم المكافأة:</span>
-                    <span className="font-black text-slate-900">{scannedDriver.rewardTitle}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-600 font-bold">كمية الأمتار المصرح بها:</span>
-                    <span className="font-mono font-black text-emerald-800 text-sm bg-white px-2 py-0.5 rounded border border-amber-300">
-                      {scannedDriver.freeMeters} م³ مجاني
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-600 font-bold">المطلوب تحصيله:</span>
-                    <span className="font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
-                      0 جنيه (مجاني بالكامل للعميل)
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-emerald-800 font-light pt-1 border-t border-amber-200">
-                    💡 سيتم احتساب قيمة الأمتار كاملة ({(scannedDriver.freeMeters * config.gasPricePerMeter).toFixed(0)} ج) في مبيعات ورديتك، وستحصل على +20 نقطة حافز تميز.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <span className="text-slate-500 block text-[10px]">اسم السائق:</span>
-                    <span className="font-bold text-slate-900">{scannedDriver.name}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block text-[10px]">رقم اللوحة:</span>
-                    <span className="font-black text-slate-900 font-mono bg-white px-2 py-0.5 rounded border border-emerald-200">
-                      {scannedDriver.carPlate}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block text-[10px]">نوع السيارة:</span>
-                    <span className="font-medium text-slate-800">{scannedDriver.carModel}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block text-[10px]">سعة الأسطوانة:</span>
-                    <span className="font-bold text-emerald-800 font-mono">
-                      {scannedDriver.capacity} لتر (~{(scannedDriver.capacity * 0.23).toFixed(1)} م³)
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          <button
+            type="button"
+            onClick={() => setTechnicianActiveView('loyalty_scanner')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition ${
+              technicianActiveView === 'loyalty_scanner'
+                ? 'bg-emerald-600 text-white shadow-md'
+                : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <QrCode className="w-4 h-4" />
+            <span>ماسح QR وكارت الولاء للسائقين 📷</span>
+          </button>
         </div>
 
-        {/* Step 2: Fueling Quantity, Pump (1-8), Billing & Anti-Fraud (7 cols) */}
-        <div className="lg:col-span-7 bg-white rounded-3xl p-6 shadow-xs border border-slate-200 space-y-5">
-          <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
-            <div>
-              <h3 className="font-black text-sm text-slate-900 flex items-center gap-2">
-                <Fuel className="w-4 h-4 text-emerald-600" />
-                <span>
-                  {scannedDriver?.isRewardRedemption
-                    ? 'الخطوة 2: تأكيد صرف الأمتار المجانية واحتساب مبيعات الوردية'
-                    : 'الخطوة 2: تسجيل كمية الغاز وحساب القيمة والنقاط'}
-                </span>
-              </h3>
-              <p className="text-[11px] text-slate-500">
-                سعر المتر الحالي: <span className="font-bold text-emerald-700">{config.gasPricePerMeter} جنيه مصري</span>
-              </p>
-            </div>
-          </div>
-
-          <form onSubmit={handleExecuteFueling} className="space-y-4">
-            {/* Pump Selector (1 to 8 pumps) */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-2">
-                اختر رقم المضخة الحالية (حتى 8 مضخات):
-              </label>
-              <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
-                {[1, 2, 3, 4, 5, 6, 7, 8].map((pumpNum) => (
-                  <button
-                    type="button"
-                    key={pumpNum}
-                    onClick={() => setSelectedPump(pumpNum)}
-                    className={`py-2 rounded-xl text-xs font-black transition border ${
-                      selectedPump === pumpNum
-                        ? 'bg-emerald-600 text-white border-emerald-700 shadow-md scale-105'
-                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                    }`}
-                  >
-                    مضخة #{pumpNum}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Quantity in m³ and Live Price Calculation */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  {scannedDriver?.isRewardRedemption ? 'كمية الأمتار المجانية المستحقة (م³)' : 'كمية الغاز المباعة (متر مكعب m³)'}
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="1"
-                    max="60"
-                    required
-                    value={gasMetersInput}
-                    onChange={(e) => setGasMetersInput(e.target.value)}
-                    className="w-full bg-slate-50 border-2 border-slate-200 focus:border-emerald-600 rounded-2xl py-3 px-4 text-xl font-black font-mono outline-none transition"
-                  />
-                  <span className="absolute left-3 top-3.5 text-xs font-bold text-slate-400">
-                    م³
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
-                  <span>قراءة عداد السيارة الحالي (كم)</span>
-                  <span className="text-[10px] text-slate-400 font-normal">اختياري - غير إلزامي</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={odometerInput}
-                    onChange={(e) => setOdometerInput(e.target.value)}
-                    placeholder="اختياري (أو يُترك فارغاً)"
-                    className="w-full bg-slate-50 border-2 border-slate-200 focus:border-emerald-600 rounded-2xl py-3 px-4 text-xl font-black font-mono outline-none transition placeholder:text-xs placeholder:font-normal placeholder:text-slate-400"
-                  />
-                  <span className="absolute left-3 top-3.5 text-xs font-bold text-slate-400">
-                    كم
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Live Calculation Bill Preview */}
-            <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white rounded-2xl p-4 sm:p-5 shadow-lg space-y-3">
-              <div className="flex items-center justify-between text-xs text-slate-300">
-                <span>المعادلة المعتمدة:</span>
-                <span className="font-mono">
-                  {parseFloat(gasMetersInput) || 0} م³ × {config.gasPricePerMeter} ج/م³
-                </span>
-              </div>
-
-              <div className="flex items-baseline justify-between pt-2 border-t border-slate-700">
-                <div>
-                  <span className="text-[11px] text-emerald-400 block font-bold">
-                    المبلغ المطلوب تحصيله من العميل:
-                  </span>
-                  {scannedDriver?.isRewardRedemption ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-3xl sm:text-4xl font-black font-mono text-emerald-400">
-                        0.00
-                      </span>
-                      <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-400/30">
-                        هدية ولاء مجانية 🎁
-                      </span>
-                    </div>
-                  ) : (
-                    <div>
-                      <span className="text-3xl sm:text-4xl font-black font-mono text-white">
-                        {((parseFloat(gasMetersInput) || 0) * config.gasPricePerMeter).toFixed(2)}
-                      </span>
-                      <span className="text-sm font-bold text-slate-300 mr-2">جنيه مصري</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="text-left bg-emerald-950/80 px-3 py-2 rounded-xl border border-emerald-500/40">
-                  {scannedDriver?.isRewardRedemption ? (
-                    <div>
-                      <span className="text-[10px] text-amber-300 block">حافز إضافي لورديتك:</span>
-                      <span className="text-base font-black text-amber-400 font-mono">
-                        +20 نقطة تميز 🌟
-                      </span>
-                    </div>
-                  ) : (
-                    <div>
-                      <span className="text-[10px] text-emerald-300 block">نقاط الولاء للسائق:</span>
-                      <span className="text-lg font-black text-emerald-400 font-mono">
-                        +{Math.floor((parseFloat(gasMetersInput) || 0) * (config.pointsPerMeter || 1))} نقطة
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {scannedDriver?.isRewardRedemption && (
-                <div className="pt-2 border-t border-slate-700/60 text-[11px] text-emerald-300 flex items-center justify-between">
-                  <span>المبلغ المحسوب في مبيعات ورديتك:</span>
-                  <span className="font-mono font-black text-white">
-                    {((parseFloat(gasMetersInput) || 0) * config.gasPricePerMeter).toFixed(2)} جنيه
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Anti-Fraud Warning Pill if any */}
-            {fraudWarning && (
-              <div className="p-3 bg-amber-50 border border-amber-300 text-amber-800 rounded-xl text-xs font-bold flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
-                {fraudWarning}
-              </div>
-            )}
-
-            {/* Submit Transaction Button */}
-            <button
-              type="submit"
-              disabled={!scannedDriver}
-              className={`w-full text-white font-black py-4 rounded-2xl transition shadow-xl text-base active:scale-98 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
-                scannedDriver?.isRewardRedemption
-                  ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
-                  : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
-              }`}
-            >
-              <Check className="w-5 h-5" />
-              <span>
-                {scannedDriver?.isRewardRedemption
-                  ? 'تأكيد صرف الأمتار المجانية (0 جنيه) واحتساب المبيعات والحافز للفني ✓'
-                  : 'تأكيد التموين واحتساب حافز الفني ونقاط السائق'}
-              </span>
-            </button>
-          </form>
-
-          {/* Success Receipt Alert with Fueling Count Stats */}
-          {transactionSuccess && (
-            <div className="p-4 bg-emerald-50 border-2 border-emerald-400 rounded-2xl space-y-3 animate-in fade-in">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                  <h4 className="font-black text-sm text-emerald-950">
-                    تمت العملية بنجاح! رقم الإيصال: {transactionSuccess.receiptNumber}
-                  </h4>
-                </div>
-                <button
-                  onClick={() => window.print()}
-                  className="bg-white hover:bg-slate-100 text-slate-800 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-200 flex items-center gap-1 shadow-xs"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>طباعة الإيصال 🖨️</span>
-                </button>
-              </div>
-
-              {/* Station & Pump Frequency Pill */}
-              {vt.showFuelingCountStats && (
-                <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-300 text-xs text-emerald-950 flex flex-wrap items-center justify-between gap-2">
-                  <span>
-                    🏢 تموين العميل رقم: <b>#{transactionSuccess.driverStationFuelingCount}</b> من هذه المحطة
-                  </span>
-                  <span>
-                    ⛽ ورقم: <b>#{transactionSuccess.driverPumpFuelingCount}</b> من المضخة #{transactionSuccess.pumpNumber}
-                  </span>
-                </div>
-              )}
-
-              <div className="text-xs text-emerald-900 grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-                <div>السيارة: <b>{transactionSuccess.carPlate}</b></div>
-                <div>الكمية: <b>{transactionSuccess.metersQuantity} م³</b></div>
-                <div>المبلغ: <b>{transactionSuccess.totalAmountEgp} ج</b></div>
-                <div>حافز الفني: <b>+5 نقاط</b></div>
-              </div>
-            </div>
-          )}
-        </div>
+        <span className="text-[11px] text-slate-400 font-mono hidden sm:inline">
+          معمارية Supabase PostgreSQL (RLS Active)
+        </span>
       </div>
 
-      {/* Technician Shift Stats Summary */}
-      {vt.showShiftStats && (
-        <div className="bg-white rounded-3xl p-6 shadow-xs border border-slate-200 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="font-black text-sm text-slate-900 flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-blue-600" />
-              إحصائيات إنجاز الوردية ومبيعات الفني
-            </h3>
-            <span className="text-xs font-mono text-slate-500">
-              كود الفني: {activeTechnician.id}
-            </span>
-          </div>
+      {/* Render Direct Refueling Portal */}
+      {technicianActiveView === 'refueling_meter' && (
+        <RefuelingTechnicianPortal activeTechnician={activeTechnician} />
+      )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
-              <span className="text-xs text-slate-500 font-medium block">عدد التفويلات اليوم</span>
-              <span className="text-2xl font-black text-slate-900 font-mono mt-1 block">
-                {activeTechnician.totalFuelingsToday}
-              </span>
-              <span className="text-[10px] text-blue-600 font-bold">سيارة مُمونة</span>
-            </div>
+      {/* Render Dynamic Technician Sections Layout & SCADA Engine */}
+      {technicianActiveView === 'loyalty_scanner' && (
+        <div className="space-y-6">
+          
+          {/* Active SCADA Fueling Session Screen (If active) */}
+          {activeScadaSession && (
+            <ScadaLiveFuelingScreen
+              session={activeScadaSession}
+              config={config}
+              onDone={() => {
+                setActiveScadaSession(null);
+                setScannedDriver(null);
+              }}
+            />
+          )}
 
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
-              <span className="text-xs text-slate-500 font-medium block">إجمالي الغاز المباع</span>
-              <span className="text-2xl font-black text-emerald-600 font-mono mt-1 block">
-                {activeTechnician.totalMetersToday.toFixed(1)}
-              </span>
-              <span className="text-[10px] text-emerald-700 font-bold">متر مكعب m³</span>
-            </div>
+          {/* Dynamic 12-Column Responsive Layout Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+            {[...techSections]
+              .sort((a, b) => a.order - b.order)
+              .filter((sec) => sec.visible || isLayoutEditMode)
+              .map((section) => {
+                const colClass =
+                  section.colSpan === 12
+                    ? 'col-span-12'
+                    : section.colSpan === 7
+                    ? 'col-span-12 md:col-span-7'
+                    : section.colSpan === 6
+                    ? 'col-span-12 md:col-span-6'
+                    : section.colSpan === 5
+                    ? 'col-span-12 md:col-span-5'
+                    : 'col-span-12 md:col-span-4';
 
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
-              <span className="text-xs text-slate-500 font-medium block">إجمالي النقدية المحصلة</span>
-              <span className="text-2xl font-black text-slate-900 font-mono mt-1 block">
-                {activeTechnician.totalAmountToday.toLocaleString()}
-              </span>
-              <span className="text-[10px] text-slate-500 font-bold">جنيه مصري</span>
-            </div>
+                const isDragging = draggedSectionId === section.id;
+
+                return (
+                  <div
+                    key={section.id}
+                    className={`${colClass} transition-all duration-200 ${
+                      isLayoutEditMode
+                        ? 'p-3 rounded-3xl border-2 border-dashed border-amber-400/90 bg-amber-50/15 shadow-md relative'
+                        : ''
+                    } ${!section.visible && isLayoutEditMode ? 'opacity-40 grayscale' : ''} ${
+                      isDragging ? 'opacity-40 scale-98' : ''
+                    }`}
+                    onDragOver={(e) => {
+                      if (isLayoutEditMode) {
+                        e.preventDefault();
+                      }
+                    }}
+                    onDrop={() => {
+                      if (isLayoutEditMode) {
+                        handleDrop(section.id);
+                      }
+                    }}
+                  >
+                    {/* In-Page Edit Controls for Admin on this section */}
+                    {isLayoutEditMode && (
+                      <SectionEditControls
+                        section={section}
+                        onMoveUp={() => handleMoveUp(section.id)}
+                        onMoveDown={() => handleMoveDown(section.id)}
+                        onChangeColSpan={(span) => handleChangeColSpan(section.id, span)}
+                        onChangeHeightMode={(h) => handleChangeHeightMode(section.id, h)}
+                        onToggleVisibility={() => handleToggleVisibility(section.id)}
+                        onDragStart={() => handleDragStart(section.id)}
+                      />
+                    )}
+
+                    {/* Section 1: Mobile Camera & Barcode Scanner */}
+                    {section.id === 'camera_scanner' && (
+                      <TechnicianQrScanner
+                        config={config}
+                        activeTechnician={activeTechnician}
+                        currentDriver={currentDriver}
+                        onSessionStarted={(session) => {
+                          setActiveScadaSession(session);
+                        }}
+                        onRedemptionCompleted={() => {
+                          onUpdateTransactions(getTransactions());
+                        }}
+                      />
+                    )}
+
+                    {/* Section 2: SCADA Live Fueling Sessions Monitor */}
+                    {section.id === 'scada_live_sessions' && (
+                      <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-sm border border-indigo-500/30 space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                          <div className="flex items-center gap-2">
+                            <Gauge className="w-5 h-5 text-amber-400" />
+                            <div>
+                              <h3 className="font-black text-sm text-white">
+                                نظام السكادا وجلسات التموين الحية
+                              </h3>
+                              <p className="text-[10px] text-slate-400">
+                                استقبال قراءات العدادات التلقائية (SCADA Webhook)
+                              </p>
+                            </div>
+                          </div>
+                          <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            مفعل ومتصل ⚡
+                          </span>
+                        </div>
+
+                        {/* Endpoint Info */}
+                        <div className="bg-black/30 p-2.5 rounded-xl border border-white/5 text-[11px] font-mono text-slate-300 flex items-center justify-between">
+                          <span className="text-amber-400 font-bold">POST</span>
+                          <span className="text-slate-300 truncate">/api/scada/complete-transaction</span>
+                          <span className="text-[10px] text-slate-400">JSON</span>
+                        </div>
+
+                        {/* Recent Sessions Table */}
+                        <div className="space-y-2 max-h-56 overflow-y-auto">
+                          {recentSessions.length === 0 ? (
+                            <div className="p-4 bg-white/5 rounded-2xl text-center text-xs text-slate-400">
+                              لا توجد جلسات مسجلة بعد. عند مسح كود السيارة والمسدس تبدأ الجلسة فوراً.
+                            </div>
+                          ) : (
+                            recentSessions.slice(0, 5).map((s) => (
+                              <div
+                                key={s.session_id}
+                                className="bg-white/5 hover:bg-white/10 p-3 rounded-2xl border border-white/5 flex items-center justify-between text-xs transition"
+                              >
+                                <div className="space-y-0.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-bold text-white">{s.car_plate}</span>
+                                    <span className="text-[10px] text-slate-400 font-mono">[{s.hose_id}]</span>
+                                  </div>
+                                  <span className="text-[10px] text-slate-400">
+                                    {new Date(s.created_at).toLocaleTimeString('ar-EG', {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })}
+                                  </span>
+                                </div>
+
+                                <div className="text-left space-y-0.5">
+                                  <span
+                                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full block ${
+                                      s.status === 'COMPLETED'
+                                        ? 'bg-emerald-500/20 text-emerald-300'
+                                        : 'bg-amber-500/20 text-amber-300 animate-pulse'
+                                    }`}
+                                  >
+                                    {s.status === 'COMPLETED'
+                                      ? `${s.volume_m3 || 0} م³ ✓`
+                                      : 'جاري الضخ ⏳'}
+                                  </span>
+                                  {s.points_earned ? (
+                                    <span className="text-[10px] text-amber-400 font-bold block">
+                                      +{s.points_earned} نقطة
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+
+                        {/* Test Signal Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const res = simulateScadaSignal(
+                              config.stationCode || 'CARGAS-SHUBRA-01',
+                              'HOSE-PUMP-01-A',
+                              18.5
+                            );
+                            alert(res.message);
+                          }}
+                          className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 rounded-2xl text-xs transition flex items-center justify-center gap-1.5"
+                        >
+                          <Zap className="w-3.5 h-3.5" />
+                          <span>محاكاة إرسال قراءة السكادا (18.5 م³) ⚡</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Section 3: Points Redemption Scanner & Records */}
+                    {section.id === 'reward_redemption_scanner' && (
+                      <div className="bg-gradient-to-br from-amber-500 via-amber-600 to-yellow-600 text-slate-950 rounded-3xl p-6 shadow-md border border-amber-300 space-y-4">
+                        <div className="flex items-center justify-between border-b border-black/10 pb-3">
+                          <div className="flex items-center gap-2">
+                            <Gift className="w-5 h-5 text-slate-950" />
+                            <h3 className="font-black text-sm text-slate-950">
+                              صرف واستبدال نقاط الولاء والأمتار المجانية
+                            </h3>
+                          </div>
+                          <span className="text-xs bg-slate-950 text-amber-300 font-black px-2.5 py-0.5 rounded-full">
+                            مكافآت السائقين 🎁
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-slate-900 leading-relaxed font-medium">
+                          يستطيع السائق إبراز كود الـ QR الخاص بقسيمة الأمتار المجانية أو هدايا الزيوت من كارت الولاء الذهبي. عند مسح الكود يتم صرف الغاز للعميل بـ 0 جنيه وتحميل القيمة بالكامل على مبيعات ورديتك مع إضافة +20 نقطة حافز لورديتك.
+                        </p>
+
+                        <div className="flex items-center gap-3 bg-white/40 p-3 rounded-2xl text-xs font-bold justify-between">
+                          <span>إجمالي القسائم المنفذة بالوردية:</span>
+                          <span className="text-sm font-mono font-black">
+                            {getRedemptions().filter((r) => r.isUsed).length} قسيمة معتمدة
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Section 4: Shift Stats */}
+                    {section.id === 'shift_stats' && (
+                      <div className="bg-white rounded-3xl p-6 shadow-xs border border-slate-200 space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <h3 className="font-black text-sm text-slate-900 flex items-center gap-2">
+                            <TrendingUp className="w-4 h-4 text-blue-600" />
+                            إحصائيات إنجاز الوردية ومبيعات الفني
+                          </h3>
+                          <span className="text-xs font-mono text-slate-500">
+                            كود الفني: {activeTechnician.id}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
+                            <span className="text-xs text-slate-500 font-medium block">
+                              عدد التفويلات اليوم
+                            </span>
+                            <span className="text-2xl font-black text-slate-900 font-mono mt-1 block">
+                              {activeTechnician.totalFuelingsToday}
+                            </span>
+                            <span className="text-[10px] text-blue-600 font-bold">سيارة مُمونة</span>
+                          </div>
+
+                          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
+                            <span className="text-xs text-slate-500 font-medium block">
+                              إجمالي الغاز المباع
+                            </span>
+                            <span className="text-2xl font-black text-emerald-600 font-mono mt-1 block">
+                              {activeTechnician.totalMetersToday.toFixed(1)}
+                            </span>
+                            <span className="text-[10px] text-emerald-700 font-bold">
+                              متر مكعب m³
+                            </span>
+                          </div>
+
+                          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
+                            <span className="text-xs text-slate-500 font-medium block">
+                              إجمالي النقدية المحصلة
+                            </span>
+                            <span className="text-2xl font-black text-slate-900 font-mono mt-1 block">
+                              {activeTechnician.totalAmountToday.toLocaleString()}
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-bold">جنيه مصري</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Section 5: Welcome Points Bonus Quota */}
+                    {section.id === 'welcome_bonus' && (
+                      <div className="bg-indigo-950 text-white rounded-3xl p-6 shadow-sm border border-indigo-800 space-y-4">
+                        <div className="flex items-center justify-between border-b border-indigo-800 pb-3">
+                          <div className="flex items-center gap-2">
+                            <Award className="w-5 h-5 text-amber-400" />
+                            <h3 className="font-black text-sm text-white">
+                              رصيد النقاط الترحيبية لجذب السائقين
+                            </h3>
+                          </div>
+                          <span className="text-xs bg-amber-400 text-slate-950 font-black px-2.5 py-0.5 rounded-full">
+                            حصة الفني 🎁
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="text-[11px] text-indigo-300 block">الرصيد المتاح بوردية اليوم:</span>
+                            <span className="text-3xl font-black font-mono text-amber-400">
+                              {activeTechnician.welcomePointsQuota ?? 350} نقطة
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const quota = activeTechnician.welcomePointsQuota ?? 350;
+                              if (quota < 50) {
+                                alert('رصيد النقاط الترحيبية المتاح بوردية اليوم غير كافٍ');
+                                return;
+                              }
+                              const updatedTech = {
+                                ...activeTechnician,
+                                welcomePointsQuota: quota - 50,
+                                welcomePointsDistributed: (activeTechnician.welcomePointsDistributed || 0) + 50,
+                              };
+                              const updatedCrew = stationCrew.map((c) =>
+                                c.id === activeTechnician.id ? updatedTech : c
+                              );
+                              setActiveTechnician(updatedTech);
+                              onUpdateCrew(updatedCrew);
+                              saveStationCrew(updatedCrew);
+
+                              // Credit to current driver
+                              const d = getDriverProfile();
+                              const updatedD = { ...d, points: d.points + 50 };
+                              onUpdateDriver(updatedD);
+                              saveDriverProfile(updatedD);
+                              alert('🎉 تم إهداء 50 نقطة ترحيبية فورية للسيارة الحالية بنجاح!');
+                            }}
+                            className="bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs px-4 py-2.5 rounded-2xl transition shadow-md active:scale-95"
+                          >
+                            إهداء 50 نقطة للسيارة 🎁
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Section 6: Manual Entry Fallback Form */}
+                    {section.id === 'manual_entry' && (
+                      <div className="bg-white rounded-3xl p-6 shadow-xs border border-slate-200 space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <h3 className="font-black text-sm text-slate-900 flex items-center gap-2">
+                            <Fuel className="w-4 h-4 text-slate-700" />
+                            <span>التسجيل اليدوي للتموين (احتياطي)</span>
+                          </h3>
+                        </div>
+
+                        <form onSubmit={handleExecuteFueling} className="space-y-3">
+                          <div>
+                            <label className="text-xs font-bold text-slate-700 block mb-1">
+                              كمية الغاز بالمتر المكعب (م³):
+                            </label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={gasMetersInput}
+                              onChange={(e) => setGasMetersInput(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono font-bold text-sm"
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between text-xs font-bold text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                            <span>المبلغ المحسوب:</span>
+                            <span className="font-mono text-base font-black text-emerald-700">
+                              {((parseFloat(gasMetersInput) || 0) * (config.gasPricePerMeter || 13)).toFixed(2)} ج.م
+                            </span>
+                          </div>
+
+                          <button
+                            type="submit"
+                            className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2.5 rounded-xl text-xs transition"
+                          >
+                            تسجيل التفويلة يدوياً
+                          </button>
+                        </form>
+                      </div>
+                    )}
+
+                    {/* Section 7: GPS Radar 10m Verification */}
+                    {section.id === 'gps_radar' && (
+                      <div className="bg-white rounded-3xl p-6 shadow-xs border border-slate-200 space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                          <div className="flex items-center gap-2">
+                            <MapPin className="w-4 h-4 text-rose-500" />
+                            <h3 className="font-black text-sm text-slate-900">
+                              رادار الموقع الجغرافي (10 أمتار)
+                            </h3>
+                          </div>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              gpsStatus === 'verified'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {gpsStatus === 'verified' ? 'ضمن النطاق ✓' : 'خارج النطاق ⚠️'}
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-slate-600">
+                          المسافة الحالية من إحداثيات محطة كارجاس: <b className="font-mono">{gpsDistance} متر</b> (الحد الأقصى المصرح به: {config.maxGpsRadiusMeters}م).
+                        </p>
+
+                        <button
+                          type="button"
+                          onClick={() => setIsSimulatedGps(!isSimulatedGps)}
+                          className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-2 rounded-xl transition"
+                        >
+                          تبديل وضع GPS ({isSimulatedGps ? 'محاكي آمن' : 'حقيقي مباشر'})
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Section 8: Technician Incentives Banner */}
+                    {section.id === 'technician_incentives' && (
+                      <div className="bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-3xl p-6 shadow-xs space-y-3">
+                        <div className="flex items-center justify-between border-b border-white/20 pb-2">
+                          <h3 className="font-black text-sm flex items-center gap-2">
+                            <Coins className="w-4 h-4 text-amber-300" />
+                            <span>حوافز ومكافآت حسن المعاملة</span>
+                          </h3>
+                          <span className="text-xs font-mono font-black text-amber-300">
+                            {activeTechnician.technicianPoints || 300} نقطة
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="bg-black/20 p-2.5 rounded-xl text-center">
+                            <span className="text-[10px] text-emerald-200 block">متوسط التقييم:</span>
+                            <span className="font-black text-base font-mono">{activeTechnician.averageBehaviorRating || 4.9} ⭐</span>
+                          </div>
+                          <div className="bg-black/20 p-2.5 rounded-xl text-center">
+                            <span className="text-[10px] text-emerald-200 block">الحافز المالي:</span>
+                            <span className="font-black text-base font-mono">{activeTechnician.incentiveBonusEgp || 450} ج</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         </div>
       )}
+
+      {/* Admin PIN Verification Modal for 5-Tap Gesture */}
+      <AdminPinVerifyModal
+        isOpen={isAdminPinModalOpen}
+        onClose={() => setIsAdminPinModalOpen(false)}
+        onSuccess={() => {
+          setIsAdminPinModalOpen(false);
+          setIsLayoutEditMode(true);
+        }}
+        expectedPin={config.adminPin || '0000'}
+        pageTitle="شاشة فني المحطة"
+      />
     </div>
   );
 };
