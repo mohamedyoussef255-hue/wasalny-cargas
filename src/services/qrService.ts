@@ -160,3 +160,52 @@ export function parseDriverQrData(rawText: string) {
   }
   return { isValid: false, isRewardRedemption: false, driverId: '', name: '', phone: '', carPlate: '', carModel: '', capacity: 70, odometer: 0 };
 }
+
+// ==================== توليد الباركود الموحد للطلمبة والمحطة معاً ====================
+
+export interface UnifiedPumpQrPayload {
+  app: 'CARGAS_SMART_SYSTEM';
+  stationId: string;
+  stationName: string;
+  pumpNumber: number;
+  hoseId: string;
+  gasPrice: number;
+  timestamp: number;
+}
+
+export function encodeUnifiedPumpQr(
+  stationId: string,
+  stationName: string,
+  pumpNumber: number,
+  gasPrice: number
+): string {
+  const payload: UnifiedPumpQrPayload = {
+    app: 'CARGAS_SMART_SYSTEM',
+    stationId,
+    stationName,
+    pumpNumber,
+    hoseId: `HOSE-${stationId}-PUMP-0${pumpNumber}-A`,
+    gasPrice,
+    timestamp: Date.now(),
+  };
+  return JSON.stringify(payload);
+}
+
+export function parseUnifiedPumpQr(rawText: string): UnifiedPumpQrPayload | null {
+  try {
+    const data = JSON.parse(rawText);
+    if (data.app === 'CARGAS_SMART_SYSTEM' || (data.stationId && data.pumpNumber)) {
+      return {
+        app: 'CARGAS_SMART_SYSTEM',
+        stationId: data.stationId,
+        stationName: data.stationName || 'محطة كارجاس',
+        pumpNumber: Number(data.pumpNumber) || 1,
+        hoseId: data.hoseId || `HOSE-${data.stationId}-PUMP-0${data.pumpNumber}-A`,
+        gasPrice: Number(data.gasPrice) || 13,
+        timestamp: data.timestamp || Date.now(),
+      };
+    }
+  } catch {}
+  return null;
+}
+

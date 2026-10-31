@@ -39,7 +39,7 @@ export const FinanceModal: React.FC<FinanceModalProps> = ({
   const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!handleValidate(pinInput)) {
-      setErrorMsg(`كلمة المرور غير صحيحة! كلمة السر الافتراضية للمالية هي 1234 (أو كود المدير العام ${validAdminPin})`);
+      setErrorMsg('كلمة المرور غير صحيحة! يرجى إدخال الرمز المعتمد للإدارة المالية.');
     }
   };
 
@@ -138,11 +138,8 @@ export const FinanceModal: React.FC<FinanceModalProps> = ({
           </div>
 
           <div className="pt-2 text-center">
-            <p className="text-[11px] text-slate-400">
-              الرقم السري الافتراضي للمالية هو <span className="font-mono font-black text-slate-700">1234</span>
-            </p>
-            <p className="text-[10px] text-emerald-700 font-medium mt-0.5">
-              يمكنك تعديل الرقم السري من صفحة المالية أو من لوحة تحكم المدير
+            <p className="text-[11px] text-slate-500 font-medium">
+              دخول مؤمن لمسؤولي الحسابات والمتابعة المالية المعتمدين
             </p>
           </div>
         </form>

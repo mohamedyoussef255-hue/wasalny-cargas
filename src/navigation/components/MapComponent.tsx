@@ -1,8 +1,13 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { Station, NavigationState } from '../types';
 import { CARGAS_FACILITY_META, getCongestionBadge } from '../utils/companyAssets';
 import { CARGAS_LOGO_SVG } from '../utils/cargasLogo';
+import {
+  getWasalnyFullConfig,
+  getMasterStationMapLogo,
+  MASTER_MAP_LOGO_EVENT,
+} from '../../services/storageService';
 import { Plus, Minus, Layers, Compass } from 'lucide-react';
 
 export type MapStyleType = 'google_streets' | 'google_hybrid' | 'google_terrain' | 'dark' | 'osm';
@@ -97,6 +102,18 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   const userMarkerRef = useRef<L.Marker | null>(null);
   const stationMarkersRef = useRef<Map<string, L.Marker>>(new Map());
   const routePolylineRef = useRef<L.Polyline | null>(null);
+  const [logoRefreshKey, setLogoRefreshKey] = useState(0);
+
+  // Listen for real-time master station logo changes
+  useEffect(() => {
+    const handleUpdate = () => setLogoRefreshKey((k) => k + 1);
+    window.addEventListener(MASTER_MAP_LOGO_EVENT, handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener(MASTER_MAP_LOGO_EVENT, handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, []);
 
   // Initialize Map
   useEffect(() => {
@@ -152,32 +169,58 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     map.invalidateSize();
   }, [mapStyle, hideOtherPOIs]);
 
-  // Update User Location Marker (Google Blue Pulsing Dot)
+  // Update User Location Marker with Egyptian License Plate Badge
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
 
+    let effectivePlate = 'مصر | EGY';
+    try {
+      const raw = localStorage.getItem('cargas_driver_profile');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.carPlate) effectivePlate = parsed.carPlate.trim();
+      }
+    } catch {
+      // fallback
+    }
+
     const userHtml = `
-      <div class="relative flex items-center justify-center w-12 h-12">
-        <div class="absolute w-12 h-12 rounded-full bg-blue-500/30 animate-ping"></div>
-        <div class="absolute w-8 h-8 rounded-full bg-blue-500/40"></div>
-        <div class="relative w-6 h-6 rounded-full bg-blue-600 border-3 border-white shadow-xl flex items-center justify-center">
-          <div class="w-2.5 h-2.5 rounded-full bg-white"></div>
+      <div style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.45));">
+        <!-- Egyptian License Plate Badge -->
+        <div style="background: white; border: 2px solid #1e3a8a; border-radius: 7px; overflow: hidden; display: flex; flex-direction: column; min-width: 76px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.25);">
+          <div style="background: #2563eb; color: white; font-size: 7.5px; font-weight: 900; padding: 1px 4px; display: flex; justify-content: space-between; align-items: center; letter-spacing: 0.5px;">
+            <span>EGY</span>
+            <span style="font-size: 8px;">مِصْر</span>
+          </div>
+          <div style="padding: 2px 5px; font-weight: 900; font-size: 10.5px; color: #0f172a; direction: ltr; letter-spacing: 0.5px; background: #f8fafc; font-family: monospace, Cairo, sans-serif;">
+            ${effectivePlate}
+          </div>
         </div>
-        <!-- Direction pointer -->
-        <div class="absolute -top-1 w-0 h-0 border-x-4 border-x-transparent border-b-6 border-b-blue-600"></div>
+
+        <!-- Car Circle with Glowing Pulse -->
+        <div style="margin-top: 2px; position: relative;">
+          <div style="position: absolute; inset: -4px; border-radius: 50%; background: rgba(37,99,235,0.4); animation: ping 2s cubic-bezier(0,0,0.2,1) infinite;"></div>
+          <div style="position: relative; background: linear-gradient(135deg, #1e40af, #2563eb); color: white; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(30,64,175,0.5); border: 2.5px solid white; font-size: 16px;">
+            🚗
+          </div>
+        </div>
+
+        <!-- Pointer Arrow -->
+        <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #1e40af; margin-top: -1px;"></div>
       </div>
     `;
 
     const userIcon = L.divIcon({
       html: userHtml,
       className: 'user-location-marker',
-      iconSize: [48, 48],
-      iconAnchor: [24, 24],
+      iconSize: [86, 76],
+      iconAnchor: [43, 76],
     });
 
     if (userMarkerRef.current) {
       userMarkerRef.current.setLatLng(userLocation);
+      userMarkerRef.current.setIcon(userIcon);
     } else {
       userMarkerRef.current = L.marker(userLocation, {
         icon: userIcon,
@@ -211,7 +254,14 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       const facility = CARGAS_FACILITY_META[station.facilityType] || CARGAS_FACILITY_META.station;
       const congestion = getCongestionBadge(station.congestionLevel, station.waitTimeMinutes);
       const isHiddenMode = !!station.isHidden;
-      const effectiveLogo = station.customLogoUrl || globalStationLogoUrl;
+      const wasalnyCfg = getWasalnyFullConfig();
+      const customStationLogo =
+        wasalnyCfg.stationCustomLogos?.[station.id] ||
+        (station as any).customLogoUrl ||
+        '';
+      const effectiveLogo = getMasterStationMapLogo(station.id, customStationLogo || globalStationLogoUrl);
+      const glowColor = wasalnyCfg.stationMarkerGlowColor || '#059669';
+      const markerStyle = wasalnyCfg.stationMarkerStyle || 'cargas_badge';
 
       // Build mini facility badges underneath Cargas emblem (Compact design)
       const serviceBadges: string[] = [];
@@ -241,17 +291,23 @@ export const MapComponent: React.FC<MapComponentProps> = ({
         .replace('مركز كارجاس ', '')
         .trim();
 
+      const markerBadgeRadius = markerStyle === 'shield_badge'
+        ? 'border-radius: 10px 10px 18px 18px;'
+        : markerStyle === 'royal_pin'
+        ? 'border-radius: 50%;'
+        : 'border-radius: 9999px;';
+
       const markerHtml = `
         <div class="group relative cursor-pointer transition-transform duration-200 ${
           isSelected || isTarget ? 'scale-115 z-50' : 'hover:scale-105'
         }" style="${isHiddenMode ? 'opacity: 0.6; filter: grayscale(50%);' : ''}">
-          ${isSelected || isTarget ? `<div class="absolute -inset-2 rounded-full bg-emerald-400/40 animate-pulse"></div>` : ''}
+          ${isSelected || isTarget ? `<div class="absolute -inset-2 rounded-full animate-pulse" style="background-color: ${glowColor}66;"></div>` : ''}
           
           <div class="relative flex flex-col items-center">
             <!-- Compact Label Badge with Station Short Name & Crowd Dot -->
             <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold shadow-xl border ${
               isSelected || isTarget
-                ? 'bg-emerald-600 text-white border-emerald-300 ring-1 ring-emerald-400'
+                ? 'bg-slate-900 text-white border-emerald-400 ring-1 ring-emerald-300'
                 : 'bg-slate-900/95 text-white border-slate-700/80 backdrop-blur-md'
             }">
               <span class="w-1.5 h-1.5 rounded-full ${congestion.dotColor}"></span>
@@ -259,9 +315,9 @@ export const MapComponent: React.FC<MapComponentProps> = ({
               ${isHiddenMode ? '<span class="text-[8px] bg-rose-600 px-1 py-0.2 rounded font-black text-white">مخفية</span>' : ''}
             </div>
 
-            <!-- Station Logo Badge (Compact 34x34 with strict 1:1 circular aspect ratio) -->
-            <div style="width: 36px; height: 36px; min-width: 36px; min-height: 36px; max-width: 36px; max-height: 36px; flex-shrink: 0; aspect-ratio: 1/1;" class="shrink-0 -mt-0.5 rounded-full bg-white p-0.5 shadow-xl border-2 ${
-              isSelected || isTarget ? 'border-emerald-400 ring-2 ring-emerald-300' : 'border-emerald-600'
+            <!-- Station Logo Badge with Dynamic Logo & Style Controlled by Admin -->
+            <div style="width: 38px; height: 38px; min-width: 38px; min-height: 38px; max-width: 38px; max-height: 38px; flex-shrink: 0; aspect-ratio: 1/1; ${markerBadgeRadius} border-color: ${glowColor};" class="shrink-0 -mt-0.5 bg-white p-0.5 shadow-xl border-2 ${
+              isSelected || isTarget ? 'ring-2 ring-emerald-300' : ''
             } flex items-center justify-center overflow-hidden">
               <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none;">
                 ${effectiveLogo ? `<img src="${effectiveLogo}" alt="logo" style="width: 100%; height: 100%; object-fit: contain; aspect-ratio: 1/1;" />` : CARGAS_LOGO_SVG}
@@ -272,7 +328,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
             ${servicesRowHtml}
             
             <!-- Pin Pointer Tail -->
-            <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #008844; margin-top: -1px; flex-shrink: 0;"></div>
+            <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid ${glowColor}; margin-top: -1px; flex-shrink: 0;"></div>
           </div>
         </div>
       `;
@@ -313,7 +369,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
         stationMarkersRef.current.set(station.id, marker);
       }
     });
-  }, [stations, selectedStation, navigationState.targetStation, isAdminEditMode, globalStationLogoUrl]);
+  }, [stations, selectedStation, navigationState.targetStation, isAdminEditMode, globalStationLogoUrl, logoRefreshKey]);
 
   // Update Route Polyline
   useEffect(() => {

@@ -3,6 +3,7 @@ import { Station, CongestionLevel } from '../types';
 import { CARGAS_FACILITY_META, getCongestionBadge } from '../utils/companyAssets';
 import { CARGAS_LOGO_SVG } from '../utils/cargasLogo';
 import { speechService } from '../services/speechService';
+import { getWasalnyFullConfig } from '../../services/storageService';
 import { 
   Navigation, 
   MapPin, 
@@ -94,13 +95,19 @@ export const StationDetailSheet: React.FC<StationDetailSheetProps> = ({
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
             {/* Cargas NGV Emblem */}
-            <div className="w-14 h-14 rounded-full bg-white p-1 border-2 border-emerald-500 shadow-xl shrink-0 overflow-hidden flex items-center justify-center">
-              {(station.customLogoUrl || customAppLogoUrl) ? (
-                <img src={station.customLogoUrl || customAppLogoUrl} alt="logo" className="w-full h-full object-contain" />
-              ) : (
-                <div dangerouslySetInnerHTML={{ __html: CARGAS_LOGO_SVG }} className="w-full h-full" />
-              )}
-            </div>
+            {(() => {
+              const wasalnyCfg = getWasalnyFullConfig();
+              const effectiveLogo = wasalnyCfg.stationCustomLogos?.[station.id] || wasalnyCfg.stationUnifiedLogoUrl || station.customLogoUrl || customAppLogoUrl;
+              return (
+                <div className="w-14 h-14 rounded-full bg-white p-1 border-2 border-emerald-500 shadow-xl shrink-0 overflow-hidden flex items-center justify-center">
+                  {effectiveLogo ? (
+                    <img src={effectiveLogo} alt={station.name} className="w-full h-full object-contain" />
+                  ) : (
+                    <div dangerouslySetInnerHTML={{ __html: CARGAS_LOGO_SVG }} className="w-full h-full" />
+                  )}
+                </div>
+              );
+            })()}
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={`text-xs font-black px-2.5 py-0.5 rounded-full border ${facility.badgeBg}`}>

@@ -34,6 +34,17 @@ import {
   ServiceAppointment,
   AppointmentServiceType,
   AppointmentStatus,
+  WasalnyServiceItem,
+  WasalnyCaptain,
+  ApprovedShiftRosterRecord,
+  TechnicianDeviceSession,
+  MapFacilityFilterItem,
+  StationDailySalesRecord,
+  SalesSystemStage,
+  CustomerViewMode,
+  CustomerChatChannel,
+  CustomerDirectMessage,
+  TechnicianIncentiveConfig,
 } from '../types';
 import { REWARDS_100_CATALOG } from '../data/rewardsCatalog';
 
@@ -297,9 +308,143 @@ export const DEFAULT_IDEAS_BANK: IdeaBankItem[] = [
   },
 ];
 
+// خدمات تطبيق وصلني الافتراضية
+export const DEFAULT_WASALNY_SERVICES: WasalnyServiceItem[] = [
+  {
+    id: 'srv-ride',
+    name: 'مشاوير الركاب والتاكسي الذكي (Wasalny Ride)',
+    description: 'توصيل ركاب سريع بسيارات تعمل بالغاز الطبيعي مع خصم مباشر بنقاط كارجاس.',
+    icon: 'Car',
+    isActive: true,
+    baseFareEgp: 15,
+    perKmRateEgp: 5.5,
+    perMinuteRateEgp: 0.8,
+    minFareEgp: 25,
+    commissionPct: 15,
+  },
+  {
+    id: 'srv-gas-delivery',
+    name: 'توصيل أسطوانات الغاز للمنازل (Wasalny Gas Delivery)',
+    description: 'توصيل سريع لأسطوانات الغاز وتركيبها بواسطة فنيين معتمدين من كارجاس.',
+    icon: 'Truck',
+    isActive: true,
+    baseFareEgp: 20,
+    perKmRateEgp: 4.0,
+    perMinuteRateEgp: 0.5,
+    minFareEgp: 30,
+    commissionPct: 10,
+  },
+  {
+    id: 'srv-sos',
+    name: 'الإغاثة والإنقاذ على الطريق (Roadside SOS)',
+    description: 'إنقاذ سريع لأعطال الطريق وتزويد متنقل بالوقود ورفع السيارات ونقلها.',
+    icon: 'LifeBuoy',
+    isActive: true,
+    baseFareEgp: 50,
+    perKmRateEgp: 8.0,
+    perMinuteRateEgp: 1.5,
+    minFareEgp: 80,
+    commissionPct: 12,
+  },
+  {
+    id: 'srv-mobile-inspection',
+    name: 'الصيانة والفحص المتنقل (Mobile CNG Inspection)',
+    description: 'فحص دوري ومعايرة أجهزة الغاز واختبار التسريب أمام المنزل أو العمل.',
+    icon: 'Wrench',
+    isActive: true,
+    baseFareEgp: 60,
+    perKmRateEgp: 6.0,
+    perMinuteRateEgp: 1.0,
+    minFareEgp: 100,
+    commissionPct: 15,
+  },
+  {
+    id: 'srv-carpool',
+    name: 'الرحلات التشاركية الموفرة (Wasalny Carpool)',
+    description: 'مشاركة مقاعد الرحلات اليومية بين المحافظات بأقل تكلفة ممكنة.',
+    icon: 'Users',
+    isActive: true,
+    baseFareEgp: 10,
+    perKmRateEgp: 3.5,
+    perMinuteRateEgp: 0.4,
+    minFareEgp: 20,
+    commissionPct: 8,
+  },
+];
+
+// كباتن وأسطول سيارات تطبيق وصلني
+export const DEFAULT_WASALNY_CAPTAINS: WasalnyCaptain[] = [
+  {
+    id: 'CAP-01',
+    name: 'كابتن / أحمد فوزي الدسوقي',
+    phone: '01012345678',
+    carPlate: 'س ف ر 1 9 8 4',
+    carModel: 'شيري أريزو 5 (غاز طبيعي)',
+    city: 'القاهرة - شبرا',
+    rating: 4.9,
+    totalTrips: 412,
+    totalEarningsEgp: 18450,
+    status: 'active',
+    joinedDate: '2026-01-15',
+    cngConverted: true,
+  },
+  {
+    id: 'CAP-02',
+    name: 'كابتن / إسلام مدحت النجار',
+    phone: '01198765432',
+    carPlate: 'ب ط ل 3 4 5 6',
+    carModel: 'بي واي دي F3 (غاز طبيعي)',
+    city: 'الجيزة - الدقي',
+    rating: 4.8,
+    totalTrips: 289,
+    totalEarningsEgp: 12600,
+    status: 'active',
+    joinedDate: '2026-02-10',
+    cngConverted: true,
+  },
+  {
+    id: 'CAP-03',
+    name: 'كابتن / محمود عبد الفتاح عويس',
+    phone: '01234567890',
+    carPlate: 'ص ق ر 7 8 9 0',
+    carModel: 'نيسان صني N17 (غاز طبيعي)',
+    city: 'القليوبية - بنها',
+    rating: 5.0,
+    totalTrips: 520,
+    totalEarningsEgp: 24300,
+    status: 'active',
+    joinedDate: '2025-11-20',
+    cngConverted: true,
+  },
+  {
+    id: 'CAP-04',
+    name: 'كابتن / حسن رجب البسيوني',
+    phone: '01555667788',
+    carPlate: 'ع ل م 2 3 4 5',
+    carModel: 'تويوتا كورولا (غاز طبيعي)',
+    city: 'الإسكندرية - سموحة',
+    rating: 4.7,
+    totalTrips: 195,
+    totalEarningsEgp: 8900,
+    status: 'active',
+    joinedDate: '2026-03-01',
+    cngConverted: true,
+  },
+];
+
+const WASALNY_STORAGE_KEY = 'cargas_wasalny_full_config';
+
 // إعدادات تطبيق وصّلني الافتراضية
 export const DEFAULT_WASALNY_CONFIG: WasalnyConfig = {
   enabled: true,
+  appName: 'تطبيق وصّلني - Cargas Wasalny',
+  appSlogan: 'مشوارك أسرع مع غاز كارجاس وأنظف للبيئة',
+  appStatus: 'active',
+  appVersion: 'v3.5 Enterprise',
+  wasalnyLogoUrl: '',
+  wasalnyLogoShape: 'rounded',
+  wasalnyThemeColor: '#059669',
+  wasalnyAccentColor: '#0284c7',
   voiceGuidance: 'wadah_egyptian',
   autoVoiceOnOpen: true,
   navigationProvider: 'google_maps',
@@ -310,7 +455,49 @@ export const DEFAULT_WASALNY_CONFIG: WasalnyConfig = {
   buttonLabel: 'وصلني لأقرب محطة كارجاس ⛽',
   subtitle: 'توجيه ذكي وملاحة فورية لأقرب محطة تموين كارجاس CNG مجهزة وسريعة',
   cardLayout: 'banner_top',
+  services: DEFAULT_WASALNY_SERVICES,
+  captains: DEFAULT_WASALNY_CAPTAINS,
+  pointsDiscountEnabled: true,
+  pointsToEgpDiscountRate: 0.5,
+  freeRidePointsThreshold: 100,
+  maxDiscountPerTripEgp: 50,
+  // التحكم في لوجوهات المحطات على الخريطة
+  stationMarkerLogoMode: 'unified_cargas',
+  stationUnifiedLogoUrl: '',
+  stationMarkerStyle: 'cargas_badge',
+  stationCustomLogos: {},
+  stationMarkerGlowColor: '#059669',
+  // قصر منظومة الخدمات والتعريفة والتوصيل الذكي على مدير النظام فقط
+  showServicesAndTariffsOnlyToAdmin: true,
+  enableSmartDeliveryForCustomers: false,
+  smartDeliveryNoteForCustomers: 'خدمة التوصيل الذكي تحت الإطلاق التجريبي ومقتصرة على توجيهات مدير النظام.',
 };
+
+export function getWasalnyFullConfig(): WasalnyConfig {
+  try {
+    const raw = localStorage.getItem(WASALNY_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        ...DEFAULT_WASALNY_CONFIG,
+        ...parsed,
+        services: parsed.services || DEFAULT_WASALNY_SERVICES,
+        captains: parsed.captains || DEFAULT_WASALNY_CAPTAINS,
+      };
+    }
+  } catch (e) {
+    console.error('Failed to load Wasalny full config', e);
+  }
+  return DEFAULT_WASALNY_CONFIG;
+}
+
+export function saveWasalnyFullConfig(cfg: WasalnyConfig): void {
+  try {
+    localStorage.setItem(WASALNY_STORAGE_KEY, JSON.stringify(cfg));
+  } catch (e) {
+    console.error('Failed to save Wasalny full config', e);
+  }
+}
 
 // المعادلة النموذجية المعتمدة لاحتساب نقاط الولاء
 export const DEFAULT_POINTS_FORMULA: PointsFormulaConfig = {
@@ -434,24 +621,24 @@ export function calculatePointsFromFormula(
 // تعريفات المساحات الافتراضية لشاشتي العميل والفني (نظام التخطيط الديناميكي المرن)
 export const DEFAULT_DRIVER_SECTIONS: SectionLayoutItem[] = [
   {
-    id: 'wasalny_hero',
-    title: 'خريطة ومحدد أقرب محطة كارجاس (وصّلني)',
-    description: 'توجيه الملاحة الحية ورصد أقرب محطة مع رادار ومحيط الـ GPS',
-    colSpan: 7,
+    id: 'driver_welcome_banner',
+    title: 'المساحة الخضراء (بانر الترحيب الرئيسي وبيانات السائق)',
+    description: 'ترحيب السائق الأخضر، رقم اللوحة، سعر المتر، زر وصّلني، وأيقونات التقييم والشكاوى',
+    colSpan: 12,
     heightMode: 'normal',
     visible: true,
     order: 1,
-    icon: 'MapPin',
+    icon: 'Sparkles',
   },
   {
-    id: 'qr_vehicle_card',
-    title: 'كود الـ QR للتموين السريع وبيانات السيارة',
-    description: 'باركود السائق السريع لمسحه بواسطة فني المحطة وبيانات اللوحة والسعة',
-    colSpan: 5,
-    heightMode: 'normal',
+    id: 'nearest_station_repeat_bar',
+    title: 'المساحة الزرقاء (رصد أقرب محطة وتكرار التموين GPS)',
+    description: 'الشريط الأزرق الداكن لرصد أقرب محطة بالـ GPS وتكرار التموين من المحطة والمضخة',
+    colSpan: 12,
+    heightMode: 'compact',
     visible: true,
     order: 2,
-    icon: 'QrCode',
+    icon: 'Fuel',
   },
   {
     id: 'promotional_banner',
@@ -461,7 +648,27 @@ export const DEFAULT_DRIVER_SECTIONS: SectionLayoutItem[] = [
     heightMode: 'normal',
     visible: true,
     order: 3,
-    icon: 'Sparkles',
+    icon: 'Award',
+  },
+  {
+    id: 'wasalny_hero',
+    title: 'خريطة ومحدد أقرب محطة كارجاس (وصّلني)',
+    description: 'توجيه الملاحة الحية ورصد أقرب محطة مع رادار ومحيط الـ GPS',
+    colSpan: 7,
+    heightMode: 'normal',
+    visible: true,
+    order: 4,
+    icon: 'MapPin',
+  },
+  {
+    id: 'qr_vehicle_card',
+    title: 'كود الـ QR للتموين السريع وبيانات السيارة',
+    description: 'باركود السائق السريع لمسحه بواسطة فني المحطة وبيانات اللوحة والسعة',
+    colSpan: 5,
+    heightMode: 'normal',
+    visible: true,
+    order: 5,
+    icon: 'QrCode',
   },
   {
     id: 'golden_card',
@@ -470,37 +677,37 @@ export const DEFAULT_DRIVER_SECTIONS: SectionLayoutItem[] = [
     colSpan: 12,
     heightMode: 'normal',
     visible: true,
-    order: 4,
+    order: 6,
     icon: 'CreditCard',
   },
   {
     id: 'fueling_count_stats',
-    title: 'شريط تكرار التموين والأقرب لموقعك',
-    description: 'عدد مرات التموين من نفس المحطة والطلمبة مع رصد الـ GPS',
+    title: 'بطاقات إجمالي الغاز المُمون والوفورات',
+    description: 'إحصائيات إجمالي الغاز الممون وإجمالي الإنفاق والوفورات المحققة بالجنيه',
     colSpan: 12,
     heightMode: 'compact',
     visible: true,
-    order: 5,
-    icon: 'Fuel',
+    order: 7,
+    icon: 'TrendingUp',
   },
   {
     id: 'rewards_bank',
-    title: 'بنك الهدايا والمكافآت واستبدال الأمتار',
-    description: 'استبدال النقاط بأمتار غاز مجانية وزيوت وغسيل سيارات وخدمات',
+    title: 'بنك الهدايا والمكافآت وكوبونات الخصم',
+    description: 'استبدال النقاط بهدايا الزيوت والصيانة والفحص وكوبونات الشركاء',
     colSpan: 12,
     heightMode: 'normal',
     visible: true,
-    order: 6,
+    order: 8,
     icon: 'Gift',
   },
   {
     id: 'maintenance_schedule',
-    title: 'جدول الصيانة الدورية للغاز الطبيعي',
-    description: 'مواعيد تغيير الزيت، البوجيهات، وفلاتر منظومة الغاز',
+    title: 'جدول الصيانة الدورية وحجز المواعيد',
+    description: 'مواعيد فحص الأسطوانات وتغيير الزيت والفلاتر مع حجز موعد فوري',
     colSpan: 12,
     heightMode: 'normal',
     visible: true,
-    order: 7,
+    order: 9,
     icon: 'Calendar',
   },
   {
@@ -510,7 +717,7 @@ export const DEFAULT_DRIVER_SECTIONS: SectionLayoutItem[] = [
     colSpan: 12,
     heightMode: 'normal',
     visible: true,
-    order: 8,
+    order: 10,
     icon: 'Clock',
   },
   {
@@ -520,7 +727,7 @@ export const DEFAULT_DRIVER_SECTIONS: SectionLayoutItem[] = [
     colSpan: 6,
     heightMode: 'normal',
     visible: true,
-    order: 9,
+    order: 11,
     icon: 'Star',
   },
   {
@@ -530,7 +737,7 @@ export const DEFAULT_DRIVER_SECTIONS: SectionLayoutItem[] = [
     colSpan: 6,
     heightMode: 'normal',
     visible: true,
-    order: 10,
+    order: 12,
     icon: 'MessageSquare',
   },
 ];
@@ -636,6 +843,18 @@ export const DEFAULT_SCADA_CONFIG: ScadaConfig = {
   simulationDelaySeconds: 3,
 };
 
+export const DEFAULT_TECHNICIAN_INCENTIVE_CONFIG: TechnicianIncentiveConfig = {
+  pointValueEgp: 0.25,
+  rating5StarRewardEgp: 10,
+  rating4StarRewardEgp: 5,
+  highRatingBonusThreshold: 4.8,
+  highRatingMonthlyBonusEgp: 250,
+  minFuelingsShiftQuota: 10,
+  volumeBonusThresholdM3: 500,
+  volumeBonusRewardEgp: 50,
+  isEnabled: true,
+};
+
 export const DEFAULT_CONFIG: AppConfig = {
   appName: 'منظومة كارجاس وبرنامج الولاء الذكي',
   appSubtitle: 'لوحة التحكم والتموين الرقمي الشامل - محطة شبرا النموذجية',
@@ -703,6 +922,14 @@ export const DEFAULT_CONFIG: AppConfig = {
   pointsFormula: DEFAULT_POINTS_FORMULA,
   layoutSettings: DEFAULT_LAYOUT_SETTINGS,
   scadaConfig: DEFAULT_SCADA_CONFIG,
+  fuelingModeDisplay: 'both',
+  cylinderInspectionPin: '8899',
+  customerServicePin: '5566',
+  complaintsOfficerPin: '7788',
+  showDeveloperName: true,
+  showCompanyName: true,
+  showAppName: true,
+  technicianIncentiveConfig: DEFAULT_TECHNICIAN_INCENTIVE_CONFIG,
 };
 
 
@@ -954,6 +1181,140 @@ export const DEFAULT_STATIONS_LOCATIONS: CargasStationLocation[] = [
     financialApprovedAt: '2026-10-25 10:00',
     financialApprovedBy: 'مدير عام الإدارة المالية',
     financialNotes: 'خدمات سريعة أسفل المظلة',
+  },
+  {
+    id: 'ST-08',
+    name: 'مركز كارجاس المتكامل لخدمات وزيوت المحركات - شيراتون',
+    code: 'CARGAS-SHERATON-OIL',
+    city: 'القاهرة',
+    address: 'شارع سيد زكريا، مساكن شيراتون، النزهة',
+    facilityType: 'oil_center',
+    latitude: 30.1085,
+    longitude: 31.3789,
+    phone: '0222684512',
+    workingHours: '8:00 ص - 10:00 م',
+    servicesAvailable: ['مركز متكامل للزيوت', 'تغيير زيوت معتمدة', 'صيانة دورية للمحركات', 'فلاتر وبوجيهات'],
+    activities: ['زيوت', 'صيانة'],
+    salesVolumeStatus: 'high',
+    promotionalPointsMultiplier: 1.5,
+    promotionalBudgetEgp: 20000,
+    region: 'القاهرة الكبرى',
+    costPerPointEgp: 0.35,
+    pointsAwardRatePerMeter: 1.5,
+    isLoyaltyProgramActive: true,
+    financialApprovedByAdmin: true,
+  },
+  {
+    id: 'ST-09',
+    name: 'مركز كارجاس المتخصص لخدمات الزيوت - المعادي',
+    code: 'CARGAS-MAADI-OIL',
+    city: 'القاهرة',
+    address: 'شارع النصر، المعادي الجديدة، أمام المركز الأولمبي',
+    facilityType: 'oil_center',
+    latitude: 29.9734,
+    longitude: 31.2856,
+    phone: '0225197845',
+    workingHours: '8:00 ص - 11:00 م',
+    servicesAvailable: ['تغيير زيوت معتمدة', 'مركز متكامل للزيوت', 'غسيل محركات', 'فحص تسريب السوائل'],
+    activities: ['زيوت'],
+    salesVolumeStatus: 'medium',
+    promotionalPointsMultiplier: 1.2,
+    promotionalBudgetEgp: 15000,
+    region: 'القاهرة الكبرى',
+    costPerPointEgp: 0.35,
+    pointsAwardRatePerMeter: 1.2,
+    isLoyaltyProgramActive: true,
+    financialApprovedByAdmin: true,
+  },
+  {
+    id: 'ST-10',
+    name: 'مركز كارجاس المعتمد لتحويل وصيانة السيارات - غيط العنب',
+    code: 'CARGAS-ALEX-GHEIT-CTR',
+    city: 'الإسكندرية',
+    address: 'محور المحمودية، منطقة غيط العنب، كرموز',
+    facilityType: 'conversion_center',
+    latitude: 31.1823,
+    longitude: 29.9145,
+    phone: '033924512',
+    workingHours: '8:00 ص - 6:00 م',
+    servicesAvailable: ['تحويل سيارات للغاز', 'صيانة أطقم الغاز وضبط المنظم', 'قطع غيار إيطالية معتمدة'],
+    activities: ['تحويل', 'صيانة'],
+    salesVolumeStatus: 'high',
+    promotionalPointsMultiplier: 1.5,
+    promotionalBudgetEgp: 25000,
+    region: 'الإسكندرية والساحل',
+    costPerPointEgp: 0.40,
+    pointsAwardRatePerMeter: 1.5,
+    isLoyaltyProgramActive: true,
+    financialApprovedByAdmin: true,
+  },
+  {
+    id: 'ST-11',
+    name: 'مركز كارجاس لفحص واختبار أسطوانات الغاز - العامرية',
+    code: 'CARGAS-AMREYA-CYL',
+    city: 'الإسكندرية',
+    address: 'طريق الإسكندرية / القاهرة الصحراوي، مجمع كارجاس العامرية',
+    facilityType: 'cylinder_inspection',
+    latitude: 31.0234,
+    longitude: 29.8145,
+    phone: '034481230',
+    workingHours: '8:00 ص - 4:00 م',
+    servicesAvailable: ['فحص واختبار أسطوانة الغاز وصمام الأمان (شهادة المرور)', 'اختبار ضغط هيدروستاتيكي 300 بار'],
+    activities: ['فحص اسطوانات'],
+    salesVolumeStatus: 'medium',
+    promotionalPointsMultiplier: 1.5,
+    promotionalBudgetEgp: 15000,
+    region: 'الإسكندرية والساحل',
+    costPerPointEgp: 0.35,
+    pointsAwardRatePerMeter: 1.5,
+    isLoyaltyProgramActive: true,
+    financialApprovedByAdmin: true,
+  },
+  {
+    id: 'ST-12',
+    name: 'محطة كارجاس الكبرى - العاصمة الإدارية الجديدة (قريباً 2027)',
+    code: 'CARGAS-NEWCAPITAL-2027',
+    city: 'القاهرة',
+    address: 'الحي المالي والحكومي، بجوار مجمع الوزارات، العاصمة الإدارية',
+    facilityType: 'cng_station',
+    latitude: 30.0125,
+    longitude: 31.7456,
+    phone: '19058',
+    workingHours: 'تاريخ الافتتاح المستهدف: 2027',
+    pumpCount: 12,
+    servicesAvailable: ['محطة عملاقة قريباً 2027', 'تموين غاز فائق السرعة', 'مركز زيوت متكامل', 'محطة شحن كهربائي'],
+    activities: ['تموين', 'زيوت', 'صيانة'],
+    salesVolumeStatus: 'medium',
+    promotionalPointsMultiplier: 2.0,
+    promotionalBudgetEgp: 50000,
+    region: 'القاهرة الكبرى',
+    costPerPointEgp: 0.35,
+    pointsAwardRatePerMeter: 2.0,
+    isLoyaltyProgramActive: false,
+    financialApprovedByAdmin: true,
+  },
+  {
+    id: 'ST-13',
+    name: 'محطة كارجاس النموذجية - العلمين الجديدة (قريباً 2027)',
+    code: 'CARGAS-ALAMEIN-2027',
+    city: 'مطروح',
+    address: 'الطريق الساحلي الدولي، مدخل مدينة العلمين الجديدة',
+    facilityType: 'cng_station',
+    latitude: 30.8345,
+    longitude: 28.9456,
+    phone: '19058',
+    workingHours: 'تاريخ الافتتاح المستهدف: 2027',
+    pumpCount: 10,
+    servicesAvailable: ['خطة التوسع القومي قريباً 2027', 'تموين غاز طبيعي CNG', 'مركز زيوت أسفل المظلة'],
+    activities: ['تموين', 'زيوت'],
+    salesVolumeStatus: 'medium',
+    promotionalPointsMultiplier: 2.0,
+    promotionalBudgetEgp: 30000,
+    region: 'الإسكندرية والساحل',
+    costPerPointEgp: 0.40,
+    pointsAwardRatePerMeter: 2.0,
+    isLoyaltyProgramActive: false,
+    financialApprovedByAdmin: true,
   },
 ];
 
@@ -1507,6 +1868,7 @@ export function getAppConfig(): AppConfig {
         ...DEFAULT_SCADA_CONFIG,
         ...(parsed.scadaConfig || {}),
       },
+      customerViewMode: parsed.customerViewMode || getCustomerViewMode(),
     };
   } catch {
     return DEFAULT_CONFIG;
@@ -1671,21 +2033,26 @@ export const DEFAULT_APPOINTMENTS: ServiceAppointment[] = [
     driverName: 'أحمد ربيع السعيد',
     carPlate: 'ق ط د 7842',
     phone: '01012345678',
-    stationId: 'ST-01',
-    stationName: 'محطة كارجاس شبرا النموذجية',
+    stationId: 'ST-05',
+    stationName: 'مركز فحص واختبار أسطوانات الغاز - مسطرد',
     serviceType: 'فحص واختبار أسطوانة الغاز وصمام الأمان (شهادة المرور)',
     appointmentDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
     timeSlot: '10:00 ص - 10:30 ص',
-    status: 'awaiting_confirmation', // جاهز لمحاكاة تأكيد الحضور قبل ساعتين
+    status: 'awaiting_confirmation',
     createdAt: new Date().toISOString(),
     alertSentAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
     confirmationDeadline: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
-    notes: 'فحص دوري واستخراج شهادة صلاحية المرور المعتمدة',
+    notes: 'فحص دوري واستخراج شهادة صلاحية المرور المعتمدة 3 سنوات',
+    bookingCategory: 'cylinder_inspection',
+    cylinderSerialNumber: 'CYL-EG-2021-99812',
+    cylinderWaterCapacityL: 70,
+    cylinderTestResult: 'pending',
+    customerServiceCallStatus: 'pending_call',
   },
   {
     id: 'APP-102',
     driverId: 'DRV-99881',
-    driverName: 'سائق سابق بالانتظار',
+    driverName: 'محمود عبد الفتاح السيد',
     carPlate: 'س ر م 5124',
     phone: '01223344556',
     stationId: 'ST-01',
@@ -1693,11 +2060,56 @@ export const DEFAULT_APPOINTMENTS: ServiceAppointment[] = [
     serviceType: 'صيانة دورية وتغيير طقم فلاتر الغاز',
     appointmentDate: new Date().toISOString().split('T')[0],
     timeSlot: '01:00 م - 01:30 م',
-    status: 'auto_cancelled_no_show', // شاغر ومتاح لشغل المكان فوراً للعملاء
+    status: 'confirmed_by_driver',
+    confirmedByCustomerService: true,
+    confirmedByAgentName: 'سارة ممدوح (خدمة العملاء)',
+    customerServiceCallStatus: 'called_confirmed',
     createdAt: new Date(Date.now() - 3600000 * 3).toISOString(),
-    alertSentAt: new Date(Date.now() - 3600000 * 2.5).toISOString(),
-    confirmationDeadline: new Date(Date.now() - 3600000 * 1.5).toISOString(),
-    notes: 'خلو موعد بسبب عدم تأكيد الوصول بالرد على الإشعار قبل ساعتين - متاح لشغل الدور',
+    notes: 'تم التواصل هاتفياً وتأكيد حضور العميل في الموعد المحدد',
+    bookingCategory: 'maintenance_conversion',
+  },
+  {
+    id: 'APP-103',
+    driverId: 'DRV-33412',
+    driverName: 'كابتن ياسر الجوهري',
+    carPlate: 'أ ب ج 9831',
+    phone: '01122334455',
+    stationId: 'ST-02',
+    stationName: 'محطة كارجاس ألماظة - النزهة',
+    serviceType: 'تغيير زيت المحرك وفحص الفلتر أسفل المظلة',
+    appointmentDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
+    timeSlot: '11:00 ص - 11:30 ص',
+    status: 'scheduled',
+    createdAt: new Date().toISOString(),
+    notes: 'حجز غيار زيت شل هيلكس الترا لمحركات الغاز',
+    bookingCategory: 'maintenance_conversion',
+    customerServiceCallStatus: 'pending_call',
+  },
+  {
+    id: 'APP-104',
+    driverId: 'DRV-55610',
+    driverName: 'طارق عبد الرازق حسن',
+    carPlate: 'ي ن ع 4521',
+    phone: '01099887766',
+    stationId: 'ST-05',
+    stationName: 'مركز فحص واختبار أسطوانات الغاز - مسطرد',
+    serviceType: 'فحص واختبار أسطوانة الغاز وصمام الأمان (شهادة المرور)',
+    appointmentDate: new Date().toISOString().split('T')[0],
+    timeSlot: '09:00 ص - 09:30 ص',
+    status: 'completed',
+    confirmedByCustomerService: true,
+    confirmedByAgentName: 'م. إيهاب شاكر (خدمة العملاء)',
+    customerServiceCallStatus: 'called_confirmed',
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+    notes: 'تم فحص واختبار الأسطوانة بنجاح بضغط 300 بار وتم إصدار شهادة المرور المعتمدة رقم CRG-CERT-9481',
+    bookingCategory: 'cylinder_inspection',
+    cylinderSerialNumber: 'CYL-IT-884210',
+    cylinderWaterCapacityL: 80,
+    cylinderTestResult: 'passed',
+    cylinderTestPressureBar: 300,
+    cylinderCertificateNumber: 'CRG-CERT-9481',
+    cylinderCertificateExpiryDate: '2029-10-30',
+    inspectionEngineerName: 'م. حسام الدين عبد الله (مدير الفحص)',
   },
 ];
 
@@ -1742,6 +2154,267 @@ export function confirmServiceAppointment(id: string): ServiceAppointment | null
   };
   saveServiceAppointments(appointments);
   return appointments[idx];
+}
+
+export function updateServiceAppointment(
+  id: string,
+  updates: Partial<ServiceAppointment>
+): ServiceAppointment | null {
+  const appointments = getServiceAppointments();
+  const idx = appointments.findIndex((a) => a.id === id);
+  if (idx === -1) return null;
+  appointments[idx] = {
+    ...appointments[idx],
+    ...updates,
+  };
+  saveServiceAppointments(appointments);
+  return appointments[idx];
+}
+
+export const CYLINDER_INSPECTION_PIN_KEY = 'cargas_cylinder_inspection_pin';
+
+export function getCylinderInspectionPin(): string {
+  if (typeof window === 'undefined') return '8899';
+  try {
+    const saved = localStorage.getItem(CYLINDER_INSPECTION_PIN_KEY);
+    if (saved && saved.trim().length > 0) return saved.trim();
+    const appCfg = getAppConfig();
+    if (appCfg.cylinderInspectionPin && appCfg.cylinderInspectionPin.trim().length > 0) {
+      return appCfg.cylinderInspectionPin.trim();
+    }
+  } catch (e) {
+    console.warn('Error reading cylinder PIN:', e);
+  }
+  return '8899';
+}
+
+export function saveCylinderInspectionPin(pin: string): void {
+  if (typeof window === 'undefined') return;
+  const targetPin = (pin || '8899').trim();
+  try {
+    localStorage.setItem(CYLINDER_INSPECTION_PIN_KEY, targetPin);
+    const appCfg = getAppConfig();
+    saveAppConfig({
+      ...appCfg,
+      cylinderInspectionPin: targetPin,
+    });
+  } catch (e) {
+    console.error('Error saving cylinder PIN:', e);
+  }
+}
+
+export const CUSTOMER_SERVICE_PIN_KEY = 'cargas_customer_service_pin';
+
+export function getCustomerServicePin(): string {
+  if (typeof window === 'undefined') return '5566';
+  try {
+    const saved = localStorage.getItem(CUSTOMER_SERVICE_PIN_KEY);
+    if (saved && saved.trim().length > 0) return saved.trim();
+    const appCfg = getAppConfig();
+    if (appCfg.customerServicePin && appCfg.customerServicePin.trim().length > 0) {
+      return appCfg.customerServicePin.trim();
+    }
+  } catch (e) {
+    console.warn('Error reading customer service PIN:', e);
+  }
+  return '5566';
+}
+
+export function saveCustomerServicePin(pin: string): void {
+  if (typeof window === 'undefined') return;
+  const targetPin = (pin || '5566').trim();
+  try {
+    localStorage.setItem(CUSTOMER_SERVICE_PIN_KEY, targetPin);
+    const appCfg = getAppConfig();
+    saveAppConfig({
+      ...appCfg,
+      customerServicePin: targetPin,
+    });
+  } catch (e) {
+    console.error('Error saving customer service PIN:', e);
+  }
+}
+
+// ==========================================
+// باسوورد مسؤول تلقي الشكاوى والمقترحات (يرسله مدير النظام عبر الواتساب)
+// ==========================================
+export const COMPLAINTS_OFFICER_PIN_KEY = 'cargas_complaints_officer_pin';
+
+export function getComplaintsOfficerPin(): string {
+  if (typeof window === 'undefined') return '7788';
+  try {
+    const saved = localStorage.getItem(COMPLAINTS_OFFICER_PIN_KEY);
+    if (saved && saved.trim().length > 0) return saved.trim();
+    const appCfg = getAppConfig();
+    if (appCfg.complaintsOfficerPin && appCfg.complaintsOfficerPin.trim().length > 0) {
+      return appCfg.complaintsOfficerPin.trim();
+    }
+  } catch (e) {
+    console.warn('Error reading complaints officer PIN:', e);
+  }
+  return '7788';
+}
+
+export function saveComplaintsOfficerPin(pin: string): void {
+  if (typeof window === 'undefined') return;
+  const targetPin = (pin || '7788').trim();
+  try {
+    localStorage.setItem(COMPLAINTS_OFFICER_PIN_KEY, targetPin);
+    const appCfg = getAppConfig();
+    saveAppConfig({
+      ...appCfg,
+      complaintsOfficerPin: targetPin,
+    });
+  } catch (e) {
+    console.error('Error saving complaints officer PIN:', e);
+  }
+}
+
+// ==========================================
+// نظام المراسلة المباشرة بين العميل وخدمة العملاء ومركز فحص الأسطوانات
+// ==========================================
+export const CUSTOMER_DIRECT_MESSAGES_KEY = 'cargas_customer_direct_messages';
+
+export const DEFAULT_CUSTOMER_MESSAGES: CustomerDirectMessage[] = [
+  {
+    id: 'MSG-001',
+    channel: 'customer_service',
+    driverId: 'drv-01',
+    driverName: 'أحمد محمود رضوان',
+    carPlate: 'س ق ج 4 5 6 7',
+    driverPhone: '01012345678',
+    senderRole: 'customer_service',
+    senderName: 'فريق خدمة عملاء كارجاس',
+    messageText: 'أهلاً بك يا أستاذ أحمد في خدمة عملاء كارجاس! موعدك لصيانة وفحص طقم الفلاتر بمحطة شبرا مجدول غداً الساعة 10:30 صباحاً.',
+    timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
+    readByCustomer: true,
+    readByStaff: true,
+    stationName: 'محطة كارجاس شبرا',
+    serviceType: 'صيانة دورية وتغيير طقم فلاتر الغاز',
+    statusBadge: 'موعد مؤكد ✔️',
+  },
+  {
+    id: 'MSG-002',
+    channel: 'customer_service',
+    driverId: 'drv-01',
+    driverName: 'أحمد محمود رضوان',
+    carPlate: 'س ق ج 4 5 6 7',
+    driverPhone: '01012345678',
+    senderRole: 'driver',
+    senderName: 'أحمد محمود رضوان',
+    messageText: 'شكراً جزيلاً، هل يشمل ذلك فحص وضبط محبس الأمان؟',
+    timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
+    readByCustomer: true,
+    readByStaff: false,
+    stationName: 'محطة كارجاس شبرا',
+    serviceType: 'صيانة دورية وتغيير طقم فلاتر الغاز',
+  },
+  {
+    id: 'MSG-003',
+    channel: 'cylinder_center',
+    driverId: 'drv-01',
+    driverName: 'أحمد محمود رضوان',
+    carPlate: 'س ق ج 4 5 6 7',
+    driverPhone: '01012345678',
+    senderRole: 'cylinder_center',
+    senderName: 'م. حسام الدين (مركز فحص أسطوانات ألماظة)',
+    messageText: 'مرحباً أستاذ أحمد. نود تذكيرك بأن موعد الفحص الدوري لأسطوانة سيارتك مستحق لتجديد شهادة المرور الرسمية. المركز يعمل يومياً حتى 5 مساءً بجهاز الضغط الهيدروستاتيكي 300 بار.',
+    timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
+    readByCustomer: true,
+    readByStaff: true,
+    stationName: 'محطة ألماظة - طريق النصر',
+    serviceType: 'فحص واختبار أسطوانة الغاز وصمام الأمان (شهادة المرور)',
+    statusBadge: 'شهادة المرور 🛡️',
+  },
+];
+
+export function getCustomerDirectMessages(
+  channel?: CustomerChatChannel,
+  driverId?: string
+): CustomerDirectMessage[] {
+  if (typeof window === 'undefined') return DEFAULT_CUSTOMER_MESSAGES;
+  try {
+    const raw = localStorage.getItem(CUSTOMER_DIRECT_MESSAGES_KEY);
+    let list: CustomerDirectMessage[] = [];
+    if (raw) {
+      list = JSON.parse(raw);
+    } else {
+      list = DEFAULT_CUSTOMER_MESSAGES;
+      localStorage.setItem(CUSTOMER_DIRECT_MESSAGES_KEY, JSON.stringify(list));
+    }
+
+    if (channel) {
+      list = list.filter((m) => m.channel === channel);
+    }
+    if (driverId) {
+      list = list.filter((m) => m.driverId === driverId);
+    }
+    return list;
+  } catch (e) {
+    console.error('Error fetching customer direct messages:', e);
+    return DEFAULT_CUSTOMER_MESSAGES;
+  }
+}
+
+export function sendCustomerDirectMessage(
+  msg: Omit<CustomerDirectMessage, 'id' | 'timestamp'>
+): CustomerDirectMessage {
+  const current = getCustomerDirectMessages();
+  const newMsg: CustomerDirectMessage = {
+    ...msg,
+    id: `MSG-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+  };
+
+  const updated = [...current, newMsg];
+  try {
+    localStorage.setItem(CUSTOMER_DIRECT_MESSAGES_KEY, JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent('cargas_customer_message_sent', { detail: newMsg }));
+  } catch (e) {
+    console.error('Error saving direct message:', e);
+  }
+  return newMsg;
+}
+
+export function markCustomerMessagesRead(
+  channel: CustomerChatChannel,
+  readerRole: 'driver' | 'staff',
+  driverId?: string
+): void {
+  try {
+    const current = getCustomerDirectMessages();
+    const updated = current.map((m) => {
+      if (m.channel !== channel) return m;
+      if (driverId && m.driverId !== driverId) return m;
+      if (readerRole === 'driver') {
+        return { ...m, readByCustomer: true };
+      } else {
+        return { ...m, readByStaff: true };
+      }
+    });
+    localStorage.setItem(CUSTOMER_DIRECT_MESSAGES_KEY, JSON.stringify(updated));
+  } catch (e) {
+    console.error('Error marking messages as read:', e);
+  }
+}
+
+
+/**
+ * فحص هل المحطة بها مركز معتمد لفحص واختبار أسطوانات الغاز
+ */
+export function isStationCylinderTestingCenter(station: CargasStationLocation): boolean {
+  if (!station) return false;
+  if (station.facilityType === 'cylinder_inspection') return true;
+  if (station.activities && station.activities.includes('فحص اسطوانات')) return true;
+  const nameNorm = (station.name || '').toLowerCase();
+  const servicesNorm = (station.servicesAvailable || []).join(' ').toLowerCase();
+  return (
+    nameNorm.includes('فحص') ||
+    nameNorm.includes('اسطوان') ||
+    nameNorm.includes('أسطوان') ||
+    servicesNorm.includes('فحص') ||
+    servicesNorm.includes('اسطوان')
+  );
 }
 
 export function cancelServiceAppointment(id: string, reason?: string): ServiceAppointment | null {
@@ -1828,17 +2501,27 @@ export function saveRedemptions(redemptions: RewardRedemption[]): void {
 }
 
 export function getStationLocations(): CargasStationLocation[] {
+  if (typeof window === 'undefined') return DEFAULT_STATIONS_LOCATIONS;
   const data = localStorage.getItem(STATIONS_LOCATIONS_KEY);
   if (!data) return DEFAULT_STATIONS_LOCATIONS;
   try {
-    return JSON.parse(data);
+    const parsed = JSON.parse(data);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_STATIONS_LOCATIONS;
   } catch {
     return DEFAULT_STATIONS_LOCATIONS;
   }
 }
 
 export function saveStationLocations(stations: CargasStationLocation[]): void {
-  localStorage.setItem(STATIONS_LOCATIONS_KEY, JSON.stringify(stations));
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STATIONS_LOCATIONS_KEY, JSON.stringify(stations));
+    // إرسال إشعار فوري وتحديث كافة الخرائط والشاشات في كامل التطبيق
+    window.dispatchEvent(new CustomEvent('cargas_stations_updated', { detail: stations }));
+    window.dispatchEvent(new Event('storage'));
+  } catch (err) {
+    console.error('Failed to save stations locations:', err);
+  }
 }
 
 export function getStationRatings(): StationRating[] {
@@ -1910,6 +2593,22 @@ export function addCustomerComplaint(complaint: Omit<CustomerComplaint, 'id' | '
   complaints.unshift(newComplaint);
   saveCustomerComplaints(complaints);
 }
+
+export function updateCustomerComplaint(
+  id: string,
+  updates: Partial<CustomerComplaint>
+): CustomerComplaint | null {
+  const complaints = getCustomerComplaints();
+  const idx = complaints.findIndex((c) => c.id === id);
+  if (idx === -1) return null;
+  complaints[idx] = {
+    ...complaints[idx],
+    ...updates,
+  };
+  saveCustomerComplaints(complaints);
+  return complaints[idx];
+}
+
 
 // دالة إثراء وحساب مقاييس الشهور والمستهدفات والانحرافات السنوية لكل محطة
 export function enrichSalesRecordMetrics(record: Partial<StationSalesRecord>): StationSalesRecord {
@@ -3652,4 +4351,907 @@ export async function aiAuditAndGenerateReward(
     icon: categoryIcon,
   };
 }
+
+// ==================== بيان وسجل كشوفات الورادي المعتمدة ====================
+
+const SHIFT_ROSTERS_KEY = 'cargas_approved_shift_rosters';
+const REGISTERED_DRIVERS_PHONE_KEY = 'cargas_registered_drivers_directory';
+const TECH_DEVICE_SESSIONS_KEY = 'cargas_technician_device_sessions';
+const DEVICE_ID_KEY = 'cargas_unique_device_id';
+
+export const DEFAULT_APPROVED_ROSTERS: ApprovedShiftRosterRecord[] = [
+  {
+    id: 'ROSTER-2026-001',
+    technicianId: 'TECH-01',
+    technicianName: 'محمود الشناوي',
+    technicianPhone: '01011223344',
+    technicianRole: 'فني تموين أول',
+    shiftType: 'صباحية (08:00 ص - 04:00 م)',
+    stationName: 'محطة كارجاس شبرا النموذجية',
+    stationCode: 'CARGAS-SHUBRA-01',
+    dailyPin: '7391',
+    approvedBySupervisorName: 'م. عصام المنشاوي (مشرف المحطة)',
+    approvedAt: '2026-10-28T08:00:15.000Z',
+    formattedApprovedAt: '2026-10-28 08:00:15 ص',
+    isChatDispatched: true,
+    status: 'active',
+    notes: 'تم فحص العدادات وتفعيل الوردية الصباحية بنجاح.',
+  },
+  {
+    id: 'ROSTER-2026-002',
+    technicianId: 'TECH-02',
+    technicianName: 'إبراهيم عبد الله مرعي',
+    technicianPhone: '01155667788',
+    technicianRole: 'فني تموين',
+    shiftType: 'مسائية (04:00 م - 12:00 ص)',
+    stationName: 'محطة كارجاس شبرا النموذجية',
+    stationCode: 'CARGAS-SHUBRA-01',
+    dailyPin: '8402',
+    approvedBySupervisorName: 'م. عصام المنشاوي (مشرف المحطة)',
+    approvedAt: '2026-10-27T16:00:10.000Z',
+    formattedApprovedAt: '2026-10-27 04:00:10 م',
+    isChatDispatched: true,
+    status: 'completed',
+    notes: 'تمت مطابقة عدادات الإغلاق وتسليم النقدية للإدارة المالية.',
+  },
+];
+
+export function getApprovedShiftRosters(): ApprovedShiftRosterRecord[] {
+  try {
+    const raw = localStorage.getItem(SHIFT_ROSTERS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {
+    console.error('Error loading shift rosters:', e);
+  }
+  return DEFAULT_APPROVED_ROSTERS;
+}
+
+export function saveApprovedShiftRosters(records: ApprovedShiftRosterRecord[]): void {
+  try {
+    localStorage.setItem(SHIFT_ROSTERS_KEY, JSON.stringify(records));
+    window.dispatchEvent(new CustomEvent('cargas_roster_updated', { detail: records }));
+  } catch (e) {
+    console.error('Error saving shift rosters:', e);
+  }
+}
+
+export function addApprovedShiftRoster(record: ApprovedShiftRosterRecord): void {
+  const all = getApprovedShiftRosters();
+  const updated = [record, ...all];
+  saveApprovedShiftRosters(updated);
+}
+
+// ==================== عدم السماح بتكرار رقم التليفون للعميل ====================
+
+export interface RegisteredDriverEntry {
+  phone: string;
+  driverId: string;
+  name: string;
+  carPlate: string;
+  registeredAt: string;
+}
+
+export function getRegisteredDriversDirectory(): RegisteredDriverEntry[] {
+  try {
+    const raw = localStorage.getItem(REGISTERED_DRIVERS_PHONE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.error('Error loading driver directory:', e);
+  }
+  // Initialize with default driver profile
+  const defaultDriver = getDriverProfile();
+  return [
+    {
+      phone: defaultDriver.phone.replace(/\D/g, ''),
+      driverId: defaultDriver.id,
+      name: defaultDriver.name,
+      carPlate: defaultDriver.carPlate,
+      registeredAt: defaultDriver.registeredAt || new Date().toISOString(),
+    },
+  ];
+}
+
+export function isCustomerPhoneRegistered(rawPhone: string): {
+  isRegistered: boolean;
+  driver?: RegisteredDriverEntry;
+} {
+  const clean = rawPhone.replace(/\D/g, '');
+  if (!clean || clean.length < 8) return { isRegistered: false };
+  const all = getRegisteredDriversDirectory();
+  const found = all.find((d) => d.phone === clean || d.phone.endsWith(clean) || clean.endsWith(d.phone));
+  if (found) {
+    return { isRegistered: true, driver: found };
+  }
+  return { isRegistered: false };
+}
+
+export function registerCustomerPhone(
+  rawPhone: string,
+  driverId: string,
+  name: string,
+  carPlate: string
+): void {
+  const clean = rawPhone.replace(/\D/g, '');
+  const all = getRegisteredDriversDirectory();
+  const filtered = all.filter((d) => d.phone !== clean && d.driverId !== driverId);
+  const updated: RegisteredDriverEntry[] = [
+    {
+      phone: clean,
+      driverId,
+      name,
+      carPlate,
+      registeredAt: new Date().toISOString(),
+    },
+    ...filtered,
+  ];
+  try {
+    localStorage.setItem(REGISTERED_DRIVERS_PHONE_KEY, JSON.stringify(updated));
+  } catch (e) {
+    console.error('Error saving driver directory:', e);
+  }
+}
+
+// ==================== قفل جلسة الفني على جهاز واحد لمنع التكرار ====================
+
+export function getOrCreateDeviceId(): string {
+  try {
+    let devId = localStorage.getItem(DEVICE_ID_KEY);
+    if (!devId) {
+      devId = 'DEV-' + Math.random().toString(36).substring(2, 9).toUpperCase() + '-' + Date.now().toString(36).toUpperCase();
+      localStorage.setItem(DEVICE_ID_KEY, devId);
+    }
+    return devId;
+  } catch {
+    return 'DEV-FALLBACK-101';
+  }
+}
+
+export function getTechnicianDeviceSessions(): Record<string, TechnicianDeviceSession> {
+  try {
+    const raw = localStorage.getItem(TECH_DEVICE_SESSIONS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.error('Error loading technician sessions:', e);
+  }
+  return {};
+}
+
+export function checkTechnicianSessionDevice(
+  rawPhone: string,
+  techId: string
+): {
+  allowed: boolean;
+  activeSession?: TechnicianDeviceSession;
+  isSameDevice: boolean;
+  message?: string;
+} {
+  const cleanPhone = rawPhone.replace(/\D/g, '');
+  const currentDevId = getOrCreateDeviceId();
+  const sessions = getTechnicianDeviceSessions();
+  
+  const existing = sessions[cleanPhone] || Object.values(sessions).find((s) => s.techId === techId && s.isActive);
+  
+  if (!existing || !existing.isActive) {
+    return { allowed: true, isSameDevice: true };
+  }
+
+  // If session is older than 14 hours, auto expire
+  const sessionAgeMs = Date.now() - new Date(existing.loginTime).getTime();
+  if (sessionAgeMs > 14 * 3600 * 1000) {
+    return { allowed: true, isSameDevice: true };
+  }
+
+  const isSame = existing.deviceId === currentDevId;
+  if (isSame) {
+    return { allowed: true, isSameDevice: true, activeSession: existing };
+  }
+
+  return {
+    allowed: false,
+    isSameDevice: false,
+    activeSession: existing,
+    message: `⛔ تنبيه أمان صارم: هذا الرقم (${rawPhone}) مسجل به وردية نشطة بالفعل من جهاز آخر (كود الجهاز: ${existing.deviceId}) بتاريخ ${new Date(existing.loginTime).toLocaleTimeString('ar-EG')}. لا يُسمح بتشغيل التطبيق لنفس الفني من أكثر من جهاز في وقت واحد لمنع التلاعب.`,
+  };
+}
+
+export function recordTechnicianDeviceLogin(
+  rawPhone: string,
+  techId: string,
+  techName: string
+): TechnicianDeviceSession {
+  const cleanPhone = rawPhone.replace(/\D/g, '');
+  const deviceId = getOrCreateDeviceId();
+  const sessions = getTechnicianDeviceSessions();
+
+  const newSession: TechnicianDeviceSession = {
+    phone: cleanPhone,
+    techId,
+    techName,
+    deviceId,
+    loginTime: new Date().toISOString(),
+    lastHeartbeat: new Date().toISOString(),
+    isActive: true,
+  };
+
+  sessions[cleanPhone] = newSession;
+  try {
+    localStorage.setItem(TECH_DEVICE_SESSIONS_KEY, JSON.stringify(sessions));
+  } catch (e) {
+    console.error('Error recording tech device session:', e);
+  }
+  return newSession;
+}
+
+export function terminateTechnicianDeviceSession(rawPhone: string): void {
+  const cleanPhone = rawPhone.replace(/\D/g, '');
+  const sessions = getTechnicianDeviceSessions();
+  if (sessions[cleanPhone]) {
+    sessions[cleanPhone].isActive = false;
+    try {
+      localStorage.setItem(TECH_DEVICE_SESSIONS_KEY, JSON.stringify(sessions));
+    } catch (e) {
+      console.error('Error clearing tech device session:', e);
+    }
+  }
+}
+
+// ==================== نظام التحكم والتثبيت الدائم للوجوهات المحطات على الخريطة ====================
+
+export const MASTER_STATION_MAP_LOGO_KEY = 'cargas_master_station_map_logo_permanent';
+export const MASTER_MAP_LOGO_EVENT = 'cargas_map_logo_updated';
+
+// لوجو كارجاس الرسمي المعتمد عالي الدقة (SVG Data URI) لضمان عدم تلف الصورة مطلقاً
+export const OFFICIAL_CARGAS_VECTOR_LOGO = `data:image/svg+xml;utf8,${encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="cargasGreenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#022c22" />
+    </linearGradient>
+    <linearGradient id="flameGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="50%" stop-color="#eab308" />
+      <stop offset="100%" stop-color="#38bdf8" />
+    </linearGradient>
+  </defs>
+  <rect width="100" height="100" rx="22" fill="url(#cargasGreenGrad)" />
+  <circle cx="50" cy="50" r="42" fill="none" stroke="#fbbf24" stroke-width="2.5" stroke-dasharray="4 2" />
+  <!-- Gas Flame Emblem -->
+  <path d="M50 18 C56 28 68 38 68 53 C68 64 59 73 49 73 C39 73 31 64 31 53 C31 43 40 32 46 25 C45 32 48 37 52 38 C53 32 52 24 50 18 Z" fill="url(#flameGrad)" />
+  <ellipse cx="49" cy="58" rx="8" ry="12" fill="#ffffff" opacity="0.9" />
+  <!-- Text Label -->
+  <text x="50" y="88" font-family="Arial, sans-serif" font-weight="900" font-size="11" fill="#fef08a" text-anchor="middle" letter-spacing="1.5">CARGAS</text>
+</svg>
+`)}`;
+
+export interface MasterLogoPreset {
+  id: string;
+  title: string;
+  subtitle: string;
+  url: string;
+  badgeText: string;
+  accentColor: string;
+}
+
+export const MASTER_MAP_LOGO_PRESETS: MasterLogoPreset[] = [
+  {
+    id: 'cargas_official',
+    title: 'شعار كارجاس الرسمي المعتمد (NGV)',
+    subtitle: 'الشعار الأخضر والذهبي الأصلي لشركة الغاز الطبيعي للسيارات',
+    url: OFFICIAL_CARGAS_VECTOR_LOGO,
+    badgeText: 'CARGAS NGV',
+    accentColor: '#059669',
+  },
+  {
+    id: 'cargas_shell',
+    title: 'كارجاس وشريك الزيوت شل (Shell CNG)',
+    subtitle: 'زيوت شل المعتمدة وهليكس الترا لمحركات الغاز',
+    url: 'https://images.unsplash.com/photo-1550355291-bbee04a92027?auto=format&fit=crop&w=240&q=80',
+    badgeText: 'SHELL • CARGAS',
+    accentColor: '#d97706',
+  },
+  {
+    id: 'cargas_bp',
+    title: 'كارجاس وشريك الزيوت العالمي BP Castrol',
+    subtitle: 'شراكة كارجاس وكاسترول لخدمات أسفل المظلة',
+    url: 'https://images.unsplash.com/photo-1508974239320-0a029497e820?auto=format&fit=crop&w=240&q=80',
+    badgeText: 'BP • كارجاس',
+    accentColor: '#16a34a',
+  },
+  {
+    id: 'cargas_total',
+    title: 'كارجاس وتوتال إنرجيز (TotalEnergies)',
+    subtitle: 'محطات كارجاس المشتركة مع توتال إنرجيز',
+    url: 'https://images.unsplash.com/photo-1517524008697-84bbe3c3fd98?auto=format&fit=crop&w=240&q=80',
+    badgeText: 'TOTAL • كارجاس',
+    accentColor: '#dc2626',
+  },
+  {
+    id: 'eco_flame',
+    title: 'شعلة الغاز الطبيعي البيئية النظيفة (ECO Flame)',
+    subtitle: 'رمز الوقود النظيف والصديق للبيئة والتوفير الاقتصادي',
+    url: 'https://images.unsplash.com/photo-1497435334941-8c899ee9e8e9?auto=format&fit=crop&w=240&q=80',
+    badgeText: 'ECO CNG',
+    accentColor: '#047857',
+  },
+  {
+    id: 'royal_blue_cargas',
+    title: 'كارجاس الأزرق الكحلي الملكي (طريقنا واحد)',
+    subtitle: 'الهوية الملكية الفاخرة لمنظومة الملاحة وتطبيق وصلني',
+    url: 'https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&w=240&q=80',
+    badgeText: 'طريقنا واحد',
+    accentColor: '#1e3a8a',
+  },
+];
+
+/**
+ * استرجاع لوجو المحطة المعتمد والموحد لكافة الخرائط في التطبيق
+ * (صفحة العميل، خريطة كارجاس الرئيسية، تطبيق وصلني الملاحي)
+ * مع الأخذ في الاعتبار اللوجو الدائم المثبت بواسطة مدير النظام
+ */
+export function getMasterStationMapLogo(stationId?: string, stationCustomLogo?: string): string {
+  if (typeof window === 'undefined') return OFFICIAL_CARGAS_VECTOR_LOGO;
+
+  // 1. لوجو خاص بمحطة محددة إذا تم تمريره صراحة
+  if (stationCustomLogo && stationCustomLogo.trim().length > 0) {
+    return stationCustomLogo.trim();
+  }
+
+  try {
+    // 2. فحص اللوجو المخصص للمحطة من إعدادات وصلني المخزنة
+    if (stationId) {
+      const wasalny = getWasalnyFullConfig();
+      if (wasalny.stationCustomLogos && wasalny.stationCustomLogos[stationId]) {
+        return wasalny.stationCustomLogos[stationId];
+      }
+    }
+
+    // 3. اللوجو الماستر الدائم المثبت من لوحة تحكم مدير النظام
+    const masterPermanent = localStorage.getItem(MASTER_STATION_MAP_LOGO_KEY);
+    if (masterPermanent && masterPermanent.trim().length > 0) {
+      return masterPermanent.trim();
+    }
+
+    // 4. اللوجو الموحد المخزن في إعدادات وصلني
+    const wasalnyFull = getWasalnyFullConfig();
+    if (wasalnyFull.stationUnifiedLogoUrl && wasalnyFull.stationUnifiedLogoUrl.trim().length > 0) {
+      return wasalnyFull.stationUnifiedLogoUrl.trim();
+    }
+
+    // 5. اللوجو المخزن في إعدادات التطبيق العامة
+    const appCfg = getAppConfig();
+    if (appCfg.stationLogoUrl && appCfg.stationLogoUrl.trim().length > 0) {
+      return appCfg.stationLogoUrl.trim();
+    }
+    if (appCfg.wasalnyConfig?.stationUnifiedLogoUrl && appCfg.wasalnyConfig.stationUnifiedLogoUrl.trim().length > 0) {
+      return appCfg.wasalnyConfig.stationUnifiedLogoUrl.trim();
+    }
+
+    // 6. اللوجوهات التوافقية القديمة
+    const legacyPerm = localStorage.getItem('cargas_custom_logo_permanent');
+    if (legacyPerm && legacyPerm.trim().length > 0) return legacyPerm.trim();
+    const legacyBak = localStorage.getItem('cargas_custom_logo');
+    if (legacyBak && legacyBak.trim().length > 0) return legacyBak.trim();
+  } catch (err) {
+    console.warn('Error reading master station map logo:', err);
+  }
+
+  // 7. اللوجو الرسمي الفيكتور الافتراضي لكارجاس (لا ينكسر ولا يختفي)
+  return OFFICIAL_CARGAS_VECTOR_LOGO;
+}
+
+/**
+ * حفظ وتثبيت لوجو المحطات على كافة خرائط التطبيق بشكل دائم
+ * Dynamic Persistent Settings System
+ * يضمن بقاء اللوجو ثابتاً في قاعدة البيانات المحلية والتطبيق بالكامل
+ * دون العودة للقيم الافتراضية عند تحديث الصفحة أو تسجيل الخروج
+ */
+export function setMasterStationMapLogo(logoUrl: string): void {
+  if (typeof window === 'undefined') return;
+
+  const targetLogo = (logoUrl || '').trim();
+
+  try {
+    // 1. تثبيت المفتاح الدائم الرئيسي
+    if (targetLogo) {
+      localStorage.setItem(MASTER_STATION_MAP_LOGO_KEY, targetLogo);
+      localStorage.setItem('cargas_custom_logo_permanent', targetLogo);
+      localStorage.setItem('cargas_custom_logo', targetLogo);
+    } else {
+      localStorage.removeItem(MASTER_STATION_MAP_LOGO_KEY);
+      localStorage.removeItem('cargas_custom_logo_permanent');
+      localStorage.removeItem('cargas_custom_logo');
+    }
+
+    // 2. تحديث إعدادات التطبيق الشاملة وحفظها
+    const currentAppCfg = getAppConfig();
+    const updatedAppCfg: AppConfig = {
+      ...currentAppCfg,
+      stationLogoUrl: targetLogo,
+      wasalnyConfig: {
+        ...(currentAppCfg.wasalnyConfig || DEFAULT_WASALNY_CONFIG),
+        stationUnifiedLogoUrl: targetLogo,
+        stationMarkerLogoMode: 'unified_cargas',
+      },
+    };
+    saveAppConfig(updatedAppCfg);
+
+    // 3. تحديث وحفظ إعدادات وصلني الكاملة
+    const currentWasalny = getWasalnyFullConfig();
+    const updatedWasalny: WasalnyConfig = {
+      ...currentWasalny,
+      stationUnifiedLogoUrl: targetLogo,
+      stationMarkerLogoMode: 'unified_cargas',
+    };
+    saveWasalnyFullConfig(updatedWasalny);
+
+    // 4. بث إشعار فوري لجميع مكونات الخرائط النشطة في الشاشة لتحديث الدبابيس فوراً بدون إعادة تحميل الصفحة
+    window.dispatchEvent(
+      new CustomEvent(MASTER_MAP_LOGO_EVENT, {
+        detail: {
+          logoUrl: targetLogo || OFFICIAL_CARGAS_VECTOR_LOGO,
+          timestamp: Date.now(),
+        },
+      })
+    );
+    window.dispatchEvent(new Event('storage'));
+  } catch (err) {
+    console.error('Error saving master station map logo persistently:', err);
+  }
+}
+
+// ==========================================
+// 1. الأيقونات الخمس المعتمدة أسفل الخريطة والتحكم الكامل لمدير النظام
+// ==========================================
+export const MAP_FACILITY_FILTERS_KEY = 'cargas_map_facility_filters';
+
+export const DEFAULT_MAP_FACILITY_FILTERS: MapFacilityFilterItem[] = [
+  {
+    id: 'fac-cng',
+    key: 'cng_fueling',
+    label: 'تموين غاز',
+    iconText: '⛽',
+    color: 'emerald',
+    isActive: true,
+    order: 1,
+    description: 'محطات توفر تموين الغاز الطبيعي السريع CNG لكافة المركبات',
+  },
+  {
+    id: 'fac-oil-center',
+    key: 'oil_centers',
+    label: 'مراكز الزيوت',
+    iconText: '🛢️',
+    color: 'amber',
+    isActive: true,
+    order: 2,
+    description: 'مراكز متخصصة ومتكاملة لتغيير الزيوت المعتمدة وفلاتر المحرك وسوائل التبريد',
+  },
+  {
+    id: 'fac-canopy',
+    key: 'canopy_oil',
+    label: 'زيوت أسفل المظلة',
+    iconText: '🪣',
+    color: 'orange',
+    isActive: true,
+    order: 3,
+    description: 'خدمة سريعة لتغيير وفحص الزيوت والفلاتر أسفل مظلة التموين مباشرة دون انتظار',
+  },
+  {
+    id: 'fac-conversion',
+    key: 'conversion_and_maint',
+    label: 'مراكز تحويل وصيانة',
+    iconText: '🔧',
+    color: 'blue',
+    isActive: true,
+    order: 4,
+    description: 'مراكز كارجاس المعتمدة لتحويل المركبات للعمل بالغاز وضبط المحركات',
+  },
+  {
+    id: 'fac-cylinder',
+    key: 'cylinder_testing',
+    label: 'مراكز فحص الاسطوانات',
+    iconText: '🛡️',
+    color: 'teal',
+    isActive: true,
+    order: 5,
+    description: 'فحص دوري هيدروستاتيكي 300 بار واختبار صمامات الأمان وإصدار شهادة الفحص المعتمدة للمرور',
+  },
+  {
+    id: 'fac-2027',
+    key: 'coming_soon_2027',
+    label: 'قريباً 2027',
+    iconText: '🚀',
+    color: 'purple',
+    isActive: true,
+    order: 6,
+    description: 'خطة التوسع القومي لمحطات كارجاس الجاري تنفيذها وتدشينها حتى عام 2027',
+  },
+];
+
+export function getMapFacilityFilters(): MapFacilityFilterItem[] {
+  if (typeof window === 'undefined') return DEFAULT_MAP_FACILITY_FILTERS;
+  try {
+    const raw = localStorage.getItem(MAP_FACILITY_FILTERS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // إذا كانت الفلاتر المحفوظة قديمة وتدمج تموين غاز مع مركز زيوت (cng_and_oil)، نقوم بترقيتها للفصل الجديد
+      const hasOldCombined = Array.isArray(parsed) && parsed.some((p: any) => p.key === 'cng_and_oil');
+      if (Array.isArray(parsed) && parsed.length > 0 && !hasOldCombined) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to parse facility filters:', err);
+  }
+  return DEFAULT_MAP_FACILITY_FILTERS;
+}
+
+export function saveMapFacilityFilters(filters: MapFacilityFilterItem[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(MAP_FACILITY_FILTERS_KEY, JSON.stringify(filters));
+    window.dispatchEvent(new CustomEvent('cargas_facility_filters_updated', { detail: filters }));
+  } catch (err) {
+    console.error('Failed to save facility filters:', err);
+  }
+}
+
+/**
+ * دالة فلترة دقيقة تربط بين مفتاح النشاط والخدمة وبين المحطات الفعلية
+ * تدعم: تموين غاز | مراكز الزيوت | زيوت أسفل المظلة | تحويل وصيانة | فحص أسطوانات | قريباً 2027
+ */
+export function isStationMatchingFacilityFilter(
+  station: CargasStationLocation,
+  facilityKey: string | null | undefined
+): boolean {
+  if (!facilityKey || facilityKey === 'all') return true;
+  if (!station) return false;
+
+  const acts = station.activities || [];
+  const servs = (station.servicesAvailable || []).join(' ').toLowerCase();
+  const nameAndAddr = `${station.name} ${station.address} ${station.city}`.toLowerCase();
+  const fType = station.facilityType;
+
+  switch (facilityKey) {
+    case 'cng_fueling':
+      // محطات تموين غاز طبيعي CNG
+      return (
+        acts.includes('تموين') ||
+        fType === 'cng_station' ||
+        servs.includes('تموين غاز') ||
+        servs.includes('غاز طبيعي') ||
+        servs.includes('تموين') ||
+        nameAndAddr.includes('محطة كارجاس') ||
+        nameAndAddr.includes('تموين')
+      );
+
+    case 'oil_centers':
+      // مراكز الزيوت المعتمدة والمتخصصة (فصل مستقل تماماً عن التموين والمظلة)
+      return (
+        acts.includes('زيوت') ||
+        fType === 'oil_center' ||
+        nameAndAddr.includes('مركز زيوت') ||
+        nameAndAddr.includes('مركز خدمات وزيوت') ||
+        servs.includes('مركز متكامل للزيوت') ||
+        servs.includes('مركز زيوت') ||
+        servs.includes('تغيير زيوت معتمدة') ||
+        servs.includes('زيوت معتمدة') ||
+        nameAndAddr.includes('زيوت')
+      );
+
+    case 'canopy_oil':
+      // زيوت سريعة أسفل المظلة
+      return (
+        fType === 'canopy_oil' ||
+        acts.includes('زيوت أسفل المظلة') ||
+        servs.includes('أسفل المظلة') ||
+        servs.includes('اسفل المظلة') ||
+        servs.includes('زيوت أسفل المظلة') ||
+        nameAndAddr.includes('مظلة') ||
+        nameAndAddr.includes('خدمة زيوت أسفل المظلة')
+      );
+
+    case 'conversion_and_maint':
+      // مراكز تحويل وصيانة
+      return (
+        fType === 'conversion_center' ||
+        acts.includes('تحويل') ||
+        acts.includes('صيانة') ||
+        servs.includes('تحويل سيارات') ||
+        servs.includes('صيانة') ||
+        nameAndAddr.includes('تحويل') ||
+        nameAndAddr.includes('صيانة')
+      );
+
+    case 'cylinder_testing':
+      // مراكز فحص واختبار أسطوانات الغاز 300 بار
+      return (
+        fType === 'cylinder_inspection' ||
+        acts.includes('فحص اسطوانات') ||
+        servs.includes('فحص واختبار أسطوانة') ||
+        servs.includes('هيدروستاتيكي') ||
+        servs.includes('شهادة المرور') ||
+        nameAndAddr.includes('فحص') ||
+        nameAndAddr.includes('أسطوان') ||
+        nameAndAddr.includes('اسطوان')
+      );
+
+    case 'coming_soon_2027':
+      // محطات التوسع القومي قريباً 2027
+      return (
+        acts.includes('قريباً 2027') ||
+        servs.includes('2027') ||
+        nameAndAddr.includes('2027') ||
+        nameAndAddr.includes('قريباً') ||
+        nameAndAddr.includes('قريبا') ||
+        servs.includes('قيد الإنشاء') ||
+        station.isLoyaltyProgramActive === false
+      );
+
+    case 'cng_and_oil':
+      // للتوافق مع البيانات القديمة
+      return (
+        fType === 'cng_station' ||
+        fType === 'oil_center' ||
+        acts.includes('تموين') ||
+        acts.includes('زيوت')
+      );
+
+    default:
+      return true;
+  }
+}
+
+// ==========================================
+// 2. تسجيل حركة المبيعات اليومية لكل محطة (المرحلة 1: يدوي | المرحلة 2: سكادا)
+// ==========================================
+export const STATION_DAILY_SALES_KEY = 'cargas_station_daily_sales_records';
+
+export function getStationDailySales(): StationDailySalesRecord[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STATION_DAILY_SALES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.warn('Failed to load station daily sales:', err);
+  }
+  return [];
+}
+
+export function saveStationDailySales(records: StationDailySalesRecord[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STATION_DAILY_SALES_KEY, JSON.stringify(records));
+  } catch (err) {
+    console.error('Failed to save station daily sales:', err);
+  }
+}
+
+export function recordStationDailySale(record: StationDailySalesRecord): void {
+  const current = getStationDailySales();
+  const existingIdx = current.findIndex((r) => r.id === record.id);
+  let updated: StationDailySalesRecord[];
+  if (existingIdx >= 0) {
+    updated = [...current];
+    updated[existingIdx] = record;
+  } else {
+    updated = [record, ...current];
+  }
+  saveStationDailySales(updated);
+}
+
+// ==========================================
+// 3. نمط عرض واجهة العميل (منفرداً أو مدمجاً)
+// ==========================================
+export const CUSTOMER_VIEW_MODE_KEY = 'cargas_customer_view_mode';
+export const CUSTOMER_VIEW_MODE_EVENT = 'cargas_customer_view_mode_updated';
+
+export function getCustomerViewMode(): CustomerViewMode {
+  if (typeof window === 'undefined') return 'all_integrated';
+  try {
+    const saved = localStorage.getItem(CUSTOMER_VIEW_MODE_KEY);
+    if (saved === 'navigation_only' || saved === 'loyalty_only' || saved === 'all_integrated') {
+      return saved as CustomerViewMode;
+    }
+  } catch {
+    // fallback
+  }
+  return 'all_integrated';
+}
+
+export function saveCustomerViewMode(mode: CustomerViewMode): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(CUSTOMER_VIEW_MODE_KEY, mode);
+    window.dispatchEvent(new CustomEvent(CUSTOMER_VIEW_MODE_EVENT, { detail: mode }));
+  } catch {
+    // fallback
+  }
+}
+
+// ==========================================
+// 4. تحديد موقع GPS دقيق للمستخدمين والكوادر فور بدء التشغيل
+// ==========================================
+export const USER_ACCURATE_GPS_KEY = 'cargas_accurate_user_gps';
+
+// إحداثيات افتراضية مركزية دقيقة لمصر (محطة كارجاس ألماظة - طريق النصر، القاهرة)
+export const DEFAULT_EGYPT_COORDS = { lat: 30.0886, lng: 31.3444 };
+
+export function getStoredUserLocation(): { lat: number; lng: number } {
+  if (typeof window === 'undefined') return DEFAULT_EGYPT_COORDS;
+  try {
+    const raw = localStorage.getItem(USER_ACCURATE_GPS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.lat === 'number' && typeof parsed.lng === 'number' && parsed.lat !== 0) {
+        return parsed;
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return DEFAULT_EGYPT_COORDS;
+}
+
+export function storeUserLocation(coords: { lat: number; lng: number }): void {
+  if (typeof window === 'undefined') return;
+  if (!coords || typeof coords.lat !== 'number' || typeof coords.lng !== 'number' || coords.lat === 0) return;
+  try {
+    localStorage.setItem(USER_ACCURATE_GPS_KEY, JSON.stringify(coords));
+  } catch {
+    // fallback
+  }
+}
+
+/**
+ * بناء مسار دقيق للملاحة بالسيارة في خرائط جوجل أو Waze بربط دقيق ومحدد
+ * بين إحداثيات موقع العميل الحقيقي origin وإحداثيات المحطة destination
+ */
+export function buildAccurateNavigationUrl(
+  origin: { lat: number; lng: number } | null | undefined,
+  destination: { lat: number; lng: number },
+  provider: 'google_maps' | 'waze' = 'google_maps'
+): string {
+  const effectiveOrigin = origin && origin.lat !== 0 ? origin : DEFAULT_EGYPT_COORDS;
+
+  if (provider === 'waze') {
+    return `https://waze.com/ul?ll=${destination.lat},${destination.lng}&navigate=yes&from=${effectiveOrigin.lat},${effectiveOrigin.lng}`;
+  }
+
+  return `https://www.google.com/maps/dir/?api=1&origin=${effectiveOrigin.lat},${effectiveOrigin.lng}&destination=${destination.lat},${destination.lng}&travelmode=driving`;
+}
+
+// ==========================================
+// 5. إدارة حوافز ومكافآت الفنيين وتقييمات العملاء المعتمدة مالياً
+// ==========================================
+export const TECHNICIAN_INCENTIVE_CONFIG_KEY = 'cargas_technician_incentive_config';
+export const TECHNICIAN_INCENTIVE_EVENT = 'cargas_technician_incentive_updated';
+
+export function getTechnicianIncentiveConfig(): TechnicianIncentiveConfig {
+  if (typeof window === 'undefined') return DEFAULT_TECHNICIAN_INCENTIVE_CONFIG;
+  try {
+    const raw = localStorage.getItem(TECHNICIAN_INCENTIVE_CONFIG_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.pointValueEgp === 'number') {
+        return { ...DEFAULT_TECHNICIAN_INCENTIVE_CONFIG, ...parsed };
+      }
+    }
+    const appCfg = getAppConfig();
+    if (appCfg.technicianIncentiveConfig) {
+      return { ...DEFAULT_TECHNICIAN_INCENTIVE_CONFIG, ...appCfg.technicianIncentiveConfig };
+    }
+  } catch (err) {
+    console.warn('Error reading technician incentive config:', err);
+  }
+  return DEFAULT_TECHNICIAN_INCENTIVE_CONFIG;
+}
+
+export function saveTechnicianIncentiveConfig(cfg: TechnicianIncentiveConfig): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(TECHNICIAN_INCENTIVE_CONFIG_KEY, JSON.stringify(cfg));
+    const appCfg = getAppConfig();
+    saveAppConfig({
+      ...appCfg,
+      technicianIncentiveConfig: cfg,
+    });
+    window.dispatchEvent(new CustomEvent(TECHNICIAN_INCENTIVE_EVENT, { detail: cfg }));
+  } catch (err) {
+    console.error('Error saving technician incentive config:', err);
+  }
+}
+
+/**
+ * احتساب الحافز المالي المستحق للفني وترجمة النقاط وتقييمات العملاء
+ */
+export function calculateTechnicianFinancialIncentive(
+  tech: TechnicianCrewMember,
+  cfgOverride?: TechnicianIncentiveConfig
+): {
+  pointIncentiveEgp: number;
+  ratingBonusEgp: number;
+  volumeBonusEgp: number;
+  totalIncentiveEgp: number;
+  isEligible: boolean;
+  notes: string[];
+} {
+  const cfg = cfgOverride || getTechnicianIncentiveConfig();
+  if (!cfg.isEnabled) {
+    return {
+      pointIncentiveEgp: 0,
+      ratingBonusEgp: 0,
+      volumeBonusEgp: 0,
+      totalIncentiveEgp: tech.incentiveBonusEgp || 0,
+      isEligible: false,
+      notes: ['نظام الحوافز متوقف مؤقتاً بقرار الإدارة'],
+    };
+  }
+
+  // 1. التحقق من كوتا الحد الأدنى للتفويلات
+  const isEligible = (tech.totalFuelingsToday || 0) >= (cfg.minFuelingsShiftQuota || 0);
+
+  // 2. الحافز المالي للنقاط = النقاط × قيمة النقطة بالجنيه
+  const points = tech.technicianPoints || 0;
+  const pointIncentiveEgp = Math.round(points * (cfg.pointValueEgp || 0.25) * 100) / 100;
+
+  // 3. احتساب مكافأة تقييمات العملاء وحسن المعاملة
+  let ratingBonusEgp = 0;
+  const behaviorRating = tech.averageBehaviorRating || tech.averageOverallRating || 4.5;
+  const customersCount = tech.totalCustomersServed || tech.totalFuelingsToday || 0;
+
+  if (behaviorRating >= 4.7) {
+    // تقييم ممتاز (5 نجوم معادل): حافز تقييم عالي
+    ratingBonusEgp += Math.round(customersCount * (cfg.rating5StarRewardEgp || 10) * 0.4);
+  } else if (behaviorRating >= 4.0) {
+    // تقييم جيد جداً (4 نجوم معادل)
+    ratingBonusEgp += Math.round(customersCount * (cfg.rating4StarRewardEgp || 5) * 0.4);
+  }
+
+  // بونص التميز الإضافي للتقييم المتفوق (سفير الابتسامة وحسن المعاملة)
+  if (behaviorRating >= (cfg.highRatingBonusThreshold || 4.8)) {
+    ratingBonusEgp += cfg.highRatingMonthlyBonusEgp || 250;
+  }
+
+  // 4. مكافأة كمية الأمتار الإضافية (Volume Milestone)
+  let volumeBonusEgp = 0;
+  if ((tech.totalMetersToday || 0) >= (cfg.volumeBonusThresholdM3 || 500)) {
+    volumeBonusEgp += cfg.volumeBonusRewardEgp || 50;
+  }
+
+  const totalIncentiveEgp = isEligible
+    ? Math.round((pointIncentiveEgp + ratingBonusEgp + volumeBonusEgp) * 100) / 100
+    : 0;
+
+  const notes: string[] = [];
+  if (!isEligible) {
+    notes.push(`لم يتجاوز الحد الأدنى للوردية (${cfg.minFuelingsShiftQuota} تفويلة)`);
+  } else {
+    notes.push(`حافز النقاط: ${pointIncentiveEgp} ج (${points} نقطة × ${cfg.pointValueEgp} ج)`);
+    notes.push(`مكافأة تقييمات العملاء: ${ratingBonusEgp} ج (تقييم ${behaviorRating} ⭐)`);
+    if (volumeBonusEgp > 0) {
+      notes.push(`بونص كمية التموين: ${volumeBonusEgp} ج (تجاوز ${cfg.volumeBonusThresholdM3} م³)`);
+    }
+  }
+
+  return {
+    pointIncentiveEgp,
+    ratingBonusEgp,
+    volumeBonusEgp,
+    totalIncentiveEgp,
+    isEligible,
+    notes,
+  };
+}
+
+
 

@@ -485,7 +485,7 @@ export const AdminPinVerifyModal: React.FC<AdminPinVerifyModalProps> = ({
 
           {error && (
             <p className="text-xs text-rose-600 font-bold">
-              رمز المرور غير صحيح! الرمز الافتراضي (0000)
+              رمز المرور غير صحيح! يرجى إدخال الرمز المعتمد لمدير النظام.
             </p>
           )}
 

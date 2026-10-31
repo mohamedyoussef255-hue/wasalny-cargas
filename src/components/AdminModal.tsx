@@ -27,7 +27,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       onSuccess();
       onClose();
     } else {
-      setErrorMsg('كلمة المرور غير صحيحة! كلمة السر الافتراضية هي 0000');
+      setErrorMsg('كلمة المرور غير صحيحة! يرجى إدخال الرمز المعتمد لمدير النظام.');
     }
   };
 
@@ -122,8 +122,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             ))}
           </div>
 
-          <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-2.5 text-center text-[11px] text-amber-800">
-            <span className="font-bold">ملاحظة أمان:</span> كلمة السر الافتراضية هي <span className="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-amber-300">0000</span> ويمكنك تغييرها من لوحة التحكم.
+          <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 text-center text-[11px] text-slate-600">
+            <span className="font-bold">ملاحظة أمان:</span> الصلاحية مقتصرة على مدير النظام المعتمد.
           </div>
 
           <button

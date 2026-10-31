@@ -30,6 +30,8 @@ import {
   Gauge,
   Zap,
   Gift,
+  BookOpen,
+  HelpCircle,
 } from 'lucide-react';
 import {
   AppConfig,
@@ -57,6 +59,10 @@ import {
   saveFuelingSessions,
   DEFAULT_TECHNICIAN_SECTIONS,
   getTransactions,
+  checkTechnicianSessionDevice,
+  recordTechnicianDeviceLogin,
+  terminateTechnicianDeviceSession,
+  calculateTechnicianFinancialIncentive,
 } from '../services/storageService';
 import { RefuelingTechnicianPortal } from './RefuelingTechnicianPortal';
 import { TechnicianQrScanner } from './TechnicianQrScanner';
@@ -110,16 +116,16 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
 
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
 
-  // 5-Clicks Handler on Any Page Space (بالضغط على الصفحة خمس مرات متتالية)
+  // 10-Clicks Handler on Any Page Space (بالنقر داخل الصفحة 10 مرات لتظهر كلمة سر مدير النظام)
   const handlePageTapGesture = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest('button, input, textarea, select, a, [draggable]')) return;
 
     const now = Date.now();
-    if (now - lastClickTime < 2500) {
+    if (now - lastClickTime < 3000) {
       const nextCount = clickCount + 1;
       setClickCount(nextCount);
-      if (nextCount >= 5) {
+      if (nextCount >= 10) {
         setClickCount(0);
         setIsAdminPinModalOpen(true);
       }
@@ -239,8 +245,25 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  // Guide modal state for operation instructions
+  const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
+  const [guideActiveTab, setGuideActiveTab] = useState<'shift' | 'fueling' | 'scada' | 'rewards' | 'safety'>('shift');
+
   // View Mode: Direct Meter Fueling (Supabase DB) vs QR Loyalty Scanner
   const [technicianActiveView, setTechnicianActiveView] = useState<'refueling_meter' | 'loyalty_scanner'>('refueling_meter');
+  
+  // Enforce Admin Policy for Fueling Mode Display
+  const fuelingDisplayMode = config.fuelingModeDisplay || 'both';
+  const effectiveView: 'refueling_meter' | 'loyalty_scanner' =
+    fuelingDisplayMode === 'manual_only'
+      ? 'refueling_meter'
+      : fuelingDisplayMode === 'scada_only'
+      ? 'loyalty_scanner'
+      : technicianActiveView;
+
+  const liveIncentive = activeTechnician
+    ? calculateTechnicianFinancialIncentive(activeTechnician, config.technicianIncentiveConfig)
+    : null;
 
   const vt = config.visibility.technician;
 
@@ -331,7 +354,22 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
       return;
     }
 
-    // Success login
+    // فحص قفل الجلسة على نفس الجهاز ومنع تشغيل التطبيق بنفس رقم الهاتف من جهاز آخر
+    const sessionCheck = checkTechnicianSessionDevice(tech.phone, tech.id);
+    if (!sessionCheck.allowed) {
+      setLoginError(sessionCheck.message || 'لا يُسمح بتشغيل التطبيق لنفس الفني من أكثر من جهاز في وقت واحد.');
+      addFraudLog({
+        type: 'distance_alert',
+        severity: 'high',
+        message: `محاولة تشغيل تطبيق الفني بنفس رقم الهاتف من جهاز آخر (${tech.phone})`,
+        details: `الفني: ${tech.name} - رقم: ${tech.phone}`,
+      });
+      return;
+    }
+
+    // Success login: record device session
+    recordTechnicianDeviceLogin(tech.phone, tech.id, tech.name);
+
     const updatedCrew = stationCrew.map((c) =>
       c.id === tech.id ? { ...c, isShiftActive: true } : c
     );
@@ -345,6 +383,9 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
   const handleEndShift = () => {
     if (!activeTechnician) return;
     if (!confirm('هل تود إنهاء الوردية الحالية وإغلاق الحساب؟')) return;
+
+    // إنهاء الجلسة على هذا الجهاز
+    terminateTechnicianDeviceSession(activeTechnician.phone);
 
     const updatedCrew = stationCrew.map((c) =>
       c.id === activeTechnician.id ? { ...c, isShiftActive: false } : c
@@ -637,11 +678,9 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
           <div>
             <label className="block font-bold text-slate-700 mb-1.5 flex items-center justify-between">
               <span>كود الـ PIN السري لليوم</span>
-              {selectedTech && (
-                <span className="text-[10px] text-blue-600 font-mono">
-                  (كود تجريبي: {selectedTech.dailyPin})
-                </span>
-              )}
+              <span className="text-[10px] text-slate-400">
+                (يتم إرساله آلياً من المشرف)
+              </span>
             </label>
             <input
               type="password"
@@ -701,6 +740,14 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
         onToggleEditMode={(enabled) => setIsLayoutEditMode(enabled)}
       />
 
+      {/* Floating Click Progress Counter for Admin Tap Gesture */}
+      {clickCount >= 3 && clickCount < 10 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-amber-300 border-2 border-amber-400 px-5 py-2.5 rounded-full shadow-2xl backdrop-blur-md flex items-center gap-3 animate-bounce text-xs font-black">
+          <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping shrink-0"></span>
+          <span>🔐 نقرات وضع التحرير لمدير النظام: {clickCount} من 10 (اضغط {10 - clickCount} مرات إضافية)</span>
+        </div>
+      )}
+
       {/* Shift Status Header */}
       <div className="bg-white rounded-3xl p-5 shadow-xs border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -745,6 +792,16 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
           )}
 
           <button
+            type="button"
+            onClick={() => setIsGuideModalOpen(true)}
+            className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold px-3 py-1.5 rounded-xl border border-blue-200 transition shadow-xs"
+            title="دليل تشغيل وإرشادات فني كارجاس"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>دليل الفني 📖</span>
+          </button>
+
+          <button
             onClick={handleEndShift}
             className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold px-3 py-1.5 rounded-xl border border-rose-200 transition"
           >
@@ -779,6 +836,9 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
               <div className="bg-black/20 backdrop-blur-md p-2.5 px-3.5 rounded-2xl text-center">
                 <span className="text-[10px] text-amber-200 block">نقاط حوافزك:</span>
                 <span className="text-lg font-black font-mono">{activeTechnician.technicianPoints || 300} نقطة</span>
+                <span className="text-[9px] text-emerald-300 block font-mono">
+                  {liveIncentive ? `(${liveIncentive.pointIncentiveEgp.toFixed(0)} ج)` : ''}
+                </span>
               </div>
 
               <div className="bg-black/20 backdrop-blur-md p-2.5 px-3.5 rounded-2xl text-center">
@@ -787,13 +847,17 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
                   <Star className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
                   <span className="text-lg font-black font-mono">{activeTechnician.averageBehaviorRating || 4.9}</span>
                 </div>
+                <span className="text-[9px] text-amber-300 block font-mono">
+                  {liveIncentive ? `(+${liveIncentive.ratingBonusEgp.toFixed(0)} ج مكافأة)` : ''}
+                </span>
               </div>
 
-              <div className="bg-black/20 backdrop-blur-md p-2.5 px-3.5 rounded-2xl text-center">
+              <div className="bg-black/20 backdrop-blur-md p-2.5 px-3.5 rounded-2xl text-center border border-emerald-400/30">
                 <span className="text-[10px] text-amber-200 block">الحافز المالي المستحق:</span>
-                <span className="text-lg font-black font-mono text-emerald-200">
-                  {activeTechnician.incentiveBonusEgp || 450} ج
+                <span className="text-lg font-black font-mono text-emerald-300">
+                  {liveIncentive ? liveIncentive.totalIncentiveEgp.toFixed(2) : (activeTechnician.incentiveBonusEgp || 450)} ج
                 </span>
+                <span className="text-[9px] text-emerald-200 block font-bold">معتمد مالياً ✅</span>
               </div>
             </div>
           </div>
@@ -801,47 +865,69 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
       )}
 
       {/* Subtab View Mode Switcher */}
-      <div className="bg-white dark:bg-slate-900 p-2 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setTechnicianActiveView('refueling_meter')}
-            className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition ${
-              technicianActiveView === 'refueling_meter'
-                ? 'bg-emerald-600 text-white shadow-md'
-                : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-            }`}
-          >
-            <Fuel className="w-4 h-4" />
-            <span>تسجيل التموين الفوري (قراءات العدادات واللوحات) ⚡</span>
-          </button>
+      {fuelingDisplayMode === 'both' ? (
+        <div className="bg-white dark:bg-slate-900 p-2 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setTechnicianActiveView('refueling_meter')}
+              className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition ${
+                effectiveView === 'refueling_meter'
+                  ? 'bg-emerald-600 text-white shadow-md'
+                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <Fuel className="w-4 h-4" />
+              <span>تسجيل التموين الفوري (قراءات العدادات واللوحات) ⚡</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setTechnicianActiveView('loyalty_scanner')}
-            className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition ${
-              technicianActiveView === 'loyalty_scanner'
-                ? 'bg-emerald-600 text-white shadow-md'
-                : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-            }`}
-          >
-            <QrCode className="w-4 h-4" />
-            <span>ماسح QR وكارت الولاء للسائقين 📷</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => setTechnicianActiveView('loyalty_scanner')}
+              className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition ${
+                effectiveView === 'loyalty_scanner'
+                  ? 'bg-emerald-600 text-white shadow-md'
+                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <QrCode className="w-4 h-4" />
+              <span>ماسح QR وكارت الولاء للسائقين 📷</span>
+            </button>
+          </div>
+
+          <span className="text-[11px] text-slate-400 font-mono hidden sm:inline">
+            معمارية Supabase PostgreSQL (RLS Active)
+          </span>
         </div>
-
-        <span className="text-[11px] text-slate-400 font-mono hidden sm:inline">
-          معمارية Supabase PostgreSQL (RLS Active)
-        </span>
-      </div>
+      ) : fuelingDisplayMode === 'manual_only' ? (
+        <div className="bg-emerald-50 border border-emerald-200 p-3.5 rounded-2xl flex items-center justify-between text-xs text-emerald-900 font-bold">
+          <div className="flex items-center gap-2">
+            <Fuel className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>نظام التموين اليدوي المباشر (قراءات العدادات واللوحات) مفعل فقط بسياسة مدير النظام</span>
+          </div>
+          <span className="bg-emerald-200/80 text-emerald-950 text-[10px] px-2.5 py-0.5 rounded-full font-mono">
+            وضع العدادات اليدوي
+          </span>
+        </div>
+      ) : (
+        <div className="bg-indigo-50 border border-indigo-200 p-3.5 rounded-2xl flex items-center justify-between text-xs text-indigo-900 font-bold">
+          <div className="flex items-center gap-2">
+            <QrCode className="w-4 h-4 text-indigo-600 shrink-0" />
+            <span>نظام الاسكادا الرقمي وماسح كروت الولاء مفعل فقط بسياسة مدير النظام</span>
+          </div>
+          <span className="bg-indigo-200/80 text-indigo-950 text-[10px] px-2.5 py-0.5 rounded-full font-mono">
+            وضع السكادا وماسح QR
+          </span>
+        </div>
+      )}
 
       {/* Render Direct Refueling Portal */}
-      {technicianActiveView === 'refueling_meter' && (
+      {effectiveView === 'refueling_meter' && (
         <RefuelingTechnicianPortal activeTechnician={activeTechnician} />
       )}
 
       {/* Render Dynamic Technician Sections Layout & SCADA Engine */}
-      {technicianActiveView === 'loyalty_scanner' && (
+      {effectiveView === 'loyalty_scanner' && (
         <div className="space-y-6">
           
           {/* Active SCADA Fueling Session Screen (If active) */}
@@ -1257,6 +1343,237 @@ export const TechnicianPortal: React.FC<TechnicianPortalProps> = ({
                   </div>
                 );
               })}
+          </div>
+        </div>
+      )}
+
+      {/* Technician Interactive Operation & Guidance Modal (دليل إرشادي شامل للفني) */}
+      {isGuideModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white p-5 flex items-center justify-between border-b border-blue-900/50 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-blue-600/30 text-blue-300 border border-blue-400/30 flex items-center justify-center text-2xl shadow-inner">
+                  📖
+                </div>
+                <div>
+                  <h3 className="font-black text-base sm:text-lg text-white">
+                    دليل تشغيل وإرشادات فني كارجاس الميداني
+                  </h3>
+                  <p className="text-xs text-blue-200 mt-0.5">
+                    المرجع الفني والتشغيلي المعتمد لإجراءات التموين والاسكادا وصرف المكافآت
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsGuideModalOpen(false)}
+                className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center text-sm font-bold transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Guide Tabs */}
+            <div className="bg-slate-100 dark:bg-slate-800/60 p-2 flex items-center gap-1.5 overflow-x-auto border-b border-slate-200 dark:border-slate-800 shrink-0">
+              {[
+                { id: 'shift', label: '1. الوردية ورادار GPS', icon: '🔐' },
+                { id: 'fueling', label: '2. تسجيل التموين واللوحات', icon: '⛽' },
+                { id: 'scada', label: '3. اسكادا وماسح QR', icon: '📡' },
+                { id: 'rewards', label: '4. استبدال الهدايا والنقاط', icon: '🎁' },
+                { id: 'safety', label: '5. السلامة ومنظومة STOP', icon: '🛡️' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setGuideActiveTab(tab.id as any)}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 ${
+                    guideActiveTab === tab.id
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  <span>{tab.icon}</span>
+                  <span>{tab.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Guide Body Content */}
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-4 text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+              {guideActiveTab === 'shift' && (
+                <div className="space-y-4">
+                  <div className="bg-blue-50 dark:bg-blue-950/30 p-4 rounded-2xl border border-blue-200 dark:border-blue-900/50 space-y-2">
+                    <h4 className="font-black text-sm text-blue-950 dark:text-blue-200 flex items-center gap-2">
+                      <span>🔐</span>
+                      <span>خطوات بدء وتفعيل الوردية اليومية</span>
+                    </h4>
+                    <p>
+                      يتلقى كل فني تموين كود تحقق يومي خاص بورديته من مشرف المحطة. عند فتح التطبيق، اختر اسمك من القائمة وأدخل كود الوردية لتفعيل الحساب ومزامنة العدادات.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-1.5">
+                      <strong className="text-slate-900 dark:text-slate-100 font-bold block">
+                        📍 فحص نطاق الـ GPS (10 أمتار):
+                      </strong>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                        التطبيق مربوط بنظام تحديد المواقع الجغرافي الصارم. يجب أن يكون هاتفك ضمن محيط 10 أمتار من إحداثيات محطة كارجاس لتسجيل التموين وحماية الوردية من أي تلاعب جغرافي.
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-1.5">
+                      <strong className="text-slate-900 dark:text-slate-100 font-bold block">
+                        🏆 محفظة حوافز ونقاط الفني:
+                      </strong>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                        كل تفويلة ناجحة تسجلها تضيف لحسابك نقاط تميز ومكافأة مالية مستحقة بنهاية الشهر، إلى جانب تقييم حسن المعاملة الذي يمنحه السائقون لخدمتك.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {guideActiveTab === 'fueling' && (
+                <div className="space-y-4">
+                  <div className="bg-emerald-50 dark:bg-emerald-950/30 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-900/50 space-y-2">
+                    <h4 className="font-black text-sm text-emerald-950 dark:text-emerald-200 flex items-center gap-2">
+                      <span>⛽</span>
+                      <span>آلية تسجيل التموين المباشر وقراءات العدادات</span>
+                    </h4>
+                    <p>
+                      في شاشة التموين الفوري، يتم إدخال حروف وأرقام اللوحة المعدنية للسيارة (أو التقاطها بالكاميرا الذكية)، ويتم تلقائياً جلب قراءة عداد السيارة من ملف العميل دون الحاجة لطلبها منه.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700 flex items-start gap-2.5">
+                      <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">1</span>
+                      <div>
+                        <strong className="text-slate-900 dark:text-slate-100 font-bold">إدخال رقم وحروف اللوحة:</strong>
+                        <p className="text-[11px] text-slate-500">اكتب الأرقام والحروف أو اضغط على أزرار الحروف السريعة أسفل الخانة.</p>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700 flex items-start gap-2.5">
+                      <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">2</span>
+                      <div>
+                        <strong className="text-slate-900 dark:text-slate-100 font-bold">قراءة عداد البداية والنهاية للمضخة:</strong>
+                        <p className="text-[11px] text-slate-500">يقوم النظام تلقائياً بتحديث قراءة البداية من آخر عملية تموين، واحتساب الأمتار والمبلغ فوراً بسعر المتر المعتمد (13 ج.م).</p>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700 flex items-start gap-2.5">
+                      <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">3</span>
+                      <div>
+                        <strong className="text-slate-900 dark:text-slate-100 font-bold">تحديد وسيلة الدفع وطباعة الإيصال:</strong>
+                        <p className="text-[11px] text-slate-500">اختر نقدياً أو فيزا كارت، ثم اضغط "حفظ وطباعة إيصال التموين" لتسليمه للعميل.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {guideActiveTab === 'scada' && (
+                <div className="space-y-4">
+                  <div className="bg-indigo-50 dark:bg-indigo-950/30 p-4 rounded-2xl border border-indigo-200 dark:border-indigo-900/50 space-y-2">
+                    <h4 className="font-black text-sm text-indigo-950 dark:text-indigo-200 flex items-center gap-2">
+                      <span>📡</span>
+                      <span>نظام السكادا التلقائي وقراءة المضخات الرقمية</span>
+                    </h4>
+                    <p>
+                      عند العمل بنظام السكادا الذكي، لا حاجة لإدخال قراءات العدادات يدوياً! النظام متصل إلكترونياً ببوردة طلمبات كارجاس ويستقبل كمية الغاز المضخوخة لحظة بلحظة.
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                    <strong className="text-slate-900 dark:text-slate-100 font-bold block">
+                      خطوات مسح الـ QR والربط بالمسدس:
+                    </strong>
+                    <ul className="list-disc list-inside space-y-1.5 text-[11px] text-slate-600 dark:text-slate-400 pr-1">
+                      <li><strong>الخطوة الأولى:</strong> وجّه كاميرا الموبايل إلى كود الـ QR المعروض على هاتف السائق لقراءة بيانات سيارته وسعة الأسطوانة.</li>
+                      <li><strong>الخطوة الثانية:</strong> وجّه الكاميرا لمسح باركود مسدس التموين (أو اختر رقم الطلمبة)، واضغط "بدء جلسة التموين".</li>
+                      <li><strong>الضخ التلقائي:</strong> بمجرد اكتمال التفويلة ورفع مسدس الغاز، ترسل السكادا إشارة انتهاء الجلسة ويتم احتساب نقاط الولاء آلياً للعميل والفني.</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+              {guideActiveTab === 'rewards' && (
+                <div className="space-y-4">
+                  <div className="bg-amber-50 dark:bg-amber-950/30 p-4 rounded-2xl border border-amber-200 dark:border-amber-900/50 space-y-2">
+                    <h4 className="font-black text-sm text-amber-950 dark:text-amber-200 flex items-center gap-2">
+                      <span>🎁</span>
+                      <span>صرف واستبدال قسائم نقاط الولاء والهدايا</span>
+                    </h4>
+                    <p>
+                      يحق للعميل استبدال نقاطه بقسائم هدايا عينية (زيوت محركات كارجاس، غسيل سيارة، كوبونات خصم). يتم صرف هذه الهدايا عبر مسح كود القسيمة.
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                    <strong className="text-slate-900 dark:text-slate-100 font-bold block">
+                      تعليمات تفويض المشرف لصرف الهدايا:
+                    </strong>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                      صلاحية صرف الهدايا تكون تحت إشراف مشرف المحطة، أو في حال قيام المشرف بمنح <strong>تفويض رسمي للفني</strong> من خلال نافذة التفويض المحددة بوقت. إذا كان التفويض مفعل، تظهر أيقونة ماسح الهدايا بشاشتك مباشرة ويمكنك اعتماد صرف الهدية فوراً للعميل وإهدائه إياها.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {guideActiveTab === 'safety' && (
+                <div className="space-y-4">
+                  <div className="bg-rose-50 dark:bg-rose-950/30 p-4 rounded-2xl border border-rose-200 dark:border-rose-900/50 space-y-2">
+                    <h4 className="font-black text-sm text-rose-950 dark:text-rose-200 flex items-center gap-2">
+                      <span>🛡️</span>
+                      <span>إجراءات السلامة والصحة المهنية ومنظومة STOP</span>
+                    </h4>
+                    <p>
+                      سلامتك وسلامة السائقين هي الأولوية القصوى لشركة كارجاس. التزم دائماً بالتعليمات الصارمة التالية أسفل مظلة التموين:
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
+                    <div className="bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-1">
+                      <strong className="text-rose-600 font-bold block">🚫 إيقاف المحرك وتفريغ الركاب:</strong>
+                      <p className="text-slate-600 dark:text-slate-400">تأكد تماماً من إيقاف محرك السيارة ونزول كافة الركاب خارج محيط المظلة قبل إدخال مسدس التموين.</p>
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-1">
+                      <strong className="text-rose-600 font-bold block">🚫 ممنوع التدخين أو الهاتف:</strong>
+                      <p className="text-slate-600 dark:text-slate-400">يُحظر منعاً باتاً التدخين أو استخدام الهاتف المحمول أثناء عملية ضخ الغاز الطبيعي.</p>
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-1">
+                      <strong className="text-emerald-700 font-bold block">✓ فحص صمام الأمان وتاريخ الفحص:</strong>
+                      <p className="text-slate-600 dark:text-slate-400">تأكد من سلامة صمام أسطوانة الغاز وصلاحية موعد الفحص الدوري قبل التموين.</p>
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-1">
+                      <strong className="text-blue-700 font-bold block">✓ التاريض وحماية الكهرباء الساكنة:</strong>
+                      <p className="text-slate-600 dark:text-slate-400">تأكد من تثبيت مشبك التأريض الأرضي وتواجد طفايات الحريق بجوار الجزيرة وجاهزيتها.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-slate-50 dark:bg-slate-800/60 p-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
+              <span className="text-[11px] text-slate-500 font-medium">
+                شركة كارجاس • الإدارة العامة للسلامة والتشغيل
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsGuideModalOpen(false)}
+                className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition shadow-xs"
+              >
+                فهمت الإرشادات والعودة للوردية ✓
+              </button>
+            </div>
           </div>
         </div>
       )}

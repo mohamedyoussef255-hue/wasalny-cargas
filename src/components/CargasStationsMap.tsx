@@ -25,7 +25,41 @@ import {
   Car,
 } from 'lucide-react';
 import { CargasStationLocation, StationFacilityType, AppConfig } from '../types';
-import { calculateDistanceKm } from '../services/storageService';
+import {
+  calculateDistanceKm,
+  getWasalnyFullConfig,
+  getMasterStationMapLogo,
+  MASTER_MAP_LOGO_EVENT,
+} from '../services/storageService';
+
+// Helper to detect Egyptian Governorate for a station
+export function detectGovernorate(name: string = '', address: string = '', city: string = ''): string {
+  const text = `${city} ${name} ${address}`.toLowerCase();
+  if (text.includes('جيزة') || text.includes('هرم') || text.includes('فيصل') || text.includes('دقي') || text.includes('عجوزة') || text.includes('أكتوبر') || text.includes('زايد') || text.includes('رماية') || text.includes('بين السرايات') || text.includes('منيب') || text.includes('بدرشين') || text.includes('صفط') || text.includes('عمرانية') || text.includes('بولاق الدكرور')) return 'الجيزة';
+  if (text.includes('إسكندرية') || text.includes('اسكندرية') || text.includes('سموحة') || text.includes('عجمي') || text.includes('برج العرب') || text.includes('سيدي جابر') || text.includes('محرم بك') || text.includes('ميامي') || text.includes('الرمل') || text.includes('المنتزه') || text.includes('أبي قير') || text.includes('كرموز')) return 'الإسكندرية';
+  if (text.includes('قليوبية') || text.includes('شبرا الخيمة') || text.includes('بنها') || text.includes('قليوب') || text.includes('طوخ') || text.includes('الخانكة') || text.includes('قها') || text.includes('شبرا الخيمه') || text.includes('بهتيم') || text.includes('مسطرد')) return 'القليوبية';
+  if (text.includes('سويس') || text.includes('العين السخنة') || text.includes('الأربعين')) return 'السويس';
+  if (text.includes('بورسعيد') || text.includes('بورفؤاد')) return 'بورسعيد';
+  if (text.includes('إسماعيلية') || text.includes('اسماعيلية') || text.includes('فايد') || text.includes('التل الكبير')) return 'الإسماعيلية';
+  if (text.includes('غربية') || text.includes('طنطا') || text.includes('المحلة') || text.includes('كفر الزيات') || text.includes('زفتى') || text.includes('سمنود')) return 'الغربية';
+  if (text.includes('دقهلية') || text.includes('منصورة') || text.includes('ميت غمر') || text.includes('بلقاس') || text.includes('شربين') || text.includes('دكرنس') || text.includes('طلخا')) return 'الدقهلية';
+  if (text.includes('شرقية') || text.includes('زقازيق') || text.includes('العاشر') || text.includes('بلبيس') || text.includes('فاقوس') || text.includes('منيا القمح') || text.includes('العاشر من رمضان')) return 'الشرقية';
+  if (text.includes('بحيرة') || text.includes('دمنهور') || text.includes('كفر الدوار') || text.includes('إيتاي البارود') || text.includes('كوم حمادة') || text.includes('وادي النطرون')) return 'البحيرة';
+  if (text.includes('منوفية') || text.includes('شبين الكوم') || text.includes('قويسنا') || text.includes('منوف') || text.includes('السادات') || text.includes('أشمون')) return 'المنوفية';
+  if (text.includes('كفر الشيخ') || text.includes('دسوق') || text.includes('بلطيم')) return 'كفر الشيخ';
+  if (text.includes('دمياط') || text.includes('رأس البر')) return 'دمياط';
+  if (text.includes('فيوم') || text.includes('إطسا') || text.includes('سنورس')) return 'الفيوم';
+  if (text.includes('بني سويف') || text.includes('الواسطى') || text.includes('ببا')) return 'بني سويف';
+  if (text.includes('منيا') || text.includes('ملوي') || text.includes('بني مزار') || text.includes('مغاغة')) return 'المنيا';
+  if (text.includes('أسيوط') || text.includes('اسيوط') || text.includes('ديروط') || text.includes('منفلوط')) return 'أسيوط';
+  if (text.includes('سوهاج') || text.includes('جرجا') || text.includes('طهطا') || text.includes('أخميم')) return 'سوهاج';
+  if (text.includes('قنا') || text.includes('نجع حمادي') || text.includes('قوص')) return 'قنا';
+  if (text.includes('أقصر') || text.includes('اقصر') || text.includes('إسنا')) return 'الأقصر';
+  if (text.includes('أسوان') || text.includes('اسوان') || text.includes('كوم أمبو') || text.includes('إدفو')) return 'أسوان';
+  if (text.includes('بحر أحمر') || text.includes('غردقة') || text.includes('سفاجا') || text.includes('شرم') || text.includes('طور') || text.includes('رأس غارب') || text.includes('القصير')) return 'البحر الأحمر';
+  if (text.includes('مطروح') || text.includes('علمين') || text.includes('الضبعة') || text.includes('مرسى مطروح')) return 'مطروح';
+  return 'القاهرة';
+}
 
 interface CargasStationsMapProps {
   config: AppConfig;
@@ -43,11 +77,42 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
   isStandalone = false,
 }) => {
   const [selectedType, setSelectedType] = useState<StationFacilityType | 'all'>('all');
+  const [selectedGovernorate, setSelectedGovernorate] = useState<string>('all');
+  const [isGroupedView, setIsGroupedView] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [nearestStation, setNearestStation] = useState<CargasStationLocation | null>(null);
   const [selectedStation, setSelectedStation] = useState<CargasStationLocation | null>(stations[0] || null);
+  const [logoRefreshKey, setLogoRefreshKey] = useState(0);
+
+  // Retrieve customer car plate number for map pin
+  const effectivePlate = useMemo(() => {
+    try {
+      const raw = localStorage.getItem('cargas_driver_profile');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.carPlate) return parsed.carPlate.trim();
+      }
+    } catch {
+      // fallback
+    }
+    return 'مصر | EGY';
+  }, []);
+
+  // Listen for permanent master station logo changes across the whole app
+  useEffect(() => {
+    const handleLogoUpdate = () => {
+      iconCacheRef.current = {};
+      setLogoRefreshKey((k) => k + 1);
+    };
+    window.addEventListener(MASTER_MAP_LOGO_EVENT, handleLogoUpdate);
+    window.addEventListener('storage', handleLogoUpdate);
+    return () => {
+      window.removeEventListener(MASTER_MAP_LOGO_EVENT, handleLogoUpdate);
+      window.removeEventListener('storage', handleLogoUpdate);
+    };
+  }, []);
 
   // Voice Search State
   const [isListening, setIsListening] = useState(false);
@@ -87,16 +152,36 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
           const userIcon = L.divIcon({
             className: 'custom-user-marker',
             html: `
-              <div style="background-color: #2563eb; color: white; width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 18px rgba(37, 99, 235, 0.8); border: 3px solid white; font-size: 18px;">
-                🚗
+              <div style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.45));">
+                <!-- Egyptian License Plate Badge -->
+                <div style="background: white; border: 2px solid #1e3a8a; border-radius: 7px; overflow: hidden; display: flex; flex-direction: column; min-width: 76px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.25);">
+                  <div style="background: #2563eb; color: white; font-size: 7.5px; font-weight: 900; padding: 1px 4px; display: flex; justify-content: space-between; align-items: center; letter-spacing: 0.5px;">
+                    <span>EGY</span>
+                    <span style="font-size: 8px;">مِصْر</span>
+                  </div>
+                  <div style="padding: 2px 5px; font-weight: 900; font-size: 10.5px; color: #0f172a; direction: ltr; letter-spacing: 0.5px; background: #f8fafc; font-family: monospace, Cairo, sans-serif;">
+                    ${effectivePlate}
+                  </div>
+                </div>
+
+                <!-- Car Circle with Glowing Pulse -->
+                <div style="margin-top: 2px; position: relative;">
+                  <div style="position: absolute; inset: -4px; border-radius: 50%; background: rgba(37,99,235,0.4); animation: ping 2s cubic-bezier(0,0,0.2,1) infinite;"></div>
+                  <div style="position: relative; background: linear-gradient(135deg, #1e40af, #2563eb); color: white; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(30,64,175,0.5); border: 2.5px solid white; font-size: 16px;">
+                    🚗
+                  </div>
+                </div>
+
+                <!-- Pointer Arrow -->
+                <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #1e40af; margin-top: -1px;"></div>
               </div>
             `,
-            iconSize: [38, 38],
-            iconAnchor: [19, 19],
+            iconSize: [86, 76],
+            iconAnchor: [43, 76],
           });
           const marker = L.marker([userCoords.lat, userCoords.lng], { icon: userIcon })
             .addTo(mapInstanceRef.current)
-            .bindPopup('<b>موقعك الحالي</b><br>تم تحديد موقعك بدقة')
+            .bindPopup(`<b>موقع سيارتك الحالي 🚗</b><br>لوحة: <b>${effectivePlate}</b><br>تم تحديد موقعك بدقة GPS`)
             .openPopup();
           userMarkerRef.current = marker;
         }
@@ -111,14 +196,15 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
     );
   };
 
-  // Calculate distance with useMemo to prevent allocation storms
+  // Calculate distance and governorate with useMemo
   const processedStations = useMemo(() => {
     return stations.map((st) => {
       let distance = st.distanceFromUserKm;
       if (userLocation) {
         distance = calculateDistanceKm(userLocation.lat, userLocation.lng, st.latitude, st.longitude);
       }
-      return { ...st, distanceFromUserKm: distance };
+      const gov = detectGovernorate(st.name, st.address, st.city);
+      return { ...st, distanceFromUserKm: distance, governorate: gov };
     });
   }, [stations, userLocation]);
 
@@ -128,6 +214,30 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
         return a.distanceFromUserKm - b.distanceFromUserKm;
       }
       return 0;
+    });
+  }, [processedStations]);
+
+  // List of all unique governorates with station counts
+  const governoratesList = useMemo(() => {
+    const counts: Record<string, number> = {};
+    processedStations.forEach((st) => {
+      const g = st.governorate || 'القاهرة';
+      counts[g] = (counts[g] || 0) + 1;
+    });
+
+    const list = Object.entries(counts).map(([name, count]) => ({
+      name,
+      count,
+    }));
+
+    const priority = ['القاهرة', 'الجيزة', 'الإسكندرية', 'القليوبية', 'السويس', 'بورسعيد', 'الإسماعيلية', 'الغربية', 'الدقهلية', 'الشرقية', 'البحيرة', 'المنوفية'];
+    return list.sort((a, b) => {
+      const idxA = priority.indexOf(a.name);
+      const idxB = priority.indexOf(b.name);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return b.count - a.count;
     });
   }, [processedStations]);
 
@@ -143,6 +253,9 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
   const filteredStations = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return sortedStations.filter((st) => {
+      const matchesGov = selectedGovernorate === 'all' || st.governorate === selectedGovernorate;
+      if (!matchesGov) return false;
+
       const matchesType =
         selectedType === 'all' ||
         st.facilityType === selectedType ||
@@ -150,8 +263,8 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
           st.activities.some((act) => {
             if (selectedType === 'cng_station' && act === 'تموين') return true;
             if (selectedType === 'conversion_center' && (act === 'تحويل' || act === 'صيانة')) return true;
-            if (selectedType === 'oil_center' && (act === 'زيوت' || act === 'صيانة')) return true;
-            if (selectedType === 'canopy_oil' && act === 'زيوت') return true;
+            if (selectedType === 'oil_center' && act === 'زيوت') return true;
+            if (selectedType === 'canopy_oil' && (act === 'زيوت أسفل المظلة' || (act === 'زيوت' && st.facilityType === 'canopy_oil'))) return true;
             if (selectedType === 'cylinder_inspection' && act === 'فحص اسطوانات') return true;
             return false;
           }));
@@ -164,10 +277,24 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
         st.city.toLowerCase().includes(query) ||
         st.address.toLowerCase().includes(query) ||
         st.code.toLowerCase().includes(query) ||
+        (st.governorate && st.governorate.toLowerCase().includes(query)) ||
         (st.activities && st.activities.some((act) => act.toLowerCase().includes(query)))
       );
     });
-  }, [sortedStations, selectedType, searchQuery]);
+  }, [sortedStations, selectedType, selectedGovernorate, searchQuery]);
+
+  // Group stations by governorate
+  const stationsByGovernorate = useMemo(() => {
+    const groups: Record<string, typeof filteredStations> = {};
+    filteredStations.forEach((st) => {
+      const g = st.governorate || 'القاهرة';
+      if (!groups[g]) {
+        groups[g] = [];
+      }
+      groups[g].push(st);
+    });
+    return groups;
+  }, [filteredStations]);
 
   // Center on selected station
   const focusStationOnMap = (st: CargasStationLocation) => {
@@ -314,15 +441,23 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
   };
 
   // Helper to get or create cached icon for facility type to prevent memory allocation spikes
-  const getMarkerIcon = (facilityType: StationFacilityType) => {
-    const hasLogo = Boolean(config.stationLogoUrl && config.stationLogoUrl.trim().length > 0);
-    const cacheKey = `${facilityType}_${hasLogo ? 'logo' : 'nologo'}`;
+  const getMarkerIcon = (facilityType: StationFacilityType, stationItem?: CargasStationLocation) => {
+    const wasalnyCfg = config.wasalnyConfig || getWasalnyFullConfig();
+    const stationCustomLogo = stationItem
+      ? (wasalnyCfg.stationCustomLogos?.[stationItem.id] || wasalnyCfg.stationCustomLogos?.[stationItem.code] || stationItem.customLogoUrl)
+      : undefined;
+    const effectiveLogo = getMasterStationMapLogo(stationItem?.id, stationCustomLogo);
+
+    const hasLogo = Boolean(effectiveLogo && effectiveLogo.trim().length > 0);
+    const glowColor = wasalnyCfg.stationMarkerGlowColor || '#059669';
+    const markerStyle = wasalnyCfg.stationMarkerStyle || 'cargas_badge';
+    const cacheKey = `${facilityType}_${stationItem?.id || 'gen'}_${hasLogo ? effectiveLogo : 'no'}_${markerStyle}`;
 
     if (iconCacheRef.current[cacheKey]) {
       return iconCacheRef.current[cacheKey];
     }
 
-    let bg = '#059669'; // CNG default
+    let bg = glowColor; // Dynamic glow
     let icon = '⛽';
     if (facilityType === 'conversion_center') {
       bg = '#2563eb';
@@ -340,11 +475,17 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
 
     let newIcon: L.DivIcon;
     if (hasLogo) {
+      const radiusStyle = markerStyle === 'shield_badge'
+        ? 'border-radius: 10px 10px 18px 18px;'
+        : markerStyle === 'royal_pin'
+        ? 'border-radius: 50%;'
+        : 'border-radius: 14px;';
+
       newIcon = L.divIcon({
         className: 'cargas-custom-logo-pin',
         html: `
-          <div style="background-color: white; border: 3px solid ${bg}; width: 44px; height: 44px; border-radius: 14px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.3); overflow: hidden; transform: rotate(-3deg);">
-            <img src="${config.stationLogoUrl}" alt="لوجو كارجاس" style="width: 100%; height: 100%; object-fit: cover;" />
+          <div style="background-color: white; border: 3px solid ${bg}; width: 44px; height: 44px; ${radiusStyle} display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,0.35); overflow: hidden; transform: rotate(-2deg); aspect-ratio: 1/1;">
+            <img src="${effectiveLogo}" alt="لوجو كارجاس" style="width: 100%; height: 100%; object-fit: contain;" />
           </div>
         `,
         iconSize: [44, 44],
@@ -445,12 +586,14 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
     };
   }, []);
 
-  // Update Markers when filteredStations or stationLogoUrl changes
+  // Update Markers when filteredStations, stationLogoUrl, or master logo changes
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    // Invalidate icon cache if stationLogoUrl changed
+    const wasalnyCfg = getWasalnyFullConfig();
+
+    // Invalidate icon cache if stationLogoUrl or logoRefreshKey changed
     iconCacheRef.current = {};
 
     // Clear previous markers
@@ -460,18 +603,19 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
     // Add markers using cached icons and lazy popups
     filteredStations.forEach((st) => {
       const marker = L.marker([st.latitude, st.longitude], {
-        icon: getMarkerIcon(st.facilityType),
+        icon: getMarkerIcon(st.facilityType, st),
       }).addTo(map);
 
       // Lazy popup evaluation — constructed only when user opens the popup
       marker.bindPopup(() => {
         const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${st.latitude},${st.longitude}`;
         const providerName = 'خرائط جوجل';
-        const logoSection = config.stationLogoUrl
+        const effectiveStationLogo = getMasterStationMapLogo(st.id, st.customLogoUrl);
+        const logoSection = effectiveStationLogo
           ? `
             <div style="text-align: center; margin-bottom: 8px;">
               <a href="${navUrl}" target="_blank" title="اضغط على اللوجو للانتقال لنظام الملاحة في ${providerName}" style="display: inline-block;">
-                <img src="${config.stationLogoUrl}" alt="كارجاس" style="height: 38px; max-width: 110px; object-fit: contain; cursor: pointer; border-radius: 8px; border: 2px solid #059669; padding: 2px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+                <img src="${effectiveStationLogo}" alt="${st.name}" style="height: 38px; max-width: 110px; object-fit: contain; cursor: pointer; border-radius: 8px; border: 2px solid ${wasalnyCfg.stationMarkerGlowColor || '#059669'}; padding: 2px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
               </a>
               <span style="display: block; font-size: 9px; color: #059669; font-weight: bold; margin-top: 2px;">(اضغط على اللوجو للانتقال لـ ${providerName} 🚗)</span>
             </div>
@@ -525,7 +669,7 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
 
       markersRef.current[st.id] = marker;
     });
-  }, [filteredStations, config.stationLogoUrl]);
+  }, [filteredStations, config.stationLogoUrl, logoRefreshKey]);
 
   const getFacilityBadge = (type: StationFacilityType) => {
     switch (type) {
@@ -709,13 +853,13 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
         </div>
       )}
 
-      {/* Categories Filter Pills */}
+      {/* Categories Filter Pills in Normal Standard Colors */}
       <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar text-xs">
         {[
           { id: 'all', label: `الكل (${stations.length})`, icon: '🏢' },
           { id: 'cng_station', label: 'محطات غاز CNG', icon: '⛽' },
-          { id: 'conversion_center', label: 'مراكز التحويل', icon: '🔧' },
-          { id: 'oil_center', label: 'مراكز الزيوت', icon: '🛢️' },
+          { id: 'conversion_center', label: 'مراكز التحويل والصيانة', icon: '🔧' },
+          { id: 'oil_center', label: 'مراكز الزيوت المعتمدة', icon: '🛢️' },
           { id: 'canopy_oil', label: 'زيوت أسفل المظلة', icon: '☂️' },
           { id: 'cylinder_inspection', label: 'فحص الأسطوانات', icon: '🛡️' },
         ].map((tab) => (
@@ -755,163 +899,381 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
           
           {/* Map Overlay Badge */}
           <div className="absolute top-3 right-3 z-20 bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-2xl border border-slate-200 shadow-md text-[11px] font-bold text-slate-900 flex items-center gap-2">
-            {config.stationLogoUrl ? (
-              <img src={config.stationLogoUrl} alt="كارجاس" className="h-4 max-w-[50px] object-contain" />
-            ) : (
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            )}
+            <img src={getMasterStationMapLogo()} alt="كارجاس" className="h-5 max-w-[65px] object-contain" />
             <span>محطات ومراكز كارجاس ({filteredStations.length})</span>
           </div>
         </div>
 
-        {/* Stations Side List (5 cols) with Direct "وصّلني" Action */}
-        <div className="lg:col-span-5 space-y-3 max-h-[460px] overflow-y-auto pr-1">
-          {filteredStations.map((st) => {
-            const badge = getFacilityBadge(st.facilityType);
-            const isSelected = selectedStation?.id === st.id;
-            const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${st.latitude},${st.longitude}`;
+        {/* Stations Side List (5 cols) with "كارجاس أقرب لك" and Governorate Classification */}
+        <div className="lg:col-span-5 space-y-3.5 flex flex-col">
+          {/* Header Card: Requested phrase "كارجاس أقرب لك" and Governorate Categories */}
+          <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white rounded-3xl p-3.5 sm:p-4 border border-emerald-500/40 shadow-md space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-white p-0.5 border border-emerald-400 flex items-center justify-center shrink-0 shadow-xs">
+                  <img src={getMasterStationMapLogo()} alt="كارجاس" className="w-full h-full object-contain" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm sm:text-base text-emerald-300 flex items-center gap-1.5">
+                    <span>كارجاس أقرب لك</span>
+                    <span className="text-xs">📍</span>
+                  </h3>
+                  <p className="text-[10px] text-slate-300">
+                    دليل المحطات والمراكز مصنف حسب المحافظة ({filteredStations.length} موقع)
+                  </p>
+                </div>
+              </div>
 
-            return (
-              <div
-                key={st.id}
-                onClick={() => focusStationOnMap(st)}
-                className={`p-4 rounded-3xl border transition cursor-pointer space-y-2.5 ${
-                  isSelected
-                    ? 'bg-emerald-50/90 border-emerald-500 shadow-md ring-2 ring-emerald-500/20'
-                    : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/60'
+              {/* Toggle Grouped by Governorate vs Flat List */}
+              <button
+                type="button"
+                onClick={() => setIsGroupedView(!isGroupedView)}
+                className="bg-white/10 hover:bg-white/20 text-emerald-200 text-[10px] font-bold px-2.5 py-1.5 rounded-xl border border-white/15 transition flex items-center gap-1 shrink-0"
+                title="تبديل طريقة العرض (مصنفة بالمحافظات / قائمة موحدة)"
+              >
+                <Layers className="w-3.5 h-3.5 text-emerald-300" />
+                <span>{isGroupedView ? 'عرض مصنف' : 'عرض بسيط'}</span>
+              </button>
+            </div>
+
+            {/* Quick Governorate Filter Pills */}
+            <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none text-[10.5px]">
+              <button
+                type="button"
+                onClick={() => setSelectedGovernorate('all')}
+                className={`px-3 py-1 rounded-xl font-bold whitespace-nowrap transition border ${
+                  selectedGovernorate === 'all'
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-xs'
+                    : 'bg-white/10 text-slate-200 border-white/10 hover:bg-white/20'
                 }`}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    {/* Clickable Station Logo navigating directly to Google Maps */}
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        window.open(navUrl, '_blank');
-                      }}
-                      className="cursor-pointer group/logo relative"
-                      title="اضغط على اللوجو للانتقال لمسار خرائط جوجل 🚗"
-                    >
-                      {config.stationLogoUrl ? (
-                        <img
-                          src={config.stationLogoUrl}
-                          alt="كارجاس"
-                          className="w-8 h-8 rounded-lg object-contain border-2 border-emerald-500 p-0.5 shrink-0 group-hover/logo:scale-110 transition shadow-2xs"
-                        />
-                      ) : (
-                        <span className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-sm border border-slate-200">
-                          {badge.icon}
-                        </span>
-                      )}
-                    </div>
-                    <div>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${badge.bg}`}>
-                        {badge.label}
-                      </span>
-                      <h4 className="font-black text-xs sm:text-sm text-slate-900 mt-0.5">
-                        {st.name}
-                      </h4>
-                    </div>
-                  </div>
+                🏛️ كل المحافظات ({processedStations.length})
+              </button>
+              {governoratesList.map((gov) => (
+                <button
+                  key={gov.name}
+                  type="button"
+                  onClick={() => setSelectedGovernorate(gov.name)}
+                  className={`px-3 py-1 rounded-xl font-bold whitespace-nowrap transition border ${
+                    selectedGovernorate === gov.name
+                      ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-xs'
+                      : 'bg-white/10 text-slate-200 border-white/10 hover:bg-white/20'
+                  }`}
+                >
+                  {gov.name} ({gov.count})
+                </button>
+              ))}
+            </div>
+          </div>
 
-                  {st.distanceFromUserKm !== undefined && (
-                    <span className="text-[11px] font-black text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-lg whitespace-nowrap">
-                      {st.distanceFromUserKm} كم
+          {/* Stations List Body with Governorate Grouping */}
+          <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+            {isGroupedView && selectedGovernorate === 'all' ? (
+              // Grouped by Governorate View
+              Object.entries(stationsByGovernorate).map(([govName, govStations]) => (
+                <div key={govName} className="space-y-2">
+                  <div className="sticky top-0 z-10 bg-slate-800/95 backdrop-blur-md text-emerald-300 border border-slate-700 px-3.5 py-1.5 rounded-2xl flex items-center justify-between text-xs font-black shadow-xs">
+                    <span className="flex items-center gap-1.5">
+                      <span>🏛️</span>
+                      <span>محافظة {govName}</span>
                     </span>
-                  )}
-                </div>
-
-                <p className="text-[11px] text-slate-500 line-clamp-1">{st.address}</p>
-
-                {/* CCTV Stream & Crowd Level Badge */}
-                {st.crowdLevel && (
-                  <div className="flex items-center justify-between text-[10px] bg-emerald-50/70 border border-emerald-200 px-2 py-1 rounded-lg text-emerald-900">
-                    <div className="flex items-center gap-1.5 font-bold">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                      <span>رصد كاميرات المراقبة: [{st.crowdLevel}]</span>
-                    </div>
-                    <span className="font-mono text-emerald-700">~{st.crowdEstimatedWaitMinutes || 3} دقيقة</span>
+                    <span className="bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 text-[10px] px-2 py-0.2 rounded-full font-bold">
+                      {govStations.length} موقع كارجاس
+                    </span>
                   </div>
-                )}
 
-                {/* Activities Badges */}
-                <div className="flex flex-wrap gap-1">
-                  {(st.activities || ['تموين', 'زيوت']).map((act) => {
-                    let badgeColor = 'bg-slate-100 text-slate-700 border-slate-200';
-                    let icon = '⛽';
-                    if (act === 'تموين') {
-                      badgeColor = 'bg-emerald-50 text-emerald-800 border-emerald-200';
-                      icon = '⛽';
-                    } else if (act === 'تحويل') {
-                      badgeColor = 'bg-blue-50 text-blue-800 border-blue-200';
-                      icon = '🔧';
-                    } else if (act === 'صيانة') {
-                      badgeColor = 'bg-indigo-50 text-indigo-800 border-indigo-200';
-                      icon = '⚙️';
-                    } else if (act === 'زيوت') {
-                      badgeColor = 'bg-amber-50 text-amber-800 border-amber-200';
-                      icon = '🛢️';
-                    } else if (act === 'فحص اسطوانات') {
-                      badgeColor = 'bg-rose-50 text-rose-800 border-rose-200';
-                      icon = '🛡️';
-                    }
+                  {govStations.map((st) => {
+                    const badge = getFacilityBadge(st.facilityType);
+                    const isSelected = selectedStation?.id === st.id;
+                    const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${st.latitude},${st.longitude}`;
+                    const itemLogo = getMasterStationMapLogo(st.id, st.customLogoUrl);
+
                     return (
-                      <span key={act} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${badgeColor}`}>
-                        {icon} {act}
-                      </span>
+                      <div
+                        key={st.id}
+                        onClick={() => focusStationOnMap(st)}
+                        className={`p-3.5 sm:p-4 rounded-3xl border transition cursor-pointer space-y-2.5 ${
+                          isSelected
+                            ? 'bg-emerald-50/90 border-emerald-500 shadow-md ring-2 ring-emerald-500/20'
+                            : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/60'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.open(navUrl, '_blank');
+                              }}
+                              className="cursor-pointer group/logo relative"
+                              title="اضغط على اللوجو للانتقال لمسار خرائط جوجل 🚗"
+                            >
+                              {itemLogo ? (
+                                <img
+                                  src={itemLogo}
+                                  alt="كارجاس"
+                                  className="w-8 h-8 rounded-lg object-contain border-2 border-emerald-500 p-0.5 shrink-0 group-hover/logo:scale-110 transition shadow-2xs"
+                                />
+                              ) : (
+                                <span className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-sm border border-slate-200">
+                                  {badge.icon}
+                                </span>
+                              )}
+                            </div>
+                            <div>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${badge.bg}`}>
+                                  {badge.label}
+                                </span>
+                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                                  🏛️ {st.governorate || govName}
+                                </span>
+                              </div>
+                              <h4 className="font-black text-xs sm:text-sm text-slate-900 mt-0.5">
+                                {st.name}
+                              </h4>
+                            </div>
+                          </div>
+
+                          {st.distanceFromUserKm !== undefined && (
+                            <span className="text-[11px] font-black text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-lg whitespace-nowrap">
+                              {st.distanceFromUserKm} كم
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-[11px] text-slate-500 line-clamp-1">{st.address}</p>
+
+                        {/* CCTV Stream & Crowd Level Badge */}
+                        {st.crowdLevel && (
+                          <div className="flex items-center justify-between text-[10px] bg-emerald-50/70 border border-emerald-200 px-2 py-1 rounded-lg text-emerald-900">
+                            <div className="flex items-center gap-1.5 font-bold">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                              <span>رصد كاميرات المراقبة: [{st.crowdLevel}]</span>
+                            </div>
+                            <span className="font-mono text-emerald-700">~{st.crowdEstimatedWaitMinutes || 3} دقيقة</span>
+                          </div>
+                        )}
+
+                        {/* Activities Badges */}
+                        <div className="flex flex-wrap gap-1">
+                          {(st.activities || ['تموين', 'زيوت']).map((act) => {
+                            let badgeColor = 'bg-slate-100 text-slate-700 border-slate-200';
+                            let icon = '⛽';
+                            if (act === 'تموين') {
+                              badgeColor = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                              icon = '⛽';
+                            } else if (act === 'تحويل') {
+                              badgeColor = 'bg-blue-50 text-blue-800 border-blue-200';
+                              icon = '🔧';
+                            } else if (act === 'صيانة') {
+                              badgeColor = 'bg-indigo-50 text-indigo-800 border-indigo-200';
+                              icon = '⚙️';
+                            } else if (act === 'زيوت') {
+                              badgeColor = 'bg-amber-50 text-amber-800 border-amber-200';
+                              icon = '🛢️';
+                            } else if (act === 'فحص اسطوانات') {
+                              badgeColor = 'bg-rose-50 text-rose-800 border-rose-200';
+                              icon = '🛡️';
+                            }
+                            return (
+                              <span key={act} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${badgeColor}`}>
+                                {icon} {act}
+                              </span>
+                            );
+                          })}
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-[10px] text-slate-600">
+                          <span className="flex items-center gap-1 font-medium">
+                            <Clock className="w-3 h-3 text-slate-400" />
+                            {st.workingHours}
+                          </span>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handlePlayWadahGuidance(st);
+                              }}
+                              className="p-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 transition"
+                              title="استمع للإرشاد الصوتي بصوت وضاح"
+                            >
+                              <Volume2 className="w-3.5 h-3.5" />
+                            </button>
+
+                            <a
+                              href={navUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-3.5 py-1.5 rounded-xl transition flex items-center gap-1 shadow-xs active:scale-95 text-xs"
+                              title="فتح مسار الملاحة فى خرائط جوجل"
+                            >
+                              <span>🚗 وصّلني</span>
+                              <Navigation className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
+              ))
+            ) : (
+              // Flat List View
+              filteredStations.map((st) => {
+                const badge = getFacilityBadge(st.facilityType);
+                const isSelected = selectedStation?.id === st.id;
+                const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${st.latitude},${st.longitude}`;
+                const itemLogo = getMasterStationMapLogo(st.id, st.customLogoUrl);
 
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-[10px] text-slate-600">
-                  <span className="flex items-center gap-1 font-medium">
-                    <Clock className="w-3 h-3 text-slate-400" />
-                    {st.workingHours}
-                  </span>
+                return (
+                  <div
+                    key={st.id}
+                    onClick={() => focusStationOnMap(st)}
+                    className={`p-3.5 sm:p-4 rounded-3xl border transition cursor-pointer space-y-2.5 ${
+                      isSelected
+                        ? 'bg-emerald-50/90 border-emerald-500 shadow-md ring-2 ring-emerald-500/20'
+                        : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/60'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            window.open(navUrl, '_blank');
+                          }}
+                          className="cursor-pointer group/logo relative"
+                          title="اضغط على اللوجو للانتقال لمسار خرائط جوجل 🚗"
+                        >
+                          {itemLogo ? (
+                            <img
+                              src={itemLogo}
+                              alt="كارجاس"
+                              className="w-8 h-8 rounded-lg object-contain border-2 border-emerald-500 p-0.5 shrink-0 group-hover/logo:scale-110 transition shadow-2xs"
+                            />
+                          ) : (
+                            <span className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-sm border border-slate-200">
+                              {badge.icon}
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${badge.bg}`}>
+                              {badge.label}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                              🏛️ {st.governorate || 'القاهرة'}
+                            </span>
+                          </div>
+                          <h4 className="font-black text-xs sm:text-sm text-slate-900 mt-0.5">
+                            {st.name}
+                          </h4>
+                        </div>
+                      </div>
 
-                  {st.promotionalPointsMultiplier > 1 && (
-                    <span className="text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                      🎁 نقاط {st.promotionalPointsMultiplier}x
-                    </span>
-                  )}
+                      {st.distanceFromUserKm !== undefined && (
+                        <span className="text-[11px] font-black text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-lg whitespace-nowrap">
+                          {st.distanceFromUserKm} كم
+                        </span>
+                      )}
+                    </div>
 
-                  <div className="flex items-center gap-1">
-                    {/* Egyptian Wadah Voice Guidance button */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handlePlayWadahGuidance(st);
-                      }}
-                      className="p-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 transition"
-                      title="استمع للإرشاد الصوتي بصوت وضاح"
-                    >
-                      <Volume2 className="w-3.5 h-3.5" />
-                    </button>
+                    <p className="text-[11px] text-slate-500 line-clamp-1">{st.address}</p>
 
-                    {/* Direct "وصّلني" Action Button */}
-                    <a
-                      href={navUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-3.5 py-1.5 rounded-xl transition flex items-center gap-1 shadow-xs active:scale-95 text-xs"
-                      title="فتح مسار الملاحة فى خرائط جوجل"
-                    >
-                      <span>🚗 وصّلني</span>
-                      <Navigation className="w-3.5 h-3.5" />
-                    </a>
+                    {/* CCTV Stream & Crowd Level Badge */}
+                    {st.crowdLevel && (
+                      <div className="flex items-center justify-between text-[10px] bg-emerald-50/70 border border-emerald-200 px-2 py-1 rounded-lg text-emerald-900">
+                        <div className="flex items-center gap-1.5 font-bold">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                          <span>رصد كاميرات المراقبة: [{st.crowdLevel}]</span>
+                        </div>
+                        <span className="font-mono text-emerald-700">~{st.crowdEstimatedWaitMinutes || 3} دقيقة</span>
+                      </div>
+                    )}
+
+                    {/* Activities Badges */}
+                    <div className="flex flex-wrap gap-1">
+                      {(st.activities || ['تموين', 'زيوت']).map((act) => {
+                        let badgeColor = 'bg-slate-100 text-slate-700 border-slate-200';
+                        let icon = '⛽';
+                        if (act === 'تموين') {
+                          badgeColor = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                          icon = '⛽';
+                        } else if (act === 'تحويل') {
+                          badgeColor = 'bg-blue-50 text-blue-800 border-blue-200';
+                          icon = '🔧';
+                        } else if (act === 'صيانة') {
+                          badgeColor = 'bg-indigo-50 text-indigo-800 border-indigo-200';
+                          icon = '⚙️';
+                        } else if (act === 'زيوت') {
+                          badgeColor = 'bg-amber-50 text-amber-800 border-amber-200';
+                          icon = '🛢️';
+                        } else if (act === 'فحص اسطوانات') {
+                          badgeColor = 'bg-rose-50 text-rose-800 border-rose-200';
+                          icon = '🛡️';
+                        }
+                        return (
+                          <span key={act} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${badgeColor}`}>
+                            {icon} {act}
+                          </span>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-[10px] text-slate-600">
+                      <span className="flex items-center gap-1 font-medium">
+                        <Clock className="w-3 h-3 text-slate-400" />
+                        {st.workingHours}
+                      </span>
+
+                      {st.promotionalPointsMultiplier > 1 && (
+                        <span className="text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                          🎁 نقاط {st.promotionalPointsMultiplier}x
+                        </span>
+                      )}
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePlayWadahGuidance(st);
+                          }}
+                          className="p-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 transition"
+                          title="استمع للإرشاد الصوتي بصوت وضاح"
+                        >
+                          <Volume2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        <a
+                          href={navUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-3.5 py-1.5 rounded-xl transition flex items-center gap-1 shadow-xs active:scale-95 text-xs"
+                          title="فتح مسار الملاحة فى خرائط جوجل"
+                        >
+                          <span>🚗 وصّلني</span>
+                          <Navigation className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
+                );
+              })
+            )}
 
-          {filteredStations.length === 0 && (
-            <div className="text-center py-12 text-slate-400 text-xs bg-slate-50 rounded-3xl border border-dashed border-slate-200">
-              لا توجد محطات مطابقة لبحثك
-            </div>
-          )}
+            {filteredStations.length === 0 && (
+              <div className="text-center py-12 text-slate-400 text-xs bg-slate-50 rounded-3xl border border-dashed border-slate-200">
+                لا توجد محطات مطابقة لبحثك في هذه المحافظة
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

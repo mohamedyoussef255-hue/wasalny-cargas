@@ -38,12 +38,24 @@ import {
   FuelingTransaction,
   RewardRedemption,
   StationFinancialConfig,
+  StationDailySalesRecord,
+  SalesSystemStage,
+  TechnicianCrewMember,
+  TechnicianIncentiveConfig,
 } from '../types';
 import {
   saveStationLocations,
   saveAppConfig,
   getStationLocations,
   getRedemptions,
+  getStationDailySales,
+  saveStationDailySales,
+  recordStationDailySale,
+  getStationCrew,
+  saveStationCrew,
+  getTechnicianIncentiveConfig,
+  saveTechnicianIncentiveConfig,
+  calculateTechnicianFinancialIncentive,
 } from '../services/storageService';
 
 interface FinancialManagementPortalProps {
@@ -71,8 +83,84 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
   const [selectedRegion, setSelectedRegion] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [activeSubTab, setActiveSubTab] = useState<
-    'sales_overview' | 'matrix' | 'redemptions_gifts' | 'live_audit' | 'security_pin'
-  >('sales_overview');
+    'sales_overview' | 'matrix' | 'daily_sales_movement' | 'redemptions_gifts' | 'live_audit' | 'security_pin' | 'technician_incentives'
+  >('daily_sales_movement');
+
+  // Technician Incentives & Rating Translation State
+  const [crewList, setCrewList] = useState<TechnicianCrewMember[]>(() => getStationCrew());
+  const [incentiveConfig, setIncentiveConfig] = useState<TechnicianIncentiveConfig>(() =>
+    config.technicianIncentiveConfig || getTechnicianIncentiveConfig()
+  );
+  const [isSavingIncentives, setIsSavingIncentives] = useState(false);
+  const [incentiveSaveSuccess, setIncentiveSaveSuccess] = useState(false);
+
+  // Daily Station Sales Movement State (حركة المبيعات اليومية للمحطات)
+  const [dailySalesRecords, setDailySalesRecords] = useState<StationDailySalesRecord[]>(() => {
+    const existing = getStationDailySales();
+    if (existing.length > 0) return existing;
+    // Seed initial realistic sales movement for Cargas stations
+    const sampleRecord: StationDailySalesRecord = {
+      id: 'DSR-' + Date.now(),
+      stationId: stations[0]?.id || 'st-1',
+      stationName: stations[0]?.name || 'محطة ألماظة - طريق النصر',
+      stationCode: stations[0]?.code || 'CAIRO-01',
+      salesDate: new Date().toISOString().slice(0, 10),
+      shiftType: 'morning',
+      supervisorName: 'م. أحمد الشناوي',
+      systemStage: 'stage1_manual',
+      manualDetails: {
+        startMeterReading: 124500,
+        endMeterReading: 128950,
+        gasVolumeSoldM3: 4450,
+        gasPricePerMeter: config.gasPricePerMeter || 13,
+        gasRevenueEgp: 4450 * (config.gasPricePerMeter || 13),
+        oilBottlesSold: 18,
+        oilRevenueEgp: 6300,
+        cashPaymentEgp: 41250,
+        visaCardPaymentEgp: 14600,
+        fleetCardPaymentEgp: 8300,
+        totalSalesEgp: 4450 * (config.gasPricePerMeter || 13) + 6300,
+        cashBankDeposited: true,
+        depositSlipNumber: 'DEP-883491-NBE',
+        shiftDiscrepancyEgp: 0,
+        supervisorSignature: 'أحمد الشناوي - معتمد',
+        notes: 'انتظام كامل في ضغط الغاز وتوريد النقدية للبنك الأهلي المصري',
+      },
+      status: 'audited_by_finance',
+      auditedByFinanceAt: new Date().toISOString(),
+      auditedByFinanceName: 'المراجع المالي المركزي',
+      createdAt: new Date().toISOString(),
+    };
+    saveStationDailySales([sampleRecord]);
+    return [sampleRecord];
+  });
+
+  // Daily Sales Form State
+  const [formStationId, setFormStationId] = useState<string>(stations[0]?.id || '');
+  const [formSalesDate, setFormSalesDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [formShiftType, setFormShiftType] = useState<'morning' | 'evening' | 'night' | 'full_day'>('morning');
+  const [formSupervisorName, setFormSupervisorName] = useState<string>('مشرف الوردية');
+  const [formStage, setFormStage] = useState<SalesSystemStage>('stage1_manual');
+  
+  // Manual Form Inputs
+  const [manualStartMeter, setManualStartMeter] = useState<number>(100000);
+  const [manualEndMeter, setManualEndMeter] = useState<number>(103500);
+  const [manualOilBottles, setManualOilBottles] = useState<number>(12);
+  const [manualOilRevenue, setManualOilRevenue] = useState<number>(4200);
+  const [manualCashEgp, setManualCashEgp] = useState<number>(35000);
+  const [manualVisaEgp, setManualVisaEgp] = useState<number>(10500);
+  const [manualFleetEgp, setManualFleetEgp] = useState<number>(4200);
+  const [manualDepositSlip, setManualDepositSlip] = useState<string>('DEP-10294-BDC');
+  const [manualNotes, setManualNotes] = useState<string>('');
+  const [isSalesSaveSuccess, setIsSalesSaveSuccess] = useState<boolean>(false);
+
+  // SCADA Telemetry Form Inputs
+  const [scadaDispenserId, setScadaDispenserId] = useState<string>('DISP-01');
+  const [scadaFlowM3, setScadaFlowM3] = useState<number>(4820);
+  const [scadaInletBar, setScadaInletBar] = useState<number>(220);
+  const [scadaCompressorHours, setScadaCompressorHours] = useState<number>(8.5);
+  const [scadaTankBar, setScadaTankBar] = useState<number>(245);
+  const [scadaVarianceM3, setScadaVarianceM3] = useState<number>(0);
 
   // Redemptions list state
   const [redemptionsList, setRedemptionsList] = useState<RewardRedemption[]>(() => {
@@ -266,6 +354,145 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
     setCurrentPinInput('');
     setNewPinInput('');
     setConfirmPinInput('');
+  };
+
+  // Save Daily Sales Movement Entry (يدوي المرحلة 1 أو سكادا المرحلة 2)
+  const handleSaveDailySales = (e: React.FormEvent) => {
+    e.preventDefault();
+    const st = stationList.find((s) => s.id === formStationId) || stationList[0];
+    if (!st) return;
+
+    const gasPrice = config.gasPricePerMeter || 13;
+    let newRecord: StationDailySalesRecord;
+
+    if (formStage === 'stage1_manual') {
+      const gasVol = Math.max(0, manualEndMeter - manualStartMeter);
+      const gasRev = gasVol * gasPrice;
+      const totalRev = gasRev + Number(manualOilRevenue);
+      const totalPaid = Number(manualCashEgp) + Number(manualVisaEgp) + Number(manualFleetEgp);
+      const discrepancy = totalPaid - totalRev;
+
+      newRecord = {
+        id: 'DSR-' + Date.now(),
+        stationId: st.id,
+        stationName: st.name,
+        stationCode: st.code,
+        salesDate: formSalesDate,
+        shiftType: formShiftType,
+        supervisorName: formSupervisorName || 'مشرف الوردية',
+        systemStage: 'stage1_manual',
+        manualDetails: {
+          startMeterReading: Number(manualStartMeter),
+          endMeterReading: Number(manualEndMeter),
+          gasVolumeSoldM3: gasVol,
+          gasPricePerMeter: gasPrice,
+          gasRevenueEgp: gasRev,
+          oilBottlesSold: Number(manualOilBottles),
+          oilRevenueEgp: Number(manualOilRevenue),
+          cashPaymentEgp: Number(manualCashEgp),
+          visaCardPaymentEgp: Number(manualVisaEgp),
+          fleetCardPaymentEgp: Number(manualFleetEgp),
+          totalSalesEgp: totalRev,
+          cashBankDeposited: !!manualDepositSlip,
+          depositSlipNumber: manualDepositSlip,
+          shiftDiscrepancyEgp: discrepancy,
+          supervisorSignature: formSupervisorName,
+          notes: manualNotes,
+        },
+        status: 'audited_by_finance',
+        auditedByFinanceAt: new Date().toISOString(),
+        auditedByFinanceName: 'المراجع المالي المركزي',
+        createdAt: new Date().toISOString(),
+      };
+    } else {
+      const scadaRev = Number(scadaFlowM3) * gasPrice;
+      newRecord = {
+        id: 'DSR-' + Date.now(),
+        stationId: st.id,
+        stationName: st.name,
+        stationCode: st.code,
+        salesDate: formSalesDate,
+        shiftType: formShiftType,
+        supervisorName: formSupervisorName || 'مشرف الربط الآلي',
+        systemStage: 'stage2_scada',
+        scadaDetails: {
+          dispenserId: scadaDispenserId,
+          totalFlowAccumulatedM3: Number(scadaFlowM3),
+          averageInletPressureBar: Number(scadaInletBar),
+          compressorRunHours: Number(scadaCompressorHours),
+          liveTankPressureBar: Number(scadaTankBar),
+          scadaCalculatedRevenueEgp: scadaRev,
+          autoReconciledStatus: Number(scadaVarianceM3) === 0 ? 'matched' : 'variance_detected',
+          varianceVolumeM3: Number(scadaVarianceM3),
+          telemetryTimestamp: new Date().toISOString(),
+          gatewayStatus: 'online',
+        },
+        status: 'audited_by_finance',
+        auditedByFinanceAt: new Date().toISOString(),
+        auditedByFinanceName: 'نظام سكادا المركزي - كارجاس',
+        createdAt: new Date().toISOString(),
+      };
+    }
+
+    recordStationDailySale(newRecord);
+    setDailySalesRecords(getStationDailySales());
+    setIsSalesSaveSuccess(true);
+    setTimeout(() => setIsSalesSaveSuccess(false), 4000);
+  };
+
+  // Export Daily Sales Movement to CSV
+  const handleExportDailySales = () => {
+    const headers = [
+      'كود الحركة',
+      'التاريخ',
+      'المحطة',
+      'الوردية',
+      'المرحلة والنظام',
+      'المشرف المسئول',
+      'كمية الغاز (م³)',
+      'إيراد الغاز (ج)',
+      'إيراد الزيوت (ج)',
+      'إجمالي المبيعات (ج)',
+      'تحصيل كاش (ج)',
+      'تحصيل فيزا (ج)',
+      'تحصيل أسطول (ج)',
+      'إيصال الإيداع البنكي',
+      'الحالة',
+    ];
+
+    const rows = dailySalesRecords.map((r) => {
+      const gasVol = r.systemStage === 'stage1_manual' ? r.manualDetails?.gasVolumeSoldM3 : r.scadaDetails?.totalFlowAccumulatedM3;
+      const gasRev = r.systemStage === 'stage1_manual' ? r.manualDetails?.gasRevenueEgp : r.scadaDetails?.scadaCalculatedRevenueEgp;
+      const oilRev = r.manualDetails?.oilRevenueEgp || 0;
+      const totalRev = r.manualDetails?.totalSalesEgp || gasRev;
+      return [
+        r.id,
+        r.salesDate,
+        `"${r.stationName}"`,
+        r.shiftType === 'morning' ? 'صباحية' : r.shiftType === 'evening' ? 'مسائية' : r.shiftType === 'night' ? 'ليلية' : 'يوم كامل',
+        r.systemStage === 'stage1_manual' ? 'المرحلة 1: يدوي' : 'المرحلة 2: سكادا آلي',
+        `"${r.supervisorName}"`,
+        gasVol || 0,
+        gasRev || 0,
+        oilRev,
+        totalRev || 0,
+        r.manualDetails?.cashPaymentEgp || 0,
+        r.manualDetails?.visaCardPaymentEgp || 0,
+        r.manualDetails?.fleetCardPaymentEgp || 0,
+        `"${r.manualDetails?.depositSlipNumber || '-'}"`,
+        r.status === 'audited_by_finance' ? 'معتمد مالياً' : 'قيد المراجعة',
+      ];
+    });
+
+    const csvContent =
+      '\uFEFF' +
+      [headers.join(','), ...rows.map((row) => row.join(','))].join('\r\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `حركة_المبيعات_اليومية_كارجاس_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
   };
 
   // Export Sales Report to CSV/Excel
@@ -522,6 +749,19 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
 
           <button
             type="button"
+            onClick={() => setActiveSubTab('daily_sales_movement')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-black transition flex items-center gap-1.5 ${
+              activeSubTab === 'daily_sales_movement'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-blue-500" />
+            <span>حركة المبيعات اليومية (المرحلة 1: يدوي | المرحلة 2: سكادا) ({dailySalesRecords.length})</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveSubTab('matrix')}
             className={`px-3.5 py-2 rounded-xl text-xs font-black transition flex items-center gap-1.5 ${
               activeSubTab === 'matrix'
@@ -557,6 +797,19 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
           >
             <Clock className="w-3.5 h-3.5 text-amber-500" />
             <span>الرصد المالي لعمليات التموين</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('technician_incentives')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-black transition flex items-center gap-1.5 ${
+              activeSubTab === 'technician_incentives'
+                ? 'bg-emerald-700 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>حوافز ومكافآت الفنيين وتقييمات العملاء 🎖️ ({crewList.length})</span>
           </button>
 
           <button
@@ -736,6 +989,549 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
                         </tr>
                       );
                     })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 3.1 Tab: Daily Sales Movement Registration (تسجيل حركة المبيعات اليومية) */}
+      {/* يدعم النظامين: المرحلة الأولى (النظام اليدوي) والمرحلة الثانية (نظام سكادا) */}
+      {/* ========================================================================= */}
+      {activeSubTab === 'daily_sales_movement' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Executive Daily Sales KPIs */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
+              <span className="text-[11px] text-slate-500 font-bold block">إجمالي الورديات</span>
+              <span className="text-lg font-black text-slate-900 font-mono">{dailySalesRecords.length}</span>
+              <span className="text-[10px] text-slate-400 block">حركة مسجلة</span>
+            </div>
+
+            <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
+              <span className="text-[11px] text-slate-500 font-bold block">إجمالي كميات الغاز</span>
+              <span className="text-lg font-black text-emerald-700 font-mono">
+                {dailySalesRecords.reduce((acc, r) => {
+                  const vol = r.systemStage === 'stage1_manual' ? r.manualDetails?.gasVolumeSoldM3 : r.scadaDetails?.totalFlowAccumulatedM3;
+                  return acc + (vol || 0);
+                }, 0).toLocaleString()}
+              </span>
+              <span className="text-[10px] text-emerald-600 block">متر مكعب m³</span>
+            </div>
+
+            <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
+              <span className="text-[11px] text-slate-500 font-bold block">إجمالي المبيعات</span>
+              <span className="text-lg font-black text-slate-900 font-mono">
+                {dailySalesRecords.reduce((acc, r) => {
+                  const rev = r.systemStage === 'stage1_manual' ? r.manualDetails?.totalSalesEgp : r.scadaDetails?.scadaCalculatedRevenueEgp;
+                  return acc + (rev || 0);
+                }, 0).toLocaleString()}
+              </span>
+              <span className="text-[10px] text-slate-500 block">جنيه مصري</span>
+            </div>
+
+            <div className="bg-blue-50/70 p-3.5 rounded-2xl border border-blue-200 shadow-xs">
+              <span className="text-[11px] text-blue-800 font-bold block">المرحلة 1: النظام اليدوي</span>
+              <span className="text-lg font-black text-blue-900 font-mono">
+                {dailySalesRecords.filter((r) => r.systemStage === 'stage1_manual').length}
+              </span>
+              <span className="text-[10px] text-blue-700 block">وردية مدخلة يدوياً</span>
+            </div>
+
+            <div className="bg-purple-50/70 p-3.5 rounded-2xl border border-purple-200 shadow-xs">
+              <span className="text-[11px] text-purple-800 font-bold block">المرحلة 2: نظام سكادا</span>
+              <span className="text-lg font-black text-purple-900 font-mono">
+                {dailySalesRecords.filter((r) => r.systemStage === 'stage2_scada').length}
+              </span>
+              <span className="text-[10px] text-purple-700 block">ربط حساسات وتدفق رقمي</span>
+            </div>
+
+            <div className="bg-emerald-50/70 p-3.5 rounded-2xl border border-emerald-200 shadow-xs">
+              <span className="text-[11px] text-emerald-800 font-bold block">التوريدات البنكية</span>
+              <span className="text-lg font-black text-emerald-900 font-mono">
+                {dailySalesRecords.filter((r) => r.manualDetails?.cashBankDeposited).length}
+              </span>
+              <span className="text-[10px] text-emerald-700 block">مطابقة بإيصال بنكي ✓</span>
+            </div>
+          </div>
+
+          {/* Registration Form: Stage 1 Manual vs Stage 2 SCADA */}
+          <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-md space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="font-black text-base text-slate-900 flex items-center gap-2">
+                  <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+                  <span>تسجيل حركة المبيعات اليومية لمحطات كارجاس</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  نموذج مالي متكامل يدعم الانتقال المؤسسي بين المرحلة الأولى (النظام اليدوي) والمرحلة الثانية (نظام سكادا الآلي)
+                </p>
+              </div>
+
+              {/* Stage Switcher Buttons */}
+              <div className="bg-slate-100 p-1 rounded-2xl flex items-center gap-1 self-start sm:self-auto border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setFormStage('stage1_manual')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 ${
+                    formStage === 'stage1_manual'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span>📝 المرحلة الأولى: النظام اليدوي</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFormStage('stage2_scada')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 ${
+                    formStage === 'stage2_scada'
+                      ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span>⚡ المرحلة الثانية: نظام سكادا SCADA</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Daily Sales Entry Form */}
+            <form onSubmit={handleSaveDailySales} className="space-y-4">
+              {/* General Station & Shift Info Row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-50/70 p-4 rounded-2xl border border-slate-200/80">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">المحطة المستهدفة:</label>
+                  <select
+                    value={formStationId}
+                    onChange={(e) => setFormStationId(e.target.value)}
+                    className="w-full text-xs font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-emerald-500"
+                  >
+                    {stationList.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.name} ({st.code}) - {st.region || st.city}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">تاريخ المبيعات:</label>
+                  <input
+                    type="date"
+                    value={formSalesDate}
+                    onChange={(e) => setFormSalesDate(e.target.value)}
+                    className="w-full text-xs font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">الوردية:</label>
+                  <select
+                    value={formShiftType}
+                    onChange={(e) => setFormShiftType(e.target.value as any)}
+                    className="w-full text-xs font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-emerald-500"
+                  >
+                    <option value="morning">الوردية الصباحية (07:00 ص - 03:00 م)</option>
+                    <option value="evening">الوردية المسائية (03:00 م - 11:00 م)</option>
+                    <option value="night">الوردية الليلية (11:00 م - 07:00 ص)</option>
+                    <option value="full_day">إجمالي اليوم بالكامل (24 ساعة)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">مشرف المحطة / المسؤول:</label>
+                  <input
+                    type="text"
+                    value={formSupervisorName}
+                    onChange={(e) => setFormSupervisorName(e.target.value)}
+                    placeholder="اسم المشرف أو المسؤول المالي"
+                    className="w-full text-xs font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* ======================================================= */}
+              {/* STAGE 1: MANUAL SYSTEM SPECIFIC FORM FIELDS (النظام اليدوي) */}
+              {/* ======================================================= */}
+              {formStage === 'stage1_manual' && (
+                <div className="space-y-4 animate-in fade-in">
+                  <div className="bg-blue-50/40 p-4 rounded-2xl border border-blue-200/80 space-y-3">
+                    <div className="flex items-center justify-between border-b border-blue-200/50 pb-2">
+                      <span className="text-xs font-black text-blue-900 flex items-center gap-1.5">
+                        <span>📝</span>
+                        <span>بيانات قراءات العدادات ومبيعات الغاز الطبيعي (م³):</span>
+                      </span>
+                      <span className="text-[11px] font-bold text-blue-700">سعر المتر المعتمد: {config.gasPricePerMeter} ج</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">قراءة عداد البدء:</label>
+                        <input
+                          type="number"
+                          value={manualStartMeter}
+                          onChange={(e) => setManualStartMeter(Number(e.target.value))}
+                          className="w-full text-xs font-mono font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">قراءة عداد النهاية:</label>
+                        <input
+                          type="number"
+                          value={manualEndMeter}
+                          onChange={(e) => setManualEndMeter(Number(e.target.value))}
+                          className="w-full text-xs font-mono font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">إجمالي الغاز المباع (م³):</label>
+                        <div className="px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono font-black text-xs text-emerald-800">
+                          {Math.max(0, manualEndMeter - manualStartMeter).toLocaleString()} م³
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">إيراد الغاز المستحق (ج):</label>
+                        <div className="px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono font-black text-xs text-slate-900">
+                          {(Math.max(0, manualEndMeter - manualStartMeter) * (config.gasPricePerMeter || 13)).toLocaleString()} ج
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Lube Oils & Breakdown of Payment Collections */}
+                  <div className="bg-slate-50/70 p-4 rounded-2xl border border-slate-200/80 space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-200/60 pb-2">
+                      <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                        <span>🛢️</span>
+                        <span>مبيعات الزيوت وطرق التحصيل (نقدية + إلكتروني + أسطول):</span>
+                      </span>
+                      <span className="text-[11px] font-mono font-bold text-emerald-700">
+                        إجمالي المبيعات المطلوبة: {(Math.max(0, manualEndMeter - manualStartMeter) * (config.gasPricePerMeter || 13) + Number(manualOilRevenue)).toLocaleString()} ج
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">عبوات زيوت مباعة:</label>
+                        <input
+                          type="number"
+                          value={manualOilBottles}
+                          onChange={(e) => setManualOilBottles(Number(e.target.value))}
+                          className="w-full text-xs font-mono font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">إيراد الزيوت (ج):</label>
+                        <input
+                          type="number"
+                          value={manualOilRevenue}
+                          onChange={(e) => setManualOilRevenue(Number(e.target.value))}
+                          className="w-full text-xs font-mono font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">تحصيل نقدية كاش (ج):</label>
+                        <input
+                          type="number"
+                          value={manualCashEgp}
+                          onChange={(e) => setManualCashEgp(Number(e.target.value))}
+                          className="w-full text-xs font-mono font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">تحصيل بطاقات فيزا (ج):</label>
+                        <input
+                          type="number"
+                          value={manualVisaEgp}
+                          onChange={(e) => setManualVisaEgp(Number(e.target.value))}
+                          className="w-full text-xs font-mono font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">بطاقات أسطول حكومي (ج):</label>
+                        <input
+                          type="number"
+                          value={manualFleetEgp}
+                          onChange={(e) => setManualFleetEgp(Number(e.target.value))}
+                          className="w-full text-xs font-mono font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">رقم إيصال الإيداع البنكي (قسيمة التوريد):</label>
+                        <input
+                          type="text"
+                          value={manualDepositSlip}
+                          onChange={(e) => setManualDepositSlip(e.target.value)}
+                          placeholder="مثال: DEP-99382-NBE"
+                          className="w-full text-xs font-mono font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">ملاحظات تسليم الوردية:</label>
+                        <input
+                          type="text"
+                          value={manualNotes}
+                          onChange={(e) => setManualNotes(e.target.value)}
+                          placeholder="أي ملاحظات حول الصيانة أو الفحص أو حركة الطلمبات"
+                          className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ======================================================= */}
+              {/* STAGE 2: SCADA SYSTEM SMART TELEMETRY (نظام سكادا الآلي) */}
+              {/* ======================================================= */}
+              {formStage === 'stage2_scada' && (
+                <div className="space-y-4 animate-in fade-in">
+                  <div className="bg-gradient-to-r from-purple-950 via-slate-900 to-indigo-950 text-white p-5 rounded-2xl border border-purple-500/40 space-y-4">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span className="text-xs font-black text-purple-200">
+                          نظام سكادا المركزي لكارجاس — الربط الآلي لحساسات التدفق والضغوط (IoT Telemetry)
+                        </span>
+                      </div>
+                      <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                        بوابة السكادا متصلة Online ⚡
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                      <div>
+                        <label className="text-[10.5px] text-purple-200 font-bold block mb-1">كود الطلمبة / الموزع:</label>
+                        <input
+                          type="text"
+                          value={scadaDispenserId}
+                          onChange={(e) => setScadaDispenserId(e.target.value)}
+                          className="w-full text-xs font-mono font-bold px-3 py-2 bg-white/10 border border-white/20 rounded-xl text-white outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10.5px] text-purple-200 font-bold block mb-1">التدفق التراكمي (م³):</label>
+                        <input
+                          type="number"
+                          value={scadaFlowM3}
+                          onChange={(e) => setScadaFlowM3(Number(e.target.value))}
+                          className="w-full text-xs font-mono font-bold px-3 py-2 bg-white/10 border border-white/20 rounded-xl text-white outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10.5px] text-purple-200 font-bold block mb-1">ضغط الدخول (Bar):</label>
+                        <input
+                          type="number"
+                          value={scadaInletBar}
+                          onChange={(e) => setScadaInletBar(Number(e.target.value))}
+                          className="w-full text-xs font-mono font-bold px-3 py-2 bg-white/10 border border-white/20 rounded-xl text-white outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10.5px] text-purple-200 font-bold block mb-1">ساعات تشغيل الكومبريسور:</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={scadaCompressorHours}
+                          onChange={(e) => setScadaCompressorHours(Number(e.target.value))}
+                          className="w-full text-xs font-mono font-bold px-3 py-2 bg-white/10 border border-white/20 rounded-xl text-white outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10.5px] text-purple-200 font-bold block mb-1">ضغط بنك الخزانات (Bar):</label>
+                        <input
+                          type="number"
+                          value={scadaTankBar}
+                          onChange={(e) => setScadaTankBar(Number(e.target.value))}
+                          className="w-full text-xs font-mono font-bold px-3 py-2 bg-white/10 border border-white/20 rounded-xl text-white outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10.5px] text-purple-200 font-bold block mb-1">انحراف التسوية (م³):</label>
+                        <input
+                          type="number"
+                          value={scadaVarianceM3}
+                          onChange={(e) => setScadaVarianceM3(Number(e.target.value))}
+                          className="w-full text-xs font-mono font-bold px-3 py-2 bg-white/10 border border-white/20 rounded-xl text-white outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="bg-white/5 p-3 rounded-xl border border-white/10 flex items-center justify-between text-xs">
+                      <span className="text-purple-300">
+                        الإيراد الآلي المحتسب بالسكادا: <span className="font-mono font-black text-white">{(scadaFlowM3 * (config.gasPricePerMeter || 13)).toLocaleString()} ج</span>
+                      </span>
+                      <span className="text-emerald-300 font-bold">
+                        حالة المطابقة: {Number(scadaVarianceM3) === 0 ? 'مطابقة تامة 100% ✓' : 'يوجد انحراف حجمي يحتاج مراجعة ⚠️'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Success Notification Alert */}
+              {isSalesSaveSuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>✅ تم حفظ وتوثيق حركة المبيعات اليومية للمحطة في قاعدة البيانات بنجاح!</span>
+                </div>
+              )}
+
+              {/* Submit Button */}
+              <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <button
+                  type="submit"
+                  className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-xs px-6 py-3 rounded-xl transition shadow-md flex items-center justify-center gap-2 active:scale-95"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>حفظ وتوثيق حركة المبيعات في سجل المالية 💾</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportDailySales}
+                  className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-800 font-black text-xs px-4 py-3 rounded-xl transition flex items-center justify-center gap-2 active:scale-95"
+                >
+                  <Download className="w-4 h-4 text-blue-600" />
+                  <span>تصدير شيت المبيعات اليومية Excel/CSV 📥</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Historical Daily Sales Table */}
+          <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm space-y-3 p-5">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+              <div>
+                <h4 className="font-black text-sm text-slate-900">
+                  سجل حركات المبيعات اليومية المعتمدة للمحطات ({dailySalesRecords.length})
+                </h4>
+                <p className="text-xs text-slate-500">
+                  بيانات الورديات وقراءات العدادات ونظام التحصيل ومطابقة السكادا
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExportDailySales}
+                className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs px-3 py-1.5 rounded-xl border border-emerald-300 transition flex items-center gap-1.5"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                <span>تصدير السجل الكامل ({dailySalesRecords.length})</span>
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-right border-collapse">
+                <thead className="bg-slate-100 text-slate-800 font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="p-3">كود الحركة والتاريخ</th>
+                    <th className="p-3">المحطة</th>
+                    <th className="p-3 text-center">الوردية</th>
+                    <th className="p-3 text-center">المرحلة والنظام</th>
+                    <th className="p-3 text-center">كمية الغاز (م³)</th>
+                    <th className="p-3 text-center">إجمالي المبيعات (ج)</th>
+                    <th className="p-3 text-center">التحصيل (كاش / فيزا / أسطول)</th>
+                    <th className="p-3 text-center">الإيداع البنكي</th>
+                    <th className="p-3 text-center">الحالة</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {dailySalesRecords.map((rec) => {
+                    const isManual = rec.systemStage === 'stage1_manual';
+                    const gasVol = isManual ? rec.manualDetails?.gasVolumeSoldM3 : rec.scadaDetails?.totalFlowAccumulatedM3;
+                    const totalRev = isManual ? rec.manualDetails?.totalSalesEgp : rec.scadaDetails?.scadaCalculatedRevenueEgp;
+
+                    return (
+                      <tr key={rec.id} className="hover:bg-slate-50/70 transition">
+                        <td className="p-3">
+                          <span className="font-mono font-bold text-slate-900 block">{rec.id}</span>
+                          <span className="text-[10px] text-slate-400 font-mono">{rec.salesDate}</span>
+                        </td>
+
+                        <td className="p-3">
+                          <span className="font-black text-slate-900 block">{rec.stationName}</span>
+                          <span className="text-[10px] text-slate-500 font-mono">{rec.stationCode} | {rec.supervisorName}</span>
+                        </td>
+
+                        <td className="p-3 text-center">
+                          <span className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded-full text-[10.5px] font-bold">
+                            {rec.shiftType === 'morning' ? 'صباحية ☀️' : rec.shiftType === 'evening' ? 'مسائية 🌇' : rec.shiftType === 'night' ? 'ليلية 🌙' : 'يوم كامل ⏱️'}
+                          </span>
+                        </td>
+
+                        <td className="p-3 text-center">
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-[10.5px] font-black border ${
+                              isManual
+                                ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                : 'bg-purple-50 text-purple-800 border-purple-200'
+                            }`}
+                          >
+                            {isManual ? 'المرحلة 1: يدوي 📝' : 'المرحلة 2: سكادا ⚡'}
+                          </span>
+                        </td>
+
+                        <td className="p-3 text-center font-mono font-black text-emerald-800">
+                          {gasVol?.toLocaleString()} م³
+                        </td>
+
+                        <td className="p-3 text-center font-mono font-black text-slate-900">
+                          {totalRev?.toLocaleString()} ج
+                        </td>
+
+                        <td className="p-3 text-center font-mono text-[11px] text-slate-600">
+                          {isManual ? (
+                            <div>
+                              <span>كاش: {rec.manualDetails?.cashPaymentEgp?.toLocaleString()} ج</span>
+                              <span className="block text-[10px] text-slate-400">
+                                فيزا: {rec.manualDetails?.visaCardPaymentEgp?.toLocaleString()} ج | أسطول: {rec.manualDetails?.fleetCardPaymentEgp?.toLocaleString()} ج
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-purple-700 font-bold">مطابقة تدفق رقمي للسكادا</span>
+                          )}
+                        </td>
+
+                        <td className="p-3 text-center">
+                          {rec.manualDetails?.depositSlipNumber ? (
+                            <span className="bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200 text-[10px] font-mono font-bold">
+                              {rec.manualDetails.depositSlipNumber} ✓
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-[10px]">
+                              {isManual ? 'قيد التوريد' : 'ربط آلي'}
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="p-3 text-center">
+                          <span className="bg-emerald-100 text-emerald-900 px-2.5 py-0.5 rounded-full text-[10px] font-bold border border-emerald-300">
+                            معتمد مالياً ✓
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1275,6 +2071,342 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* 6. Tab: Technician Incentives & Rating Translation (حوافز الفنيين والترجمة المالية للنقاط وتقييمات العملاء) */}
+      {activeSubTab === 'technician_incentives' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Header Policy Control Card */}
+          <div className="bg-gradient-to-br from-slate-900 via-emerald-950 to-slate-900 text-white rounded-3xl p-6 border border-emerald-800/60 shadow-xl space-y-6">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-emerald-900/60 pb-5">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-400 shadow-inner">
+                  <Sparkles className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xl font-black text-white">
+                      سياسة حوافز الفنيين وترجمة النقاط وتقييمات العملاء المعتمدة 🎖️
+                    </h3>
+                    <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                      إدارة مالية ونظام عام
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    تحكم مشترك للمدير المالي ومدير النظام في قيمة النقطة بالجنيه، مكافآت حسن المعاملة، وبونص التميز الشهري
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSavingIncentives(true);
+                    saveTechnicianIncentiveConfig(incentiveConfig);
+                    const updatedCfg: AppConfig = {
+                      ...config,
+                      technicianIncentiveConfig: incentiveConfig,
+                    };
+                    onUpdateConfig(updatedCfg);
+                    saveAppConfig(updatedCfg);
+                    setTimeout(() => {
+                      setIsSavingIncentives(false);
+                      setIncentiveSaveSuccess(true);
+                      setTimeout(() => setIncentiveSaveSuccess(false), 3500);
+                    }, 400);
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl font-black text-xs flex items-center gap-2 transition shadow-md"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{isSavingIncentives ? 'جاري الحفظ...' : 'حفظ واعتماد سياسة الحوافز 💾'}</span>
+                </button>
+              </div>
+            </div>
+
+            {incentiveSaveSuccess && (
+              <div className="p-3 bg-emerald-900/60 border border-emerald-400 text-emerald-200 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in zoom-in-95">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>تم حفظ وتحديث سياسة الحوافز المالية للفنيين بنجاح وبثها فورياً لكافة المحطات وشاشات الفنيين!</span>
+              </div>
+            )}
+
+            {/* Interactive Policy Inputs Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-slate-800/60 p-4 rounded-2xl border border-emerald-900/40">
+                <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                  قيمة النقطة للفني بالجنيه (EGP / Point):
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    value={incentiveConfig.pointValueEgp}
+                    onChange={(e) =>
+                      setIncentiveConfig({ ...incentiveConfig, pointValueEgp: parseFloat(e.target.value) || 0 })
+                    }
+                    className="w-full bg-slate-900 border border-emerald-700/50 rounded-xl p-2.5 text-sm font-mono font-black text-emerald-400 outline-none"
+                  />
+                  <span className="text-xs font-bold text-slate-400">ج/نقطة</span>
+                </div>
+                <span className="text-[10px] text-slate-400 mt-1 block">مثال: 400 نقطة = 100 جنيه</span>
+              </div>
+
+              <div className="bg-slate-800/60 p-4 rounded-2xl border border-emerald-900/40">
+                <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                  مكافأة تقييم 5 نجوم (معاملة ممتازة):
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={incentiveConfig.rating5StarRewardEgp}
+                    onChange={(e) =>
+                      setIncentiveConfig({ ...incentiveConfig, rating5StarRewardEgp: parseInt(e.target.value) || 0 })
+                    }
+                    className="w-full bg-slate-900 border border-emerald-700/50 rounded-xl p-2.5 text-sm font-mono font-black text-amber-400 outline-none"
+                  />
+                  <span className="text-xs font-bold text-slate-400">جنية</span>
+                </div>
+                <span className="text-[10px] text-slate-400 mt-1 block">مكافأة مباشرة لكل تقييم ممتاز</span>
+              </div>
+
+              <div className="bg-slate-800/60 p-4 rounded-2xl border border-emerald-900/40">
+                <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                  مكافأة تقييم 4 نجوم (معاملة جيدة جداً):
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={incentiveConfig.rating4StarRewardEgp}
+                    onChange={(e) =>
+                      setIncentiveConfig({ ...incentiveConfig, rating4StarRewardEgp: parseInt(e.target.value) || 0 })
+                    }
+                    className="w-full bg-slate-900 border border-emerald-700/50 rounded-xl p-2.5 text-sm font-mono font-black text-amber-300 outline-none"
+                  />
+                  <span className="text-xs font-bold text-slate-400">جنية</span>
+                </div>
+                <span className="text-[10px] text-slate-400 mt-1 block">مكافأة معاملة حسنة</span>
+              </div>
+
+              <div className="bg-slate-800/60 p-4 rounded-2xl border border-emerald-900/40">
+                <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                  بونص التميز (سفير الابتسامة 4.8+):
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={incentiveConfig.highRatingMonthlyBonusEgp}
+                    onChange={(e) =>
+                      setIncentiveConfig({
+                        ...incentiveConfig,
+                        highRatingMonthlyBonusEgp: parseInt(e.target.value) || 0,
+                      })
+                    }
+                    className="w-full bg-slate-900 border border-emerald-700/50 rounded-xl p-2.5 text-sm font-mono font-black text-emerald-300 outline-none"
+                  />
+                  <span className="text-xs font-bold text-slate-400">جنية</span>
+                </div>
+                <span className="text-[10px] text-slate-400 mt-1 block">بونص إضافي لكبار الفنيين</span>
+              </div>
+
+              <div className="bg-slate-800/60 p-4 rounded-2xl border border-emerald-900/40">
+                <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                  الحد الأدنى لتفويلات الوردية:
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={incentiveConfig.minFuelingsShiftQuota}
+                    onChange={(e) =>
+                      setIncentiveConfig({ ...incentiveConfig, minFuelingsShiftQuota: parseInt(e.target.value) || 0 })
+                    }
+                    className="w-full bg-slate-900 border border-emerald-700/50 rounded-xl p-2.5 text-sm font-mono font-black text-slate-200 outline-none"
+                  />
+                  <span className="text-xs font-bold text-slate-400">تفويلة</span>
+                </div>
+                <span className="text-[10px] text-slate-400 mt-1 block">شرط استحقاق الحافز في الوردية</span>
+              </div>
+
+              <div className="bg-slate-800/60 p-4 rounded-2xl border border-emerald-900/40">
+                <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                  حد بونص حجم المبيعات (م³):
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={incentiveConfig.volumeBonusThresholdM3}
+                    onChange={(e) =>
+                      setIncentiveConfig({
+                        ...incentiveConfig,
+                        volumeBonusThresholdM3: parseInt(e.target.value) || 0,
+                      })
+                    }
+                    className="w-full bg-slate-900 border border-emerald-700/50 rounded-xl p-2.5 text-sm font-mono font-black text-slate-200 outline-none"
+                  />
+                  <span className="text-xs font-bold text-slate-400">م³</span>
+                </div>
+                <span className="text-[10px] text-slate-400 mt-1 block">تجاوز هذا الحجم يمنح مكافأة</span>
+              </div>
+
+              <div className="bg-slate-800/60 p-4 rounded-2xl border border-emerald-900/40">
+                <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                  قيمة مكافأة حجم المبيعات:
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={incentiveConfig.volumeBonusRewardEgp}
+                    onChange={(e) =>
+                      setIncentiveConfig({ ...incentiveConfig, volumeBonusRewardEgp: parseInt(e.target.value) || 0 })
+                    }
+                    className="w-full bg-slate-900 border border-emerald-700/50 rounded-xl p-2.5 text-sm font-mono font-black text-emerald-400 outline-none"
+                  />
+                  <span className="text-xs font-bold text-slate-400">جنية</span>
+                </div>
+                <span className="text-[10px] text-slate-400 mt-1 block">تضاف للحافز الإجمالي</span>
+              </div>
+
+              <div className="bg-slate-800/60 p-4 rounded-2xl border border-emerald-900/40 flex flex-col justify-between">
+                <span className="text-[11px] font-bold text-slate-300 block mb-1">حالة تفعيل نظام الحوافز:</span>
+                <label className="flex items-center gap-3 cursor-pointer mt-2">
+                  <input
+                    type="checkbox"
+                    checked={incentiveConfig.isEnabled}
+                    onChange={(e) => setIncentiveConfig({ ...incentiveConfig, isEnabled: e.target.checked })}
+                    className="w-5 h-5 accent-emerald-500 rounded"
+                  />
+                  <span className="text-xs font-black text-emerald-300">
+                    {incentiveConfig.isEnabled ? 'نظام الحوافز مفعل ونشط ✅' : 'نظام الحوافز معطل مؤقتاً ⏸️'}
+                  </span>
+                </label>
+                <span className="text-[10px] text-slate-400 mt-1 block">إيقاف مؤقت أو تفعيل فوري</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Payroll Summary Table & Audit Sheet */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="p-5 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="text-base font-black text-slate-900 flex items-center gap-2">
+                  <span>مسير كشف حوافز ومكافآت الفنيين المالي المعتمد</span>
+                  <span className="text-xs bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full font-bold">
+                    {crewList.length} فني ومشرف
+                  </span>
+                </h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  احتساب دقيق للحوافز المالية بناء على: (النقاط × {incentiveConfig.pointValueEgp} ج) + مكافآت تقييمات العملاء وحسن المعاملة
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="bg-slate-800 hover:bg-slate-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>طباعة الكشف</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-right border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-100/70 border-b border-slate-200 text-[11px] font-black text-slate-600">
+                    <th className="p-3.5">الفني / الوظيفة</th>
+                    <th className="p-3.5">المحطة</th>
+                    <th className="p-3.5 text-center">تموينات الوردية</th>
+                    <th className="p-3.5 text-center">نقاط الفني</th>
+                    <th className="p-3.5 text-center">حافز النقاط (ج)</th>
+                    <th className="p-3.5 text-center">تقييم العملاء ⭐</th>
+                    <th className="p-3.5 text-center">مكافأة التقييم (ج)</th>
+                    <th className="p-3.5 text-center bg-emerald-50 text-emerald-950 font-black">
+                      إجمالي الحافز المستحق (ج)
+                    </th>
+                    <th className="p-3.5 text-center">الاعتماد المالي</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {crewList.map((tech) => {
+                    const calc = calculateTechnicianFinancialIncentive(tech, incentiveConfig);
+                    return (
+                      <tr key={tech.id} className="hover:bg-slate-50 transition">
+                        <td className="p-3.5">
+                          <span className="font-black text-slate-900 block">{tech.name}</span>
+                          <span className="text-[11px] text-slate-500 font-mono">
+                            {tech.role} • {tech.phone}
+                          </span>
+                        </td>
+                        <td className="p-3.5">
+                          <span className="font-bold text-slate-700">{tech.stationName}</span>
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <span className="font-mono font-bold text-slate-900">{tech.totalFuelingsToday || 0} تفويلة</span>
+                          <span className="text-[10px] text-slate-400 block font-mono">
+                            {tech.totalMetersToday || 0} م³
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <span className="font-mono font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                            {tech.technicianPoints || 0} نقطة
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-center font-mono font-black text-slate-800">
+                          {calc.pointIncentiveEgp.toFixed(2)} ج
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <div className="inline-flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 text-amber-900 font-bold font-mono">
+                            <span className="text-amber-500">★</span>
+                            <span>{tech.averageBehaviorRating || tech.averageOverallRating || 4.8}</span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 block mt-0.5">
+                            {tech.totalCustomersServed || tech.totalFuelingsToday || 0} عميل
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-center font-mono font-black text-amber-700">
+                          +{calc.ratingBonusEgp.toFixed(2)} ج
+                        </td>
+                        <td className="p-3.5 text-center bg-emerald-50/60">
+                          <span className="font-mono font-black text-emerald-800 text-sm">
+                            {calc.totalIncentiveEgp.toFixed(2)} ج
+                          </span>
+                          {!calc.isEligible && (
+                            <span className="text-[9px] text-rose-600 block font-bold">لم يستوفِ الكوتا</span>
+                          )}
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updatedCrew = crewList.map((c) =>
+                                c.id === tech.id ? { ...c, incentiveBonusEgp: calc.totalIncentiveEgp } : c
+                              );
+                              setCrewList(updatedCrew);
+                              saveStationCrew(updatedCrew);
+                              alert(`✅ تم اعتماد وصرف الحافز المالي للفني (${tech.name}) بمبلغ (${calc.totalIncentiveEgp} ج) بنجاح!`);
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-xl font-bold text-xs shadow-xs transition"
+                          >
+                            اعتماد وصرف ✅
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

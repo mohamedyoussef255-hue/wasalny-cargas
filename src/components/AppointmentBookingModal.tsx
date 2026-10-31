@@ -108,6 +108,7 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
   // Handlers
   const handleCreateBooking = (e: React.FormEvent) => {
     e.preventDefault();
+    const isCyl = selectedService.includes('فحص واختبار أسطوانة') || selectedService.includes('شهادة المرور');
     const newApp = bookServiceAppointment({
       driverId: driver.id,
       driverName: driver.name,
@@ -119,13 +120,16 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
       appointmentDate: selectedDate,
       timeSlot: selectedSlot,
       notes: driverNotes || 'حجز عبر تطبيق عملاء كارجاس',
+      bookingCategory: isCyl ? 'cylinder_inspection' : 'maintenance_conversion',
+      cylinderTestResult: isCyl ? 'pending' : undefined,
+      customerServiceCallStatus: 'pending_call',
     });
 
     confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } });
-    setSuccessToast(`تم حجز موعدك بنجاح برقم (${newApp.id}) في ${newApp.stationName}`);
+    setSuccessToast(`تم إرسال حجزك بنجاح برقم (${newApp.id}) إلى مركز خدمة عملاء كارجاس 19058 للمراجعة والتأكيد.`);
     refreshAppointments();
     setActiveTab('my_appointments');
-    setTimeout(() => setSuccessToast(null), 5000);
+    setTimeout(() => setSuccessToast(null), 6000);
   };
 
   const handleConfirmAttendance = (appId: string) => {
@@ -349,13 +353,24 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
                           </div>
 
                           <div className="flex items-center gap-2">
+                            {app.confirmedByCustomerService ? (
+                              <span className="bg-emerald-100 text-emerald-900 font-black text-[11px] px-3 py-1 rounded-full border border-emerald-300 flex items-center gap-1">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                                <span>مؤكد من خدمة العملاء 💬</span>
+                              </span>
+                            ) : (
+                              <span className="bg-blue-50 text-blue-800 font-bold text-[11px] px-2.5 py-1 rounded-full border border-blue-200 flex items-center gap-1">
+                                <Clock className="w-3 h-3 text-blue-600" />
+                                <span>قيد مراجعة خدمة العملاء ⏳</span>
+                              </span>
+                            )}
                             {isAwaitingConfirmation && (
                               <span className="bg-amber-500 text-slate-950 font-black text-[11px] px-3 py-1 rounded-full animate-pulse flex items-center gap-1">
                                 <Clock className="w-3.5 h-3.5" />
                                 <span>مطلوب تأكيد الحضور (تنبيه قبل ساعتين ⏰)</span>
                               </span>
                             )}
-                            {isConfirmed && (
+                            {isConfirmed && !app.confirmedByCustomerService && (
                               <span className="bg-emerald-100 text-emerald-800 font-black text-[11px] px-3 py-1 rounded-full border border-emerald-300 flex items-center gap-1">
                                 <CheckCircle2 className="w-3.5 h-3.5" />
                                 <span>تم تأكيد حضورك بنجاح ✓</span>
@@ -365,11 +380,6 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
                               <span className="bg-teal-100 text-teal-900 font-black text-[11px] px-3 py-1 rounded-full border border-teal-300 flex items-center gap-1">
                                 <Sparkles className="w-3.5 h-3.5 text-teal-700" />
                                 <span>موعد مقدم (شغل مكان شاغر ⚡)</span>
-                              </span>
-                            )}
-                            {app.status === 'scheduled' && (
-                              <span className="bg-blue-100 text-blue-800 font-black text-[11px] px-3 py-1 rounded-full border border-blue-200">
-                                مجدول ومؤكد مبدئياً 📅
                               </span>
                             )}
                             {isCancelled && (
@@ -429,9 +439,22 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
 
                         {/* Actions & Simulation Bar */}
                         <div className="pt-2 border-t border-slate-200/60 flex flex-wrap items-center justify-between gap-2 text-xs">
-                          <span className="text-[11px] text-slate-400">
-                            رقم هاتف المتابعة: <span className="font-mono font-bold text-slate-600">{app.phone}</span>
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-slate-400">
+                              رقم المتابعة: <span className="font-mono font-bold text-slate-600">{app.phone}</span>
+                            </span>
+                            <a
+                              href={`https://wa.me/201012345678?text=${encodeURIComponent(
+                                `مرحباً خدمة عملاء كارجاس 19058، أود الاستفسار وتأكيد حجز موعدي برقم #${app.id} (${app.serviceType}) بمحطة (${app.stationName}) يوم ${app.appointmentDate} الساعة ${app.timeSlot} لسيارتي (${app.carPlate}).`
+                              )}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] px-2.5 py-1 rounded-lg transition shadow-2xs flex items-center gap-1"
+                              title="تواصل مباشرة مع خدمة العملاء عبر الواتساب لتأكيد الحجز فوراً"
+                            >
+                              <span>تواصل مع خدمة العملاء للتأكيد 💬</span>
+                            </a>
+                          </div>
 
                           <div className="flex items-center gap-2">
                             {/* Simulator Buttons for easy testing of 2-hour & 1-hour expiration flows */}

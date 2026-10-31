@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Fuel, Moon, Sun, Lock, ShieldCheck, UserCheck, Wrench, Sparkles, CheckCircle2, DollarSign } from 'lucide-react';
+import { Fuel, Moon, Sun, Lock, ShieldCheck, UserCheck, Wrench, Sparkles, CheckCircle2, DollarSign, Headphones } from 'lucide-react';
 import { AppConfig, UserRole } from '../types';
 
 interface HeaderProps {
@@ -73,48 +73,55 @@ export const Header: React.FC<HeaderProps> = ({
 
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 className="font-extrabold text-base sm:text-lg text-slate-900 tracking-tight">
-                    {config.appName}
-                  </h1>
+                  {config.showAppName !== false && (
+                    <h1 className="font-extrabold text-base sm:text-lg text-slate-900 tracking-tight">
+                      {config.appName}
+                    </h1>
+                  )}
                   <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full border border-emerald-200">
                     كارجاس CNG
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-500 font-medium">
-                  {config.appSubtitle}
-                </p>
+                {(config.showCompanyName !== false || config.showDeveloperName !== false) && (
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    {config.showCompanyName !== false ? config.companyName : ''}
+                    {config.showCompanyName !== false && config.showDeveloperName !== false ? ' • ' : ''}
+                    {config.showDeveloperName !== false ? `م. ${config.developerName}` : ''}
+                  </p>
+                )}
               </div>
             </div>
 
             {/* Mobile Admin Trigger: Hidden from regular users, secret 5-clicks on logo is the entrance */}
           </div>
 
-          {/* Right Action Bar: Theme Toggle, and Admin Role Controls ONLY if Admin Unlocked */}
+          {/* Right Action Bar: Theme Toggle, and Role Controls */}
           <div className="flex items-center gap-2">
             {/* Admin Controls Toolbar (VISIBLE ONLY WHEN ADMIN IS UNLOCKED) */}
             {isAdminUnlocked ? (
-              <div className="bg-slate-900 text-white p-1 rounded-2xl flex items-center gap-1 border border-slate-700 shadow-md">
-                <span className="text-[10px] text-emerald-400 font-bold px-2 hidden sm:inline">
+              <div className="bg-slate-900 text-white p-1 rounded-2xl flex items-center gap-1 border border-slate-700 shadow-md overflow-x-auto no-scrollbar max-w-[85vw] sm:max-w-none">
+                <span className="text-[10px] text-emerald-400 font-bold px-2 hidden lg:inline">
                   👑 وضع المدير:
                 </span>
                 
                 {/* Admin Portal Tab */}
                 <button
                   onClick={() => onRoleChange('admin')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-black transition-all ${
                     currentRole === 'admin'
                       ? 'bg-emerald-600 text-white shadow-sm'
                       : 'text-slate-300 hover:text-white hover:bg-slate-800'
                   }`}
+                  title="لوحة تحكم المدير"
                 >
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>لوحة التحكم</span>
+                  <span>الإدارة</span>
                 </button>
 
                 {/* Financial Portal Tab */}
                 <button
                   onClick={() => onRoleChange('finance')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-black transition-all ${
                     currentRole === 'finance'
                       ? 'bg-teal-600 text-white shadow-sm'
                       : 'text-slate-300 hover:text-white hover:bg-slate-800'
@@ -125,10 +132,52 @@ export const Header: React.FC<HeaderProps> = ({
                   <span className="hidden sm:inline">المالية</span>
                 </button>
 
+                {/* Customer Service & Bookings Tab */}
+                <button
+                  onClick={() => onRoleChange('customer_service')}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-black transition-all ${
+                    currentRole === 'customer_service'
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                  }`}
+                  title="صفحة خدمة العملاء ومتابعة الحجوزات"
+                >
+                  <Headphones className="w-3.5 h-3.5 text-amber-300" />
+                  <span className="hidden sm:inline">خدمة العملاء</span>
+                </button>
+
+                {/* Cylinder Inspection Portal Tab */}
+                <button
+                  onClick={() => onRoleChange('cylinder_inspection')}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-black transition-all ${
+                    currentRole === 'cylinder_inspection'
+                      ? 'bg-cyan-600 text-white shadow-sm'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                  }`}
+                  title="بوابة فحص واختبار أسطوانات الغاز"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-cyan-300" />
+                  <span className="hidden sm:inline">فحص الأسطوانات</span>
+                </button>
+
+                {/* Complaints Officer Tab */}
+                <button
+                  onClick={() => onRoleChange('complaints_officer')}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-black transition-all ${
+                    currentRole === 'complaints_officer'
+                      ? 'bg-rose-600 text-white shadow-sm'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                  }`}
+                  title="بوابة مسؤول تلقي الشكاوى والمقترحات"
+                >
+                  <span className="text-xs">📢</span>
+                  <span className="hidden sm:inline">الشكاوى</span>
+                </button>
+
                 {/* Preview Driver View */}
                 <button
                   onClick={() => onRoleChange('driver')}
-                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition-all ${
                     currentRole === 'driver'
                       ? 'bg-emerald-700 text-white shadow-sm'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
@@ -136,13 +185,13 @@ export const Header: React.FC<HeaderProps> = ({
                   title="معاينة صفحة العميل"
                 >
                   <UserCheck className="w-3.5 h-3.5" />
-                  <span className="hidden md:inline">معاينة العميل</span>
+                  <span className="hidden md:inline">العميل</span>
                 </button>
 
                 {/* Preview Technician View */}
                 <button
                   onClick={() => onRoleChange('technician')}
-                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition-all ${
                     currentRole === 'technician'
                       ? 'bg-blue-600 text-white shadow-sm'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
@@ -150,25 +199,12 @@ export const Header: React.FC<HeaderProps> = ({
                   title="معاينة صفحة الفني"
                 >
                   <Wrench className="w-3.5 h-3.5" />
-                  <span className="hidden md:inline">معاينة الفني</span>
+                  <span className="hidden md:inline">الفني</span>
                 </button>
               </div>
             ) : null}
 
-            {/* Quick Financial Management Portal Access Button */}
-            <button
-              onClick={() => onRoleChange('finance')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-bold transition shadow-xs active:scale-95 border ${
-                currentRole === 'finance'
-                  ? 'bg-emerald-700 text-white border-emerald-600 shadow-sm font-black'
-                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
-              }`}
-              title="دخول بوابة الإدارة المالية المعتمدة (برقم سري)"
-            >
-              <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
-              <span className="hidden sm:inline">بوابة المالية 💼</span>
-              <span className="sm:hidden">المالية</span>
-            </button>
+
 
             {/* Dark / Light Toggle */}
             <button

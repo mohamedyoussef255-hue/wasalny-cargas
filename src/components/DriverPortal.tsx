@@ -53,6 +53,7 @@ import {
   MaintenanceItem,
   CargasStationLocation,
   TechnicianCrewMember,
+  CustomerViewMode,
 } from '../types';
 import { generateQrDataUrl, encodeDriverQrData, encodeRewardRedemptionQrData } from '../services/qrService';
 import {
@@ -63,12 +64,17 @@ import {
   calculateDistanceKm,
   DEFAULT_DRIVER_SECTIONS,
   DEFAULT_DRIVER_SECTIONS_ORDER,
+  getCustomerViewMode,
+  saveCustomerViewMode,
+  CUSTOMER_VIEW_MODE_EVENT,
 } from '../services/storageService';
 import { CargasStationsMap } from './CargasStationsMap';
 import { InlineNearestStationMap } from './InlineNearestStationMap';
 import { CargasNavApp } from '../navigation/CargasNavApp';
 import { CustomerFeedbackModal } from './CustomerFeedbackModal';
 import { AppointmentBookingModal } from './AppointmentBookingModal';
+import { CustomerMessagingModal } from './CustomerMessagingModal';
+import { CustomerChatChannel } from '../types';
 
 import {
   DynamicInPageLayoutEditor,
@@ -119,6 +125,8 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
   // Station Navigation Modal State (Wasalny Hero Popup)
   const [isStationNavModalOpen, setIsStationNavModalOpen] = useState(false);
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+  const [isMessagingModalOpen, setIsMessagingModalOpen] = useState(false);
+  const [messagingInitialChannel, setMessagingInitialChannel] = useState<CustomerChatChannel>('customer_service');
 
   // Dynamic In-Page Layout Customization State (5-Clicks Gesture by Admin)
   const [isLayoutEditMode, setIsLayoutEditMode] = useState(false);
@@ -126,31 +134,82 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
   const [clickCount, setClickCount] = useState(0);
   const [lastClickTime, setLastClickTime] = useState(0);
 
+  // User View Mode: 'all_integrated' | 'navigation_only' | 'loyalty_only'
+  // تحكم حصري لمدير النظام: عندما يخفي نظاماً تختفي كافة أيقوناته من صفحة العميل بدون أن يعلم
+  const [customerViewMode, setCustomerViewMode] = useState<CustomerViewMode>(
+    () => config.customerViewMode || getCustomerViewMode()
+  );
+
+  // Sync when config changes
+  useEffect(() => {
+    if (config.customerViewMode) {
+      setCustomerViewMode(config.customerViewMode);
+    }
+  }, [config.customerViewMode]);
+
+  // Listen for admin changes dispatched across windows/tabs
+  useEffect(() => {
+    const handleModeUpdate = (e: any) => {
+      const mode = e?.detail || getCustomerViewMode();
+      setCustomerViewMode(mode);
+    };
+    window.addEventListener(CUSTOMER_VIEW_MODE_EVENT, handleModeUpdate);
+    window.addEventListener('storage', handleModeUpdate);
+    return () => {
+      window.removeEventListener(CUSTOMER_VIEW_MODE_EVENT, handleModeUpdate);
+      window.removeEventListener('storage', handleModeUpdate);
+    };
+  }, []);
+
+  // Auto-redirect if admin hides the currently opened page
+  useEffect(() => {
+    if (customerViewMode === 'navigation_only' && activePage === 'loyalty') {
+      setActivePage('home');
+    }
+    if (customerViewMode === 'loyalty_only' && activePage === 'map') {
+      setActivePage('home');
+    }
+  }, [customerViewMode, activePage]);
+
   // Sections State (التحكم المباشر في ترتيب ومقاسات وإظهار/إخفاء المساحات)
   const [driverSections, setDriverSections] = useState<SectionLayoutItem[]>(() => {
-    return (config.layoutSettings?.driverSections && config.layoutSettings.driverSections.length > 0)
-      ? config.layoutSettings.driverSections
-      : DEFAULT_DRIVER_SECTIONS;
+    const saved = config.layoutSettings?.driverSections;
+    if (saved && saved.length > 0) {
+      const existingIds = new Set(saved.map((s) => s.id));
+      const missing = DEFAULT_DRIVER_SECTIONS.filter((s) => !existingIds.has(s.id));
+      if (missing.length > 0) {
+        return [...saved, ...missing].sort((a, b) => a.order - b.order);
+      }
+      return saved;
+    }
+    return DEFAULT_DRIVER_SECTIONS;
   });
 
   useEffect(() => {
     if (config.layoutSettings?.driverSections && config.layoutSettings.driverSections.length > 0) {
-      setDriverSections(config.layoutSettings.driverSections);
+      const saved = config.layoutSettings.driverSections;
+      const existingIds = new Set(saved.map((s) => s.id));
+      const missing = DEFAULT_DRIVER_SECTIONS.filter((s) => !existingIds.has(s.id));
+      if (missing.length > 0) {
+        setDriverSections([...saved, ...missing].sort((a, b) => a.order - b.order));
+      } else {
+        setDriverSections(saved);
+      }
     }
   }, [config.layoutSettings?.driverSections]);
 
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
 
-  // 5-Clicks Handler on Any Page Space (بالضغط على الصفحة خمس مرات متتالية)
+  // 10-Clicks Handler on Any Page Space (بالنقر داخل الصفحة 10 مرات لتظهر كلمة سر مدير النظام)
   const handlePageTapGesture = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest('button, input, textarea, select, a, [draggable]')) return;
 
     const now = Date.now();
-    if (now - lastClickTime < 2500) {
+    if (now - lastClickTime < 3000) {
       const nextCount = clickCount + 1;
       setClickCount(nextCount);
-      if (nextCount >= 5) {
+      if (nextCount >= 10) {
         setClickCount(0);
         setIsAdminPinModalOpen(true);
       }
@@ -466,7 +525,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
       label: 'أقرب محطة وخريطة كارجاس',
       sub: 'توجيه الملاحة "وصّلني"',
       icon: <MapPin className="w-4 h-4" />,
-      visible: v.showNearestStationMap,
+      visible: customerViewMode !== 'loyalty_only' && v.showNearestStationMap,
       badge: 'مباشر',
     },
     {
@@ -474,7 +533,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
       label: 'كارت الولاء وبنك الهدايا',
       sub: `${driver.points} نقطة متاحة`,
       icon: <CreditCard className="w-4 h-4" />,
-      visible: v.showGoldenCard || v.showRewardsBank,
+      visible: customerViewMode !== 'navigation_only' && (v.showGoldenCard || v.showRewardsBank),
     },
     {
       id: 'maintenance' as DriverPageView,
@@ -519,288 +578,11 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
         onToggleEditMode={(enabled) => setIsLayoutEditMode(enabled)}
       />
 
-      {/* Top Bars: Only shown when NOT in enlarged map view */}
-      {activePage !== 'map' && (
-        <>
-          {/* 1. Station Repeat Fueling Stats Bar - Directly ABOVE Welcome Banner (GPS-driven) */}
-          {v.showFuelingCountStats && (
-            <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-3xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg border border-slate-700/80">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center text-xl shrink-0">
-                  ⛽
-                </div>
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[11px] text-slate-400 block font-medium">
-                      المحطة الأقرب لموقعك (رصد تلقائي عبر GPS 🛰️):
-                    </span>
-                    {gpsDistanceKm !== null && (
-                      <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                        تبعد عنك {gpsDistanceKm} كم
-                      </span>
-                    )}
-                    {activeDetectedStation?.crowdLevel && (
-                      <span className="bg-amber-500/20 text-amber-300 border border-amber-400/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                        حالة الزحام: {activeDetectedStation.crowdLevel} 🟢
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-sm font-black text-slate-100 mt-0.5">
-                    {activeStationName} {activeDetectedStation?.city ? `(${activeDetectedStation.city})` : ''}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-4 text-xs font-bold w-full md:w-auto justify-between md:justify-end pt-2 md:pt-0 border-t md:border-t-0 border-slate-700">
-                <div className="text-right">
-                  <span className="text-[10px] text-emerald-400 block font-normal">مرات تموينك من هذه المحطة:</span>
-                  <span className="text-sm sm:text-base font-black font-mono text-white">
-                    {currentStationCounts.stationCount} مرات تموين
-                  </span>
-                </div>
-
-                <div className="text-right border-r border-slate-700 pr-4">
-                  <span className="text-[10px] text-amber-400 block font-normal">مرات تموينك من نفس الطلمبة:</span>
-                  <span className="text-sm sm:text-base font-black font-mono text-white">
-                    {currentStationCounts.pumpCount} مرات
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* 2. Top Welcome Banner */}
-          <div className="bg-gradient-to-r from-emerald-800 via-teal-800 to-slate-900 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 rounded-full bg-emerald-500/10 blur-2xl pointer-events-none"></div>
-            <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
-              
-              {/* Driver greeting info */}
-              <div className="space-y-2 max-w-md">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="bg-emerald-500/30 text-emerald-300 border border-emerald-400/30 text-xs px-3 py-0.5 rounded-full font-bold">
-                    برنامج ولاء عملاء كارجاس CNG
-                  </span>
-                  <span className="text-xs text-emerald-200">
-                    سعر المتر: {config.gasPricePerMeter} ج
-                  </span>
-                  <span className="bg-white/10 text-white text-xs px-2.5 py-0.5 rounded-full font-mono">
-                    لوحة: {driver.carPlate}
-                  </span>
-                </div>
-
-                <h2 className="text-2xl sm:text-3xl font-black text-white">
-                  أهلاً بك، {driver.name} 🚗
-                </h2>
-                <p className="text-xs sm:text-sm text-emerald-100 font-light leading-relaxed">
-                  {config.customTexts.welcomeDriver}
-                </p>
-              </div>
-
-              {/* أيقونة برنامج وصلني في المساحة بين كلمة أهلاً بك وبين أيقونات تقييم الفني وصندوق الشكاوى */}
-              {v.showNearestStationMap && config.wasalnyConfig?.enabled !== false && (
-                <div
-                  onClick={() => setIsStationNavModalOpen(true)}
-                  className="flex items-center gap-3.5 bg-white/15 hover:bg-white/25 border-2 border-emerald-400/50 backdrop-blur-md px-4 sm:px-5 py-3 rounded-3xl cursor-pointer transition transform hover:scale-[1.03] active:scale-95 group shadow-xl shrink-0"
-                  title="اضغط هنا لتفاصيل أقرب محطة كارجاس وبدء الملاحة"
-                >
-                  <div className="relative w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-400 to-teal-300 text-slate-950 flex items-center justify-center text-2xl shadow-md shrink-0 group-hover:rotate-12 transition">
-                    <span>🚗</span>
-                    <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-400"></span>
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs sm:text-sm font-black text-white">
-                        {config.wasalnyConfig?.buttonLabel || 'وصلني لأقرب محطة'}
-                      </span>
-                      <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-md">
-                        GPS 🛰️
-                      </span>
-                    </div>
-                    <span className="text-[11px] text-emerald-200 block font-medium mt-0.5">
-                      {activeStationName} {gpsDistanceKm !== null ? `(${gpsDistanceKm} كم)` : ''}
-                    </span>
-                    <span className="text-[10px] text-amber-300 font-bold block mt-0.5">
-                      اضغط لتفاصيل المحطة وبدء الملاحة 🗺️
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {/* Action buttons stacked on left: Clean and non-duplicated */}
-              <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 w-full lg:w-auto shrink-0">
-                {/* 1. تقييم الفني والخدمة */}
-                {v.showServiceRating && (
-                  <button
-                    onClick={() => {
-                      setFeedbackInitialTab('rating');
-                      setIsFeedbackModalOpen(true);
-                    }}
-                    className="w-full flex items-center justify-center gap-2 bg-amber-400 hover:bg-amber-500 text-slate-950 text-xs font-black px-4 py-2.5 rounded-2xl transition shadow-md active:scale-95"
-                  >
-                    <Star className="w-4 h-4 fill-slate-950" />
-                    <span>تقييم الفني والخدمة ⭐</span>
-                  </button>
-                )}
-
-                {/* 2. صندوق الشكاوى والمقترحات */}
-                {v.showComplaintsBox && (
-                  <button
-                    onClick={() => {
-                      setFeedbackInitialTab('complaint');
-                      setIsFeedbackModalOpen(true);
-                    }}
-                    className="w-full flex items-center justify-center gap-2 bg-white/15 hover:bg-white/25 text-white text-xs font-bold px-4 py-2.5 rounded-2xl border border-white/20 backdrop-blur-md transition shadow-xs active:scale-95"
-                  >
-                    <MessageSquare className="w-4 h-4 text-rose-300" />
-                    <span>صندوق الشكاوى والمقترحات 📨</span>
-                  </button>
-                )}
-
-                {/* 3. تعديل الملف والسيارة */}
-                {v.showEditProfile && (
-                  <button
-                    onClick={() => {
-                      setEditName(driver.name);
-                      setEditPhone(driver.phone);
-                      setEditPlate(driver.carPlate);
-                      setEditModel(driver.carModel);
-                      setEditOdo(driver.odometerKm);
-                      setEditCapacity(driver.cngCylinderCapacity);
-                      setIsEditProfileOpen(true);
-                    }}
-                    className="w-full flex items-center justify-center gap-2 bg-emerald-700/60 hover:bg-emerald-700 text-emerald-100 text-xs font-bold px-4 py-2 rounded-2xl border border-emerald-500/30 transition shadow-xs active:scale-95"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                    <span>تعديل بيانات السيارة ✏️</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Promotional Banner Carousel (العروض والمسابقات وشرح برنامج الولاء) */}
-      {v.showPromotionalBanner && activeCampaigns.length > 0 && activePage !== 'map' && (
-        <div className="relative overflow-hidden rounded-3xl shadow-xl border border-slate-700/50">
-          {(() => {
-            const camp = activeCampaigns[currentCampaignIndex] || activeCampaigns[0];
-            const handleAction = () => {
-              if (camp.buttonAction === 'navigate_map') {
-                setActivePage('map');
-              } else if (camp.buttonAction === 'view_rewards') {
-                setActivePage('loyalty');
-              } else {
-                setActivePage('home');
-              }
-            };
-
-            return (
-              <div
-                className={`p-6 sm:p-7 text-white bg-gradient-to-r ${camp.bannerGradient || 'from-indigo-950 via-slate-900 to-slate-950'} transition-all duration-500 relative`}
-              >
-                {/* Decorative background glows */}
-                <div className="absolute top-0 right-0 -mr-20 -mt-20 w-72 h-72 rounded-full bg-amber-400/10 blur-3xl pointer-events-none"></div>
-                <div className="absolute bottom-0 left-0 -ml-20 -mb-20 w-72 h-72 rounded-full bg-blue-500/10 blur-3xl pointer-events-none"></div>
-
-                <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
-                  {/* Content Section */}
-                  <div className="space-y-3 max-w-2xl">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="bg-amber-400 text-slate-950 text-xs font-black px-3 py-1 rounded-full shadow-xs">
-                        {camp.badge || 'عرض خاص 🏆'}
-                      </span>
-                      <span className="bg-white/15 backdrop-blur-md text-amber-200 border border-white/10 text-xs px-3 py-1 rounded-full font-bold flex items-center gap-1.5">
-                        <Coins className="w-3.5 h-3.5 text-amber-400" />
-                        <span>مكافأة فورية: +{camp.pointsReward} نقطة ولاء (تعادل {camp.financialEquivalentEgp} ج)</span>
-                      </span>
-                      <span className="text-[11px] text-slate-300 font-mono">
-                        عرض {currentCampaignIndex + 1} من {activeCampaigns.length}
-                      </span>
-                    </div>
-
-                    <h3 className="text-xl sm:text-2xl font-black text-white leading-tight">
-                      {camp.title}
-                    </h3>
-
-                    <p className="text-xs sm:text-sm text-slate-200 font-normal leading-relaxed">
-                      {camp.aiGeneratedCopy || camp.subtitle}
-                    </p>
-
-                    {/* Loyalty Explanation Box */}
-                    {camp.explanationOfLoyalty && (
-                      <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3 border border-white/10 text-xs text-slate-200 flex items-start gap-2.5">
-                        <span className="text-base">💡</span>
-                        <div>
-                          <span className="font-bold text-amber-300 block mb-0.5">
-                            برنامج كارجاس للولاء وتقدير السائقين:
-                          </span>
-                          <p className="text-[11px] text-slate-300 font-light leading-relaxed">
-                            {camp.explanationOfLoyalty}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Call to Action Button & Navigation Controls */}
-                  <div className="flex flex-col sm:flex-row lg:flex-col items-center gap-3 w-full lg:w-auto">
-                    <button
-                      onClick={handleAction}
-                      className="w-full sm:w-auto bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-sm px-6 py-3.5 rounded-2xl shadow-lg transition transform active:scale-95 flex items-center justify-center gap-2 whitespace-nowrap"
-                    >
-                      <span>{camp.buttonText || 'فول واكسب الآن ⛽'}</span>
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-
-                    {/* Carousel navigation controls if more than 1 campaign */}
-                    {activeCampaigns.length > 1 && (
-                      <div className="flex items-center gap-2 pt-1">
-                        <button
-                          onClick={() =>
-                            setCurrentCampaignIndex(
-                              (prev) => (prev - 1 + activeCampaigns.length) % activeCampaigns.length
-                            )
-                          }
-                          className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/25 text-white flex items-center justify-center text-xs transition"
-                          title="العرض السابق"
-                        >
-                          <ChevronRight className="w-4 h-4" />
-                        </button>
-
-                        <div className="flex items-center gap-1.5 px-2">
-                          {activeCampaigns.map((_, idx) => (
-                            <button
-                              key={idx}
-                              onClick={() => setCurrentCampaignIndex(idx)}
-                              className={`h-2 rounded-full transition-all ${
-                                idx === currentCampaignIndex
-                                  ? 'w-6 bg-amber-400'
-                                  : 'w-2 bg-white/30 hover:bg-white/60'
-                              }`}
-                            />
-                          ))}
-                        </div>
-
-                        <button
-                          onClick={() =>
-                            setCurrentCampaignIndex((prev) => (prev + 1) % activeCampaigns.length)
-                          }
-                          className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/25 text-white flex items-center justify-center text-xs transition"
-                          title="العرض التالي"
-                        >
-                          <ChevronLeft className="w-4 h-4" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
+      {/* Floating Click Progress Counter for Admin Tap Gesture (10 نقرات متتالية لفتح كلمة سر مدير النظام) */}
+      {clickCount >= 3 && clickCount < 10 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-amber-300 border-2 border-amber-400 px-5 py-2.5 rounded-full shadow-2xl backdrop-blur-md flex items-center gap-3 animate-bounce text-xs font-black">
+          <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping shrink-0"></span>
+          <span>🔐 نقرات وضع التحرير لمدير النظام: {clickCount} من 10 (اضغط {10 - clickCount} مرات إضافية)</span>
         </div>
       )}
       {/* Standalone Map Page View ("وصّلني") with One-Click Back to Dashboard */}
@@ -842,51 +624,83 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
           {/* Top Customer Navigation Bar with Direct Section Tabs */}
           <div className="bg-white rounded-3xl p-3 sm:p-4 shadow-sm border border-slate-200/90 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
             
-            {/* Direct Horizontal Tabs for Switching Between Pages */}
+            {/* Direct Horizontal Tabs for Switching Between Pages in Normal Clean Colors */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0 scrollbar-none">
               {navMenuItems
                 .filter((item) => item.visible)
                 .map((item) => {
                   const isActive = activePage === item.id;
                   return (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        if (item.id === 'feedback') {
-                          setFeedbackInitialTab('rating');
-                          setIsFeedbackModalOpen(true);
-                        } else if (item.id === 'complaints') {
-                          setFeedbackInitialTab('complaint');
-                          setIsFeedbackModalOpen(true);
-                        } else {
-                          setActivePage(item.id);
-                        }
-                      }}
-                      className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all shrink-0 active:scale-95 ${
-                        isActive
-                          ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md shadow-emerald-600/25 border border-emerald-500'
-                          : 'bg-slate-50 hover:bg-emerald-50/60 text-slate-700 border border-slate-200/90 hover:border-emerald-300'
-                      }`}
-                      title={item.sub}
-                    >
-                      <span>{item.icon}</span>
-                      <span>{item.label}</span>
-                      {item.badge && (
-                        <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-2xs">
-                          {item.badge}
-                        </span>
+                    <React.Fragment key={item.id}>
+                      <button
+                        onClick={() => {
+                          if (item.id === 'feedback') {
+                            setFeedbackInitialTab('rating');
+                            setIsFeedbackModalOpen(true);
+                          } else if (item.id === 'complaints') {
+                            setFeedbackInitialTab('complaint');
+                            setIsFeedbackModalOpen(true);
+                          } else {
+                            setActivePage(item.id);
+                          }
+                        }}
+                        className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all shrink-0 active:scale-95 ${
+                          isActive
+                            ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md shadow-emerald-600/25 border border-emerald-500'
+                            : 'bg-slate-50 hover:bg-emerald-50/60 text-slate-700 border border-slate-200/90 hover:border-emerald-300'
+                        }`}
+                        title={item.sub}
+                      >
+                        <span className="text-sm">{item.icon}</span>
+                        <span>{item.label}</span>
+                        {item.badge && (
+                          <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-2xs">
+                            {item.badge}
+                          </span>
+                        )}
+                      </button>
+
+                      {/* Dedicated Standalone Fueling QR Button in Normal Colors */}
+                      {item.id === 'home' && (
+                        <button
+                          type="button"
+                          onClick={() => setIsQrModalOpen(true)}
+                          className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all shrink-0 active:scale-95 bg-slate-900 hover:bg-slate-800 text-white shadow-sm border border-slate-700"
+                          title="إظهار كود التموين السريع QR في نافذة مستقلة"
+                        >
+                          <QrCode className="w-4 h-4 text-emerald-400" />
+                          <span>كود الـ QR للتموين 📱</span>
+                        </button>
                       )}
-                    </button>
+
+                      {/* Direct 2-Way Messaging Button with Support and Inspection in Normal Colors */}
+                      {item.id === 'home' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMessagingInitialChannel('customer_service');
+                            setIsMessagingModalOpen(true);
+                          }}
+                          className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all shrink-0 active:scale-95 bg-slate-100 hover:bg-slate-200 text-slate-700 shadow-sm border border-slate-300"
+                          title="مراسلة خدمة العملاء ومركز فحص الأسطوانات"
+                        >
+                          <MessageSquare className="w-4 h-4 text-slate-600" />
+                          <span>مراسلة الدعم والفحص 💬</span>
+                        </button>
+                      )}
+                    </React.Fragment>
                   );
                 })}
             </div>
 
             {/* Quick Stats & Profile Edit Button */}
             <div className="flex items-center justify-between lg:justify-end gap-2.5 shrink-0 border-t lg:border-t-0 pt-2 lg:pt-0 border-slate-100">
-              <div className="bg-emerald-50 border border-emerald-200 px-3.5 py-2 rounded-2xl text-xs font-black text-emerald-800 flex items-center gap-1.5">
-                <span className="text-sm">🪙</span>
-                <span>{driver.points} نقطة ولاء</span>
-              </div>
+              {customerViewMode !== 'navigation_only' && (
+                <div className="bg-emerald-50 border border-emerald-200 px-3.5 py-2 rounded-2xl text-xs font-black text-emerald-800 flex items-center gap-1.5">
+                  <span className="text-sm">🪙</span>
+                  <span>{driver.points} نقطة ولاء</span>
+                </div>
+              )}
 
               {v.showEditProfile && (
                 <button
@@ -917,7 +731,18 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-12 gap-6 animate-in fade-in">
                 {[...driverSections]
                   .sort((a, b) => a.order - b.order)
-                  .filter((sec) => sec.visible || isLayoutEditMode)
+                  .filter((sec) => {
+                    if (isLayoutEditMode) return true;
+                    if (!sec.visible) return false;
+                    // الفصل المستقل بتحكم مدير النظام: إخفاء النظام تماماً بدون أن يعلم العميل
+                    if (customerViewMode === 'navigation_only') {
+                      if (sec.id === 'golden_loyalty_card' || sec.id === 'rewards_bank' || sec.id === 'promotional_banner') return false;
+                    }
+                    if (customerViewMode === 'loyalty_only') {
+                      if (sec.id === 'wasalny_hero' || sec.id === 'nearest_station_repeat_bar') return false;
+                    }
+                    return true;
+                  })
                   .map((section) => {
                     const colClass =
                       section.colSpan === 12
@@ -964,6 +789,179 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                           onToggleVisibility={() => handleToggleVisibility(section.id)}
                           onDragStart={() => handleDragStart(section.id)}
                         />
+                        {/* 0. المساحة الخضراء: بانر الترحيب الرئيسي وبيانات السائق (قابلة للنقل والتحجيم والتنسيق) */}
+                        {section.id === 'driver_welcome_banner' && (
+                          <div
+                            className={`bg-gradient-to-r from-emerald-800 via-teal-800 to-slate-900 rounded-3xl text-white shadow-xl relative overflow-hidden h-full flex flex-col justify-between ${
+                              section.heightMode === 'compact'
+                                ? 'p-4 sm:p-5'
+                                : section.heightMode === 'expanded'
+                                ? 'p-8 sm:p-10'
+                                : 'p-6'
+                            }`}
+                          >
+                            <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 rounded-full bg-emerald-500/10 blur-2xl pointer-events-none"></div>
+                            <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 h-full">
+                              {/* Driver greeting info */}
+                              <div className="space-y-2 max-w-md">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="bg-emerald-500/30 text-emerald-300 border border-emerald-400/30 text-xs px-3 py-0.5 rounded-full font-bold">
+                                    برنامج ولاء عملاء كارجاس CNG
+                                  </span>
+                                  <span className="text-xs text-emerald-200">
+                                    سعر المتر: {config.gasPricePerMeter} ج
+                                  </span>
+                                  <span className="bg-white/10 text-white text-xs px-2.5 py-0.5 rounded-full font-mono">
+                                    لوحة: {driver.carPlate}
+                                  </span>
+                                </div>
+
+                                <h2 className="text-2xl sm:text-3xl font-black text-white">
+                                  أهلاً بك، {driver.name} 🚗
+                                </h2>
+                                <p className="text-xs sm:text-sm text-emerald-100 font-light leading-relaxed">
+                                  {config.customTexts.welcomeDriver}
+                                </p>
+                              </div>
+
+                              {/* أيقونة برنامج وصلني */}
+                              {v.showNearestStationMap && config.wasalnyConfig?.enabled !== false && (
+                                <div
+                                  onClick={() => setIsStationNavModalOpen(true)}
+                                  className="flex items-center gap-3.5 bg-white/15 hover:bg-white/25 border-2 border-emerald-400/50 backdrop-blur-md px-4 sm:px-5 py-3 rounded-3xl cursor-pointer transition transform hover:scale-[1.03] active:scale-95 group shadow-xl shrink-0"
+                                  title="اضغط هنا لتفاصيل أقرب محطة كارجاس وبدء الملاحة"
+                                >
+                                  <div className="relative w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-400 to-teal-300 text-slate-950 flex items-center justify-center text-2xl shadow-md shrink-0 group-hover:rotate-12 transition">
+                                    <span>🚗</span>
+                                    <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                      <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-400"></span>
+                                    </span>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs sm:text-sm font-black text-white">
+                                        {config.wasalnyConfig?.buttonLabel || 'وصلني لأقرب محطة'}
+                                      </span>
+                                      <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-md">
+                                        GPS 🛰️
+                                      </span>
+                                    </div>
+                                    <span className="text-[11px] text-emerald-200 block font-medium mt-0.5">
+                                      {activeStationName} {gpsDistanceKm !== null ? `(${gpsDistanceKm} كم)` : ''}
+                                    </span>
+                                    <span className="text-[10px] text-amber-300 font-bold block mt-0.5">
+                                      اضغط لتفاصيل المحطة وبدء الملاحة 🗺️
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Action buttons stacked */}
+                              <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 w-full lg:w-auto shrink-0">
+                                {v.showServiceRating && (
+                                  <button
+                                    onClick={() => {
+                                      setFeedbackInitialTab('rating');
+                                      setIsFeedbackModalOpen(true);
+                                    }}
+                                    className="w-full flex items-center justify-center gap-2 bg-amber-400 hover:bg-amber-500 text-slate-950 text-xs font-black px-4 py-2.5 rounded-2xl transition shadow-md active:scale-95"
+                                  >
+                                    <Star className="w-4 h-4 fill-slate-950" />
+                                    <span>تقييم الفني والخدمة ⭐</span>
+                                  </button>
+                                )}
+
+                                {v.showComplaintsBox && (
+                                  <button
+                                    onClick={() => {
+                                      setFeedbackInitialTab('complaint');
+                                      setIsFeedbackModalOpen(true);
+                                    }}
+                                    className="w-full flex items-center justify-center gap-2 bg-white/15 hover:bg-white/25 text-white text-xs font-bold px-4 py-2.5 rounded-2xl border border-white/20 backdrop-blur-md transition shadow-xs active:scale-95"
+                                  >
+                                    <MessageSquare className="w-4 h-4 text-rose-300" />
+                                    <span>صندوق الشكاوى والمقترحات 📨</span>
+                                  </button>
+                                )}
+
+                                {v.showEditProfile && (
+                                  <button
+                                    onClick={() => {
+                                      setEditName(driver.name);
+                                      setEditPhone(driver.phone);
+                                      setEditPlate(driver.carPlate);
+                                      setEditModel(driver.carModel);
+                                      setEditOdo(driver.odometerKm);
+                                      setEditCapacity(driver.cngCylinderCapacity);
+                                      setIsEditProfileOpen(true);
+                                    }}
+                                    className="w-full flex items-center justify-center gap-2 bg-emerald-700/60 hover:bg-emerald-700 text-emerald-100 text-xs font-bold px-4 py-2 rounded-2xl border border-emerald-500/30 transition shadow-xs active:scale-95"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                    <span>تعديل بيانات السيارة ✏️</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 0.1 المساحة الزرقاء: شريط رصد أقرب محطة وتكرار التموين GPS (قابلة للنقل والتحجيم والتنسيق) */}
+                        {section.id === 'nearest_station_repeat_bar' && v.showFuelingCountStats && (
+                          <div
+                            className={`bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-3xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg border border-slate-700/80 h-full ${
+                              section.heightMode === 'compact'
+                                ? 'p-3.5 sm:p-4'
+                                : section.heightMode === 'expanded'
+                                ? 'p-6 sm:p-7'
+                                : 'p-4 sm:p-5'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-11 h-11 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center text-xl shrink-0">
+                                ⛽
+                              </div>
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-[11px] text-slate-400 block font-medium">
+                                    كارجاس أقرب لك (رصد تلقائي عبر GPS 🛰️):
+                                  </span>
+                                  {gpsDistanceKm !== null && (
+                                    <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                      تبعد عنك {gpsDistanceKm} كم
+                                    </span>
+                                  )}
+                                  {activeDetectedStation?.crowdLevel && (
+                                    <span className="bg-amber-500/20 text-amber-300 border border-amber-400/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                      حالة الزحام: {activeDetectedStation.crowdLevel} 🟢
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-sm font-black text-slate-100 mt-0.5">
+                                  {activeStationName} {activeDetectedStation?.city ? `(${activeDetectedStation.city})` : ''}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-4 text-xs font-bold w-full md:w-auto justify-between md:justify-end pt-2 md:pt-0 border-t md:border-t-0 border-slate-700">
+                              <div className="text-right">
+                                <span className="text-[10px] text-emerald-400 block font-normal">مرات تموينك من هذه المحطة:</span>
+                                <span className="text-sm sm:text-base font-black font-mono text-white">
+                                  {currentStationCounts.stationCount} مرات تموين
+                                </span>
+                              </div>
+
+                              <div className="text-right border-r border-slate-700 pr-4">
+                                <span className="text-[10px] text-amber-400 block font-normal">مرات تموينك من نفس الطلمبة:</span>
+                                <span className="text-sm sm:text-base font-black font-mono text-white">
+                                  {currentStationCounts.pumpCount} مرات
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
                         {/* 1. Wasalny Live Nearest Station Map */}
                         {section.id === 'wasalny_hero' && v.showNearestStationMap && (
                           <InlineNearestStationMap
@@ -972,6 +970,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                             userLocation={driverGpsLocation}
                             distanceKm={gpsDistanceKm}
                             config={config}
+                            carPlate={driver.carPlate}
                             onNavigateToMapPage={() => setActivePage('map')}
                             onPlayVoiceGuidance={handlePlayWadahGuidance}
                             onLocateUser={() => {
@@ -1191,26 +1190,34 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                             </div>
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                              {rewards.slice(0, 3).map((r) => {
-                                const canAfford = driver.points >= r.pointsCost;
-                                return (
-                                  <div key={r.id} className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/50 flex items-center justify-between gap-3">
-                                    <div>
-                                      <h4 className="font-black text-xs text-slate-900">{r.title}</h4>
-                                      <span className="text-[10px] text-amber-700 font-bold">{r.pointsCost} نقطة</span>
+                              {rewards
+                                .filter((r) => r.isActive !== false)
+                                .slice(0, 3)
+                                .map((r) => {
+                                  const canAfford = driver.points >= r.pointsCost;
+                                  const costPerPoint = config.loyaltyCostModel?.officialCostPerPoint ?? 0.35;
+                                  const finEgp = (r.pointsCost * costPerPoint).toFixed(0);
+                                  return (
+                                    <div key={r.id} className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/50 flex items-center justify-between gap-3">
+                                      <div>
+                                        <h4 className="font-black text-xs text-slate-900">{r.title}</h4>
+                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                          <span className="text-[10px] text-amber-700 font-bold">{r.pointsCost} نقطة</span>
+                                          <span className="text-[9.5px] text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded font-bold">~{finEgp} ج</span>
+                                        </div>
+                                      </div>
+                                      <button
+                                        onClick={() => handleRedeemReward(r)}
+                                        disabled={!canAfford}
+                                        className={`text-[11px] font-bold px-3 py-1.5 rounded-xl transition ${
+                                          canAfford ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                                        }`}
+                                      >
+                                        {canAfford ? 'استبدال' : 'غير كافٍ'}
+                                      </button>
                                     </div>
-                                    <button
-                                      onClick={() => handleRedeemReward(r)}
-                                      disabled={!canAfford}
-                                      className={`text-[11px] font-bold px-3 py-1.5 rounded-xl transition ${
-                                        canAfford ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                                      }`}
-                                    >
-                                      {canAfford ? 'استبدال' : 'نقاط غير كافية'}
-                                    </button>
-                                  </div>
-                                );
-                              })}
+                                  );
+                                })}
                             </div>
                           </div>
                         )}
@@ -1313,30 +1320,126 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                           </div>
                         )}
 
-                        {/* 8. Promotional Banner */}
+                        {/* 8. Promotional Banner (بانر العروض الترويجية والمسابقات - قابل للتحريك وإعادة الترتيب) */}
                         {section.id === 'promotional_banner' && v.showPromotionalBanner && activeCampaigns.length > 0 && (
-                          <div className="relative overflow-hidden rounded-3xl shadow-lg border border-slate-700/50">
+                          <div className="relative overflow-hidden rounded-3xl shadow-xl border border-slate-700/50 h-full">
                             {(() => {
                               const camp = activeCampaigns[currentCampaignIndex] || activeCampaigns[0];
+                              const handleAction = () => {
+                                if (camp.buttonAction === 'navigate_map') {
+                                  setActivePage('map');
+                                } else if (camp.buttonAction === 'view_rewards') {
+                                  setActivePage('loyalty');
+                                } else {
+                                  setActivePage('home');
+                                }
+                              };
+
                               return (
-                                <div className={`p-5 text-white bg-gradient-to-r ${camp.bannerGradient || 'from-indigo-950 via-slate-900 to-slate-950'}`}>
-                                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                                    <div>
-                                      <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded-full">
-                                        {camp.badge || 'عرض حصري'}
-                                      </span>
-                                      <h4 className="text-base font-black mt-1">{camp.title}</h4>
-                                      <p className="text-xs text-slate-200 mt-0.5 max-w-xl">{camp.subtitle}</p>
+                                <div
+                                  className={`text-white bg-gradient-to-r ${camp.bannerGradient || 'from-indigo-950 via-slate-900 to-slate-950'} transition-all duration-500 relative h-full flex flex-col justify-between ${
+                                    section.heightMode === 'compact'
+                                      ? 'p-4 sm:p-5'
+                                      : section.heightMode === 'expanded'
+                                      ? 'p-8 sm:p-9'
+                                      : 'p-6 sm:p-7'
+                                  }`}
+                                >
+                                  {/* Decorative background glows */}
+                                  <div className="absolute top-0 right-0 -mr-20 -mt-20 w-72 h-72 rounded-full bg-amber-400/10 blur-3xl pointer-events-none"></div>
+                                  <div className="absolute bottom-0 left-0 -ml-20 -mb-20 w-72 h-72 rounded-full bg-blue-500/10 blur-3xl pointer-events-none"></div>
+
+                                  <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+                                    {/* Content Section */}
+                                    <div className="space-y-3 max-w-2xl">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="bg-amber-400 text-slate-950 text-xs font-black px-3 py-1 rounded-full shadow-xs">
+                                          {camp.badge || 'عرض خاص 🏆'}
+                                        </span>
+                                        <span className="bg-white/15 backdrop-blur-md text-amber-200 border border-white/10 text-xs px-3 py-1 rounded-full font-bold flex items-center gap-1.5">
+                                          <Coins className="w-3.5 h-3.5 text-amber-400" />
+                                          <span>مكافأة فورية: +{camp.pointsReward} نقطة ولاء (تعادل {camp.financialEquivalentEgp} ج)</span>
+                                        </span>
+                                        <span className="text-[11px] text-slate-300 font-mono">
+                                          عرض {currentCampaignIndex + 1} من {activeCampaigns.length}
+                                        </span>
+                                      </div>
+
+                                      <h3 className="text-xl sm:text-2xl font-black text-white leading-tight">
+                                        {camp.title}
+                                      </h3>
+
+                                      <p className="text-xs sm:text-sm text-slate-200 font-normal leading-relaxed">
+                                        {camp.aiGeneratedCopy || camp.subtitle}
+                                      </p>
+
+                                      {/* Loyalty Explanation Box */}
+                                      {camp.explanationOfLoyalty && (
+                                        <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3 border border-white/10 text-xs text-slate-200 flex items-start gap-2.5">
+                                          <span className="text-base">💡</span>
+                                          <div>
+                                            <span className="font-bold text-amber-300 block mb-0.5">
+                                              برنامج كارجاس للولاء وتقدير السائقين:
+                                            </span>
+                                            <p className="text-[11px] text-slate-300 font-light leading-relaxed">
+                                              {camp.explanationOfLoyalty}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      )}
                                     </div>
-                                    <button
-                                      onClick={() => {
-                                        if (camp.buttonAction === 'navigate_map') setActivePage('map');
-                                        else if (camp.buttonAction === 'view_rewards') setActivePage('loyalty');
-                                      }}
-                                      className="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs px-4 py-2 rounded-xl transition shadow-sm shrink-0"
-                                    >
-                                      {camp.buttonText || 'استكشف الآن'}
-                                    </button>
+
+                                    {/* Call to Action Button & Navigation Controls */}
+                                    <div className="flex flex-col sm:flex-row lg:flex-col items-center gap-3 w-full lg:w-auto shrink-0">
+                                      <button
+                                        onClick={handleAction}
+                                        className="w-full sm:w-auto bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-sm px-6 py-3.5 rounded-2xl shadow-lg transition transform active:scale-95 flex items-center justify-center gap-2 whitespace-nowrap"
+                                      >
+                                        <span>{camp.buttonText || 'فول واكسب الآن ⛽'}</span>
+                                        <ChevronLeft className="w-4 h-4" />
+                                      </button>
+
+                                      {/* Carousel navigation controls if more than 1 campaign */}
+                                      {activeCampaigns.length > 1 && (
+                                        <div className="flex items-center gap-2 pt-1">
+                                          <button
+                                            onClick={() =>
+                                              setCurrentCampaignIndex(
+                                                (prev) => (prev - 1 + activeCampaigns.length) % activeCampaigns.length
+                                              )
+                                            }
+                                            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/25 text-white flex items-center justify-center text-xs transition"
+                                            title="العرض السابق"
+                                          >
+                                            <ChevronRight className="w-4 h-4" />
+                                          </button>
+
+                                          <div className="flex items-center gap-1.5 px-2">
+                                            {activeCampaigns.map((_, idx) => (
+                                              <button
+                                                key={idx}
+                                                onClick={() => setCurrentCampaignIndex(idx)}
+                                                className={`h-2 rounded-full transition-all ${
+                                                  idx === currentCampaignIndex
+                                                    ? 'w-6 bg-amber-400'
+                                                    : 'w-2 bg-white/30 hover:bg-white/60'
+                                                }`}
+                                              />
+                                            ))}
+                                          </div>
+
+                                          <button
+                                            onClick={() =>
+                                              setCurrentCampaignIndex((prev) => (prev + 1) % activeCampaigns.length)
+                                            }
+                                            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/25 text-white flex items-center justify-center text-xs transition"
+                                            title="العرض التالي"
+                                          >
+                                            <ChevronLeft className="w-4 h-4" />
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                               );
@@ -1438,46 +1541,73 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {rewards.map((reward) => {
-                    const canAfford = driver.points >= reward.pointsCost;
-                    return (
-                      <div
-                        key={reward.id}
-                        className={`rounded-2xl p-5 border transition-all duration-200 flex flex-col justify-between space-y-4 ${
-                          canAfford
-                            ? 'bg-white border-slate-200 hover:border-emerald-400 hover:shadow-md'
-                            : 'bg-slate-50/60 border-slate-200/60 opacity-80'
-                        }`}
-                      >
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-2xl">🎁</span>
-                            <span className="text-xs font-black bg-amber-100 text-amber-900 px-2.5 py-1 rounded-full border border-amber-200">
-                              {reward.pointsCost} نقطة
-                            </span>
-                          </div>
-                          <h4 className="font-black text-sm text-slate-900">{reward.title}</h4>
-                          <p className="text-xs text-slate-500 leading-relaxed">{reward.description}</p>
-                        </div>
+                {/* Financial Administration Approval Header */}
+                <div className="bg-emerald-50/80 border border-emerald-300/80 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">⚖️</span>
+                    <div>
+                      <span className="font-black text-emerald-900 block">
+                        حسابات الإدارة المالية المعتمدة لنقاط الولاء وبنك الهدايا
+                      </span>
+                      <span className="text-[11px] text-emerald-700">
+                        تكلفة النقطة المقررة: {(config.loyaltyCostModel?.officialCostPerPoint ?? 0.35)} ج | معدل المنح: {config.pointsPerMeter || 1} نقطة/م³
+                      </span>
+                    </div>
+                  </div>
+                  <span className="bg-white border border-emerald-300 text-emerald-800 font-bold px-3 py-1 rounded-xl shadow-xs">
+                    هدايا معتمدة رسمياً ومحدثة حياً ✓
+                  </span>
+                </div>
 
-                        <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-700">{reward.valueText}</span>
-                          <button
-                            onClick={() => handleRedeemReward(reward)}
-                            disabled={!canAfford}
-                            className={`text-xs font-bold px-4 py-2 rounded-xl transition ${
-                              canAfford
-                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
-                                : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                            }`}
-                          >
-                            {canAfford ? 'استبدال الآن' : `ينقصك ${reward.pointsCost - driver.points} نقطة`}
-                          </button>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {rewards
+                    .filter((r) => r.isActive !== false)
+                    .map((reward) => {
+                      const canAfford = driver.points >= reward.pointsCost;
+                      const costPerPoint = config.loyaltyCostModel?.officialCostPerPoint ?? 0.35;
+                      const finEgp = (reward.estimatedEgpValue || reward.pointsCost * costPerPoint).toFixed(0);
+                      return (
+                        <div
+                          key={reward.id}
+                          className={`rounded-2xl p-5 border transition-all duration-200 flex flex-col justify-between space-y-4 ${
+                            canAfford
+                              ? 'bg-white border-slate-200 hover:border-emerald-400 hover:shadow-md'
+                              : 'bg-slate-50/60 border-slate-200/60 opacity-80'
+                          }`}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-2xl">🎁</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-black bg-amber-100 text-amber-900 px-2.5 py-1 rounded-full border border-amber-200">
+                                  {reward.pointsCost} نقطة
+                                </span>
+                                <span className="text-[10px] font-bold bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full border border-emerald-200">
+                                  ~{finEgp} ج
+                                </span>
+                              </div>
+                            </div>
+                            <h4 className="font-black text-sm text-slate-900">{reward.title}</h4>
+                            <p className="text-xs text-slate-500 leading-relaxed">{reward.description}</p>
+                          </div>
+
+                          <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-700">{reward.valueText || `${finEgp} جنيه`}</span>
+                            <button
+                              onClick={() => handleRedeemReward(reward)}
+                              disabled={!canAfford}
+                              className={`text-xs font-bold px-4 py-2 rounded-xl transition ${
+                                canAfford
+                                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs active:scale-95'
+                                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                              }`}
+                            >
+                              {canAfford ? 'استبدال الآن' : `ينقصك ${reward.pointsCost - driver.points} نقطة`}
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
 
                 {/* Active Vouchers & Coupons List */}
@@ -1580,6 +1710,16 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                       <Calendar className="w-4 h-4" />
                       <span>حجز موعد فحص أسطوانة أو صيانة 📅</span>
                     </button>
+                    <a
+                      href={`https://wa.me/201012345678?text=${encodeURIComponent('مرحباً خدمة عملاء كارجاس 19058، أود الاستفسار وتأكيد مواعيد الصيانة وفحص أسطوانة سيارتي.')}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs px-3 py-2 rounded-xl transition flex items-center gap-1.5"
+                      title="تواصل مباشرة مع خدمة العملاء للتأكيد أو الاستفسار"
+                    >
+                      <Headphones className="w-4 h-4 text-emerald-600" />
+                      <span>خدمة العملاء 19058 🎧</span>
+                    </a>
                     <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl text-xs">
                       <span className="text-slate-500">العداد الحالي:</span>
                       <span className="font-mono font-black text-slate-900">
@@ -1944,12 +2084,14 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                   {driver.carPlate}
                 </span>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-amber-300 font-black">رصيد الولاء:</span>
-                <span className="bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded-md">
-                  {driver.points} نقطة
-                </span>
-              </div>
+              {customerViewMode !== 'navigation_only' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-amber-300 font-black">رصيد الولاء:</span>
+                  <span className="bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded-md">
+                    {driver.points} نقطة
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Grid of All Customer Action Icons */}
@@ -2267,6 +2409,33 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                 </div>
                 <span className="text-[11px] font-mono font-bold text-slate-600">خدمة العملاء 24/7</span>
               </a>
+
+              {/* Option 4: Smart Delivery / Dispatch (Strictly Controlled by System Admin) */}
+              {config.wasalnyConfig?.enableSmartDeliveryForCustomers && (
+                <div className="p-3 bg-gradient-to-r from-teal-50 to-emerald-50 rounded-2xl border border-teal-200 space-y-2 animate-in fade-in">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">🚀</span>
+                      <span className="font-black text-xs text-teal-900">خدمة التوصيل الذكي (مفعلة بإذن مدير النظام)</span>
+                    </div>
+                    <span className="text-[10px] bg-teal-200 text-teal-900 font-bold px-2 py-0.5 rounded-full">
+                      مصرّح رسمياً
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-teal-800 leading-relaxed">
+                    {config.wasalnyConfig.smartDeliveryNoteForCustomers || 'خدمة التوصيل الذكي لنقل أو صيانة الأسطوانات متاحة بتوجيه الإدارة.'}
+                  </p>
+                  <button
+                    onClick={() => {
+                      setIsStationNavModalOpen(false);
+                      setActivePage('map');
+                    }}
+                    className="w-full py-2 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-xl text-xs transition"
+                  >
+                    فتح مسار التوصيل والتحرك للموقع 📍
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Wadah Voice & Dismiss */}
@@ -2314,6 +2483,14 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
         stations={stations}
       />
 
+      {/* 2-Way Direct Customer Messaging Modal */}
+      <CustomerMessagingModal
+        isOpen={isMessagingModalOpen}
+        onClose={() => setIsMessagingModalOpen(false)}
+        driver={driver}
+        initialChannel={messagingInitialChannel}
+      />
+
       {/* 5-Clicks Admin Verification Modal (التحقق الأمني لتفعيل التحرير بالسحب والإفلات) */}
       <AdminPinVerifyModal
         isOpen={isAdminPinModalOpen}
@@ -2324,6 +2501,64 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
           setIsLayoutEditMode(true);
         }}
       />
+
+      {/* Standalone Fueling QR Modal (نافذة مستقلة لإظهار كود الـ QR للتموين وإغلاقها فور الانتهاء) */}
+      {isQrModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200 no-print">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl relative border-2 border-blue-500 animate-in zoom-in-95">
+            <button
+              onClick={() => setIsQrModalOpen(false)}
+              className="absolute top-4 left-4 p-2 text-slate-400 hover:text-slate-700 rounded-full hover:bg-slate-100 transition"
+              title="إغلاق النافذة"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 text-white rounded-2xl mx-auto flex items-center justify-center text-2xl font-black shadow-md">
+              📱
+            </div>
+
+            <div>
+              <span className="bg-blue-50 text-blue-800 border border-blue-200 text-[10px] font-black px-3 py-1 rounded-full">
+                كود التموين السريع المعتمد لكارجاس
+              </span>
+              <h3 className="text-base font-black text-slate-900 mt-2">
+                امسح الكود عبر جهاز فني التموين
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {driver.name} • {driver.carPlate}
+              </p>
+            </div>
+
+            {/* The QR Image */}
+            <div className="p-4 bg-slate-50 rounded-2xl border-2 border-dashed border-blue-300 inline-block shadow-inner">
+              {qrDataUrl ? (
+                <img
+                  src={qrDataUrl}
+                  alt="Customer Fueling QR"
+                  className="w-56 h-56 mx-auto rounded-xl shadow-xs"
+                />
+              ) : (
+                <div className="w-56 h-56 flex items-center justify-center text-xs text-slate-400">
+                  جارٍ توليد الكود...
+                </div>
+              )}
+            </div>
+
+            <div className="bg-emerald-50 text-emerald-900 p-2.5 rounded-xl border border-emerald-200 text-xs font-bold">
+              🪙 رصيدك الحالي: {driver.points} نقطة ولاء
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsQrModalOpen(false)}
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-3 rounded-2xl transition text-xs shadow-md active:scale-95"
+            >
+              إغلاق النافذة بعد الانتهاء من المسح ✕
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

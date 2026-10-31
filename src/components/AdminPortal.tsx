@@ -12,6 +12,7 @@ import {
   Save,
   KeyRound,
   Shield,
+  ShieldCheck,
   Palette,
   Bot,
   Settings,
@@ -77,6 +78,7 @@ import {
   WasalnyConfig,
   FuelingTransaction,
   LoyaltyCostModel,
+  CustomerViewMode,
 } from '../types';
 import { generateQrDataUrl } from '../services/qrService';
 import {
@@ -125,6 +127,18 @@ import {
   aiAuditAndGenerateReward,
   AiAuditRewardResult,
   DEFAULT_WASALNY_CONFIG,
+  getMasterStationMapLogo,
+  setMasterStationMapLogo,
+  MASTER_MAP_LOGO_PRESETS,
+  OFFICIAL_CARGAS_VECTOR_LOGO,
+  getCustomerViewMode,
+  saveCustomerViewMode,
+  getCylinderInspectionPin,
+  saveCylinderInspectionPin,
+  getCustomerServicePin,
+  saveCustomerServicePin,
+  getComplaintsOfficerPin,
+  saveComplaintsOfficerPin,
 } from '../services/storageService';
 import { REWARDS_100_CATALOG } from '../data/rewardsCatalog';
 import { RefuelingAdminDashboard } from './RefuelingAdminDashboard';
@@ -132,6 +146,7 @@ import { PromotionsFormulaManager } from './PromotionsFormulaManager';
 import { PointsCalculator } from './PointsCalculator';
 import { DynamicLayoutManager } from './DynamicLayoutManager';
 import { FinancialManagementPortal } from './FinancialManagementPortal';
+import { WasalnyAdminDashboard } from './WasalnyAdminDashboard';
 
 interface AdminPortalProps {
   config: AppConfig;
@@ -209,15 +224,58 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [editAppName, setEditAppName] = useState(config.appName);
   const [editAppSub, setEditAppSub] = useState(config.appSubtitle);
   const [editAppLogoUrl, setEditAppLogoUrl] = useState(config.appLogoUrl || '');
-  const [editStationLogoUrl, setEditStationLogoUrl] = useState(config.stationLogoUrl || '');
+  const [editStationLogoUrl, setEditStationLogoUrl] = useState(() => getMasterStationMapLogo() || config.stationLogoUrl || '');
   const [editGasPrice, setEditGasPrice] = useState(config.gasPricePerMeter);
   const [editPointsRatio, setEditPointsRatio] = useState(config.pointsPerMeter);
   const [editAdminPin, setEditAdminPin] = useState(config.adminPin);
   const [editFinancePin, setEditFinancePin] = useState(config.financePin || '1234');
+  const [editCylinderPin, setEditCylinderPin] = useState(
+    config.cylinderInspectionPin || getCylinderInspectionPin() || '8899'
+  );
+  const [editCustomerServicePin, setEditCustomerServicePin] = useState(
+    config.customerServicePin || getCustomerServicePin() || '5566'
+  );
+  const [editComplaintsOfficerPin, setEditComplaintsOfficerPin] = useState(
+    config.complaintsOfficerPin || getComplaintsOfficerPin() || '7788'
+  );
+  const [editShowDeveloperName, setEditShowDeveloperName] = useState<boolean>(
+    config.showDeveloperName !== false
+  );
+  const [editShowCompanyName, setEditShowCompanyName] = useState<boolean>(
+    config.showCompanyName !== false
+  );
+  const [editShowAppName, setEditShowAppName] = useState<boolean>(
+    config.showAppName !== false
+  );
+  const [editDeveloperName, setEditDeveloperName] = useState(
+    config.developerName || 'محمد عبد الرحمن يوسف'
+  );
+  const [editCompanyName, setEditCompanyName] = useState(
+    config.companyName || 'شركة عزوتي للبرمجيات وتكنولوجيا المعلومات'
+  );
+  const [editFuelingModeDisplay, setEditFuelingModeDisplay] = useState<'both' | 'manual_only' | 'scada_only'>(
+    config.fuelingModeDisplay || 'both'
+  );
   const [editThemeColor, setEditThemeColor] = useState(config.themeColor);
   const [editWelcomeDriver, setEditWelcomeDriver] = useState(config.customTexts.welcomeDriver);
   const [editWelcomeTech, setEditWelcomeTech] = useState(config.customTexts.welcomeTech);
   const [editNotice, setEditNotice] = useState(config.customTexts.maintenanceNotice);
+
+  // طريقة عرض النظام للعميل ومراحل الإطلاق التشغيلية (تحكم حصري لمدير النظام)
+  const [adminCustomerViewMode, setAdminCustomerViewMode] = useState<CustomerViewMode>(
+    () => config.customerViewMode || getCustomerViewMode()
+  );
+
+  const handleUpdateCustomerViewMode = (mode: CustomerViewMode) => {
+    setAdminCustomerViewMode(mode);
+    saveCustomerViewMode(mode);
+    const updated: AppConfig = {
+      ...config,
+      customerViewMode: mode,
+    };
+    onUpdateConfig(updated);
+    saveAppConfig(updated);
+  };
 
   const compressImageFile = (file: File, maxDim = 160, quality = 0.85): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -273,15 +331,32 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const compressedDataUrl = await compressImageFile(file, 160, 0.85);
+      const compressedDataUrl = await compressImageFile(file, 200, 0.88);
       setEditStationLogoUrl(compressedDataUrl);
+      setMasterStationMapLogo(compressedDataUrl);
+      alert('✅ تم رفع وضغط لوجو المحطات وتثبيته بشكل دائم على كافة خرائط التطبيق بنجاح!');
     } catch {
       const reader = new FileReader();
       reader.onload = (event) => {
-        setEditStationLogoUrl(event.target?.result as string);
+        const res = event.target?.result as string;
+        setEditStationLogoUrl(res);
+        setMasterStationMapLogo(res);
+        alert('✅ تم رفع لوجو المحطات وتثبيته بشكل دائم على كافة خرائط التطبيق بنجاح!');
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleApplyPresetMapLogo = (logoUrl: string) => {
+    setEditStationLogoUrl(logoUrl);
+    setMasterStationMapLogo(logoUrl);
+    alert('✅ تم تطبيق وتثبيت الشعار بنجاح وتعميمه على كافة خرائط التطبيق (صفحة العميل، خريطة كارجاس، تطبيق وصلني)!');
+  };
+
+  const handleResetMapLogoToOfficial = () => {
+    setEditStationLogoUrl(OFFICIAL_CARGAS_VECTOR_LOGO);
+    setMasterStationMapLogo(OFFICIAL_CARGAS_VECTOR_LOGO);
+    alert('🔄 تم استعادة وتثبيت شعار كارجاس الرسمي المعتمد (NGV) على كافة الخرائط بنجاح!');
   };
 
   // Contacts
@@ -311,7 +386,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const handleSaveWasalnySettings = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    const currentWasalny = config.wasalnyConfig || DEFAULT_WASALNY_CONFIG;
     const updatedWasalny: WasalnyConfig = {
+      ...currentWasalny,
       enabled: wasalnyEnabled,
       voiceGuidance: wasalnyVoice,
       autoVoiceOnOpen: wasalnyAutoVoice,
@@ -954,6 +1031,45 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     });
   };
 
+  const [stationActivityFeedback, setStationActivityFeedback] = useState<string | null>(null);
+
+  // تفعيل أو إلغاء أي نشاط للمحطة بنقرة واحدة مباشرة من الجدول وحفظه بشكل دائم
+  const handleQuickToggleStationActivity = (stationId: string, act: StationActivity) => {
+    let targetName = '';
+    let isNowActive = false;
+
+    const updated = stations.map((st) => {
+      if (st.id !== stationId) return st;
+      targetName = st.name;
+      const currentActs = st.activities || ['تموين', 'زيوت'];
+      const exists = currentActs.includes(act);
+      isNowActive = !exists;
+      const newActs = exists ? currentActs.filter((a) => a !== act) : [...currentActs, act];
+
+      const services = [...(st.servicesAvailable || [])];
+      if (isNowActive) {
+        if (act === 'زيوت' && !services.includes('تغيير زيوت معتمدة')) services.push('تغيير زيوت معتمدة');
+        if (act === 'تموين' && !services.includes('تموين غاز طبيعي')) services.push('تموين غاز طبيعي');
+        if (act === 'فحص اسطوانات' && !services.includes('فحص واختبار أسطوانة الغاز وصمام الأمان (شهادة المرور)')) {
+          services.push('فحص واختبار أسطوانة الغاز وصمام الأمان (شهادة المرور)');
+        }
+      }
+
+      return {
+        ...st,
+        activities: newActs,
+        servicesAvailable: services,
+      };
+    });
+
+    onUpdateStations(updated);
+    saveStationLocations(updated);
+
+    const msg = `✅ تم ${isNowActive ? 'إضافة وتفعيل' : 'إلغاء'} نشاط (${act}) لمحطة [${targetName}] وحفظ التغيير دائماً وتحديث الخريطة فوراً!`;
+    setStationActivityFeedback(msg);
+    setTimeout(() => setStationActivityFeedback(null), 4000);
+  };
+
   const toggleStationActivity = (act: StationActivity) => {
     const current = stationForm.activities || [];
     const exists = current.includes(act);
@@ -1220,6 +1336,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       pointsPerMeter: Number(editPointsRatio),
       adminPin: editAdminPin.trim() || '0000',
       financePin: editFinancePin.trim() || '1234',
+      cylinderInspectionPin: editCylinderPin.trim() || '8899',
+      customerServicePin: editCustomerServicePin.trim() || '5566',
+      complaintsOfficerPin: editComplaintsOfficerPin.trim() || '7788',
+      showDeveloperName: editShowDeveloperName,
+      showCompanyName: editShowCompanyName,
+      showAppName: editShowAppName,
+      developerName: editDeveloperName.trim() || 'محمد عبد الرحمن يوسف',
+      companyName: editCompanyName.trim() || 'شركة عزوتي للبرمجيات وتكنولوجيا المعلومات',
       themeColor: editThemeColor,
       stationCode: stationCodeInput,
       googlePlayUrl: playUrlInput,
@@ -1243,11 +1367,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       assistantEnabled: moenEnabled,
       assistantOnlyAdmin: moenOnlyAdmin,
       assistantAllowedTopics: moenAllowedTopics,
+      fuelingModeDisplay: editFuelingModeDisplay,
     };
+
+    saveCylinderInspectionPin(editCylinderPin.trim() || '8899');
+    saveCustomerServicePin(editCustomerServicePin.trim() || '5566');
+    saveComplaintsOfficerPin(editComplaintsOfficerPin.trim() || '7788');
+
+    if (editStationLogoUrl) {
+      setMasterStationMapLogo(editStationLogoUrl);
+    }
 
     onUpdateConfig(updatedConfig);
     saveAppConfig(updatedConfig);
-    alert('تم حفظ وتحديث كافة إعدادات المنظومة ومصفوفة الظهور وتكلفة النقاط بنجاح!');
+    alert('✅ تم حفظ وتحديث كافة إعدادات المنظومة وكلمات السر وإعدادات الخصوصية بنجاح!');
   };
 
   const handlePrintCard = (item: { title: string; qrUrl: string; sub: string }) => {
@@ -1526,61 +1659,169 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </div>
             </div>
 
-            {/* Station Logo Customization Card for Map */}
-            <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-4 w-full sm:w-auto">
-                <div className="w-14 h-14 rounded-2xl bg-white border-2 border-emerald-500 shadow-xs flex items-center justify-center overflow-hidden shrink-0 p-1">
-                  {editStationLogoUrl ? (
-                    <img src={editStationLogoUrl} alt="Station Logo" className="w-full h-full object-contain" />
-                  ) : (
-                    <div className="w-full h-full bg-emerald-600 rounded-xl flex items-center justify-center text-white font-black text-xs">
-                      CARGAS
-                    </div>
-                  )}
-                </div>
+            {/* Station Logo Customization Card for Map - Master Persistent System */}
+            <div className="bg-gradient-to-br from-slate-900 via-slate-850 to-emerald-950 text-white border-2 border-emerald-500/60 rounded-3xl p-5 sm:p-6 shadow-xl space-y-5">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-700/80 pb-4">
                 <div>
-                  <h4 className="font-bold text-sm text-slate-900">شعار محطات كارجاس المعمم على الخريطة</h4>
-                  <p className="text-xs text-slate-600 mt-0.5">
-                    يظهر هذا اللوجو كرمز موحد لكافة دبابيس المحطات في الخريطة، وينبثق منه زر [🚗 وصّلني] لنظام الملاحة.
+                  <div className="flex items-center gap-2">
+                    <span className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-lg border border-emerald-400/30">
+                      🗺️
+                    </span>
+                    <h4 className="font-black text-sm sm:text-base text-white">
+                      التحكم الشامل وتثبيت لوجو المحطات على كافة الخرائط 📍
+                    </h4>
+                    <span className="bg-emerald-500 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full">
+                      تثبيت دائم 🔒
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                    يتم تثبيت هذا الشعار بشكل دائم في قاعدة البيانات وتعميمه فوراً على: 
+                    <b> (1) خريطة أقرب محطة بصفحة العميل </b>، 
+                    <b> (2) خريطة كارجاس الرئيسية </b>، 
+                    <b> (3) تطبيق وصلني الملاحي </b> بدون حاجة لإعادة رفعه أبداً.
                   </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetMapLogoToOfficial}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 text-xs font-bold py-2 px-3 rounded-xl transition flex items-center gap-1.5"
+                    title="استعادة الشعار الرسمي المعتمد لكارجاس NGV"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>اللوجو الرسمي الأصلي 🔄</span>
+                  </button>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                <input
-                  type="file"
-                  id="stationLogoMapInput"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleStationLogoUpload}
-                />
-                <button
-                  type="button"
-                  onClick={() => document.getElementById('stationLogoMapInput')?.click()}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 px-3.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>رفع لوجو للمحطات</span>
-                </button>
-                {editStationLogoUrl && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditStationLogoUrl('');
-                    }}
-                    className="bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 text-xs font-bold py-2 px-3 rounded-xl transition"
-                    title="استعادة الشعار الافتراضي"
-                  >
-                    حذف
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => handleSaveAllSettings()}
-                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold py-2 px-3.5 rounded-xl transition shadow-xs"
-                >
-                  تعميم وحفظ 💾
-                </button>
+              {/* Previews & Upload Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-center">
+                {/* Live Previews of the Logo on Customer Map and Wasalny */}
+                <div className="lg:col-span-5 bg-slate-900/90 rounded-2xl border border-slate-700 p-4 space-y-3">
+                  <span className="text-[11px] font-bold text-emerald-300 block">
+                    👁️ معاينة حية فورية ومطابقة لما يراه العميل على الخريطة:
+                  </span>
+                  
+                  <div className="flex items-center justify-around gap-3 pt-1">
+                    {/* Customer Page Nearest Station Pulsating Badge */}
+                    <div className="flex flex-col items-center gap-1.5 text-center">
+                      <div className="relative w-14 h-14 flex items-center justify-center">
+                        <div className="absolute inset-0 rounded-full bg-emerald-500/30 animate-ping"></div>
+                        <div className="relative w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-800 border-2 border-white shadow-xl flex flex-col items-center justify-center p-1">
+                          <img
+                            src={editStationLogoUrl || OFFICIAL_CARGAS_VECTOR_LOGO}
+                            alt="Preview"
+                            className="w-7 h-7 object-contain"
+                          />
+                          <span className="text-[6.5px] font-black text-amber-300">CARGAS</span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-slate-300 font-bold">المحطة الأقرب للعميل ⚡</span>
+                    </div>
+
+                    {/* Standard Station Marker Pin */}
+                    <div className="flex flex-col items-center gap-1.5 text-center">
+                      <div className="w-10 h-10 rounded-xl bg-white border-2 border-emerald-500 shadow-md flex items-center justify-center p-1 rotate-[-2deg]">
+                        <img
+                          src={editStationLogoUrl || OFFICIAL_CARGAS_VECTOR_LOGO}
+                          alt="Pin Preview"
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+                      <span className="text-[10px] text-slate-300 font-bold">دبابيس باقي المحطات 📍</span>
+                    </div>
+
+                    {/* Small Status Indicator */}
+                    <div className="bg-emerald-950/60 border border-emerald-500/40 rounded-xl p-2.5 text-[11px] space-y-1 text-right">
+                      <div className="text-emerald-300 font-black flex items-center gap-1">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>نشط ومثبت</span>
+                      </div>
+                      <span className="text-slate-400 text-[10px] block">
+                        محفوظ تلقائياً في التخزين الدائم
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Upload & URL Input Area */}
+                <div className="lg:col-span-7 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="file"
+                      id="stationLogoMapMasterInput"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleStationLogoUpload}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => document.getElementById('stationLogoMapMasterInput')?.click()}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black py-2.5 px-4 rounded-xl transition flex items-center gap-2 shadow-md active:scale-95"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>رفع لوجو من جهازك (ضغط وحفظ دائم) 📷</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (editStationLogoUrl) {
+                          setMasterStationMapLogo(editStationLogoUrl);
+                          alert('🔒 تم تثبيت وتعميم اللوجو بنجاح في قاعدة البيانات وعلى كافة الخرائط!');
+                        }
+                      }}
+                      className="bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black py-2.5 px-4 rounded-xl transition flex items-center gap-1.5 shadow-md active:scale-95"
+                    >
+                      <Save className="w-4 h-4" />
+                      <span>تثبيت اللوجو فوراً 💾</span>
+                    </button>
+                  </div>
+
+                  {/* Text URL Input for direct custom link */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="أو الصق رابط صورة الشعار هنا ثم اضغط تثبيت..."
+                      value={editStationLogoUrl}
+                      onChange={(e) => setEditStationLogoUrl(e.target.value)}
+                      className="flex-1 bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 placeholder:text-slate-500 font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Master Presets Quick-Select Carousel */}
+              <div className="space-y-2 pt-2 border-t border-slate-800">
+                <span className="text-xs font-bold text-slate-300 block">
+                  ⚡ شعارات معتمدة جاهزة للاختيار السريع بنقرة واحدة (تُثبت فوراً على كافة الخرائط):
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-xs">
+                  {MASTER_MAP_LOGO_PRESETS.map((preset) => {
+                    const isSelected = editStationLogoUrl === preset.url;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => handleApplyPresetMapLogo(preset.url)}
+                        className={`p-2.5 rounded-2xl border-2 text-right transition flex flex-col justify-between items-center gap-2 ${
+                          isSelected
+                            ? 'bg-emerald-950/80 border-emerald-400 ring-2 ring-emerald-400/30 text-white'
+                            : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700 text-slate-200'
+                        }`}
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-white p-1 flex items-center justify-center overflow-hidden border border-slate-200">
+                          <img src={preset.url} alt={preset.title} className="w-full h-full object-contain" />
+                        </div>
+                        <div className="text-center w-full">
+                          <span className="font-black text-[11px] block leading-tight truncate">{preset.title}</span>
+                          <span className="text-[9px] text-emerald-400 font-mono block mt-0.5">{preset.badgeText}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -1724,13 +1965,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       اضغط لتفعيل أو إلغاء أي نشاط في هذا الفرع؛ يتحدث تلقائياً على الخريطة وفلاتر البحث وبوابات السائقين:
                     </p>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-1">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 pt-1">
                       {[
-                        { id: 'تموين' as StationActivity, label: '⛽ تموين', desc: 'تموين غاز طبيعي CNG' },
-                        { id: 'تحويل' as StationActivity, label: '🔧 تحويل', desc: 'تحويل سيارات للغاز' },
-                        { id: 'صيانة' as StationActivity, label: '⚙️ صيانة', desc: 'صيانة أطقم الحقن والغاز' },
-                        { id: 'زيوت' as StationActivity, label: '🛢️ زيوت', desc: 'معتمدة وأسفل المظلة' },
-                        { id: 'فحص اسطوانات' as StationActivity, label: '🛡️ فحص اسطوانات', desc: 'اختبار واعتماد أسطوانات' },
+                        { id: 'تموين' as StationActivity, label: '⛽ تموين غاز', desc: 'تموين غاز طبيعي CNG' },
+                        { id: 'زيوت' as StationActivity, label: '🛢️ مراكز الزيوت', desc: 'مركز زيوت كارجاس المعتمدة' },
+                        { id: 'زيوت أسفل المظلة' as StationActivity, label: '🪣 زيوت مظلة', desc: 'خدمة زيوت سريعة دون انتظار' },
+                        { id: 'تحويل' as StationActivity, label: '🔧 تحويل سيارات', desc: 'تحويل سيارات للعمل بالغاز' },
+                        { id: 'صيانة' as StationActivity, label: '⚙️ صيانة دورية', desc: 'صيانة أطقم الحقن والمنظم' },
+                        { id: 'فحص اسطوانات' as StationActivity, label: '🛡️ فحص اسطوانات', desc: 'فحص 300 بار وشهادة المرور' },
+                        { id: 'قريباً 2027' as StationActivity, label: '🚀 قريباً 2027', desc: 'محطات التوسع القومي 2027' },
                       ].map((item) => {
                         const isChecked = (stationForm.activities || []).includes(item.id);
                         return (
@@ -1738,22 +1981,22 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             type="button"
                             key={item.id}
                             onClick={() => toggleStationActivity(item.id)}
-                            className={`p-3 rounded-2xl border-2 text-right transition flex flex-col justify-between ${
+                            className={`p-2.5 rounded-2xl border-2 text-right transition flex flex-col justify-between ${
                               isChecked
-                                ? 'bg-white border-emerald-600 shadow-sm text-emerald-950 ring-2 ring-emerald-400/20'
+                                ? 'bg-white border-emerald-600 shadow-sm text-emerald-950 ring-2 ring-emerald-400/20 font-bold'
                                 : 'bg-white/60 border-slate-200 text-slate-500 hover:border-slate-300'
                             }`}
                           >
                             <div className="flex items-center justify-between">
-                              <span className="font-black text-xs">{item.label}</span>
+                              <span className="font-black text-[11px]">{item.label}</span>
                               <input
                                 type="checkbox"
                                 checked={isChecked}
                                 onChange={() => {}}
-                                className="w-4 h-4 rounded text-emerald-600 accent-emerald-600"
+                                className="w-3.5 h-3.5 rounded text-emerald-600 accent-emerald-600 shrink-0"
                               />
                             </div>
-                            <span className="text-[10px] text-slate-500 mt-1 block">{item.desc}</span>
+                            <span className="text-[9.5px] text-slate-500 mt-1 block leading-tight">{item.desc}</span>
                           </button>
                         );
                       })}
@@ -1924,6 +2167,23 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </div>
             )}
 
+            {/* Live Feedback Notification on Activity Toggle */}
+            {stationActivityFeedback && (
+              <div className="bg-emerald-900 text-emerald-100 border-2 border-emerald-400 p-3 rounded-2xl text-xs font-bold flex items-center justify-between shadow-lg animate-in slide-in-from-top duration-200">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <span>{stationActivityFeedback}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setStationActivityFeedback(null)}
+                  className="text-emerald-300 hover:text-white text-xs px-2 py-0.5 rounded-lg border border-emerald-400/40"
+                >
+                  ✕ إغلاق
+                </button>
+              </div>
+            )}
+
             {/* Stations Table */}
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
               <table className="w-full text-xs text-right">
@@ -1931,7 +2191,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   <tr>
                     <th className="p-3">الكود</th>
                     <th className="p-3">اسم المحطة / المركز</th>
-                    <th className="p-3">الأنشطة المعتمدة</th>
+                    <th className="p-3 min-w-[260px]">
+                      <span>الأنشطة المعتمدة</span>
+                      <span className="text-[10px] text-emerald-600 font-normal block">⚡ اضغط لتفعيل/إلغاء النشاط فوراً</span>
+                    </th>
                     <th className="p-3">المحافظة والعنوان</th>
                     <th className="p-3 font-mono">الإحداثيات (X, Y)</th>
                     <th className="p-3 text-center">المبيعات / الترويج</th>
@@ -1948,36 +2211,40 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         <td className="p-3 font-mono font-bold text-slate-700">{st.code}</td>
                         <td className="p-3 font-bold text-slate-900">{st.name}</td>
                         <td className="p-3">
-                          <div className="flex flex-wrap gap-1">
-                            {currentActs.map((act) => {
-                              let badgeColor = 'bg-slate-100 text-slate-800 border-slate-200';
-                              let icon = '⛽';
-                              if (act === 'تموين') {
-                                badgeColor = 'bg-emerald-50 text-emerald-800 border-emerald-200';
-                                icon = '⛽';
-                              } else if (act === 'تحويل') {
-                                badgeColor = 'bg-blue-50 text-blue-800 border-blue-200';
-                                icon = '🔧';
-                              } else if (act === 'صيانة') {
-                                badgeColor = 'bg-indigo-50 text-indigo-800 border-indigo-200';
-                                icon = '⚙️';
-                              } else if (act === 'زيوت') {
-                                badgeColor = 'bg-amber-50 text-amber-800 border-amber-200';
-                                icon = '🛢️';
-                              } else if (act === 'فحص اسطوانات') {
-                                badgeColor = 'bg-rose-50 text-rose-800 border-rose-200';
-                                icon = '🛡️';
-                              }
+                          {/* 1-Click Interactive Activity Badges */}
+                          <div className="flex flex-wrap gap-1 max-w-[280px]">
+                            {[
+                              { act: 'تموين' as StationActivity, icon: '⛽', label: 'تموين', activeClass: 'bg-emerald-600 text-white border-emerald-700 font-black shadow-xs' },
+                              { act: 'زيوت' as StationActivity, icon: '🛢️', label: 'زيوت', activeClass: 'bg-amber-500 text-slate-950 border-amber-600 font-black shadow-xs ring-1 ring-amber-400' },
+                              { act: 'زيوت أسفل المظلة' as StationActivity, icon: '🪣', label: 'مظلة', activeClass: 'bg-cyan-600 text-white border-cyan-700 font-black shadow-xs' },
+                              { act: 'تحويل' as StationActivity, icon: '🔧', label: 'تحويل', activeClass: 'bg-blue-600 text-white border-blue-700 font-black shadow-xs' },
+                              { act: 'صيانة' as StationActivity, icon: '⚙️', label: 'صيانة', activeClass: 'bg-indigo-600 text-white border-indigo-700 font-black shadow-xs' },
+                              { act: 'فحص اسطوانات' as StationActivity, icon: '🛡️', label: 'فحص', activeClass: 'bg-rose-600 text-white border-rose-700 font-black shadow-xs' },
+                              { act: 'قريباً 2027' as StationActivity, icon: '🚀', label: '2027', activeClass: 'bg-purple-600 text-white border-purple-700 font-black shadow-xs' },
+                            ].map((item) => {
+                              const isActive = currentActs.includes(item.act);
                               return (
-                                <span
-                                  key={act}
-                                  className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${badgeColor}`}
+                                <button
+                                  key={item.act}
+                                  type="button"
+                                  onClick={() => handleQuickToggleStationActivity(st.id, item.act)}
+                                  className={`text-[9.5px] px-2 py-0.5 rounded-md border transition-all duration-150 active:scale-95 flex items-center gap-1 cursor-pointer ${
+                                    isActive
+                                      ? item.activeClass
+                                      : 'bg-slate-50 hover:bg-slate-100 text-slate-400 border-dashed border-slate-300 opacity-60 hover:opacity-100'
+                                  }`}
+                                  title={`اضغط لـ ${isActive ? 'إلغاء' : 'تفعيل'} نشاط (${item.act}) فوراً وحفظه بالخريطة`}
                                 >
-                                  {icon} {act}
-                                </span>
+                                  <span>{item.icon}</span>
+                                  <span>{item.label}</span>
+                                  <span>{isActive ? '✓' : '+'}</span>
+                                </button>
                               );
                             })}
                           </div>
+                          <span className="text-[9px] text-slate-400 block mt-1">
+                            {currentActs.length > 0 ? `${currentActs.length} أنشطة مفعلة` : 'لا توجد أنشطة مفعلة'}
+                          </span>
                         </td>
                         <td className="p-3 text-slate-600">{st.city} - {st.address}</td>
                         <td className="p-3 font-mono text-[11px] text-slate-500" dir="ltr">
@@ -2058,432 +2325,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
         )}
 
-        {/* Tab: Wasalny Application Master Control Center (تحكم كامل في تطبيق وصلني) */}
+        {/* Tab: Wasalny Application Master Control Center (تحكم كامل في تطبيق وصلني واللوجو والخدمات والأسطول) */}
         {activeTab === 'wasalny_control' && (
-          <div className="p-6 space-y-6 animate-in fade-in">
-            {/* Header Banner */}
-            <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white rounded-3xl p-6 shadow-xl border border-emerald-700/50 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-3xl shadow-md shrink-0">
-                  🚗
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xl font-black text-white">
-                      لوحة التحكم الشاملة لتطبيق "وصّلني" والملاحة
-                    </h3>
-                    <span className="text-[10px] bg-emerald-500/30 text-emerald-300 font-bold px-2.5 py-0.5 rounded-full border border-emerald-400/40">
-                      تحكم كامل 100%
-                    </span>
-                  </div>
-                  <p className="text-xs text-emerald-200 mt-1">
-                    التحكم في تفعيل وصّلني • اختيار الصوت المرشد (صوت وضاح المصري) • استراتيجية توجيه السائقين للمحطات • الربط مع خرائط جوجل • رادار المسافة
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={handleTestWadahVoice}
-                  className="bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-md active:scale-95"
-                  title="استمع لتجربة صوت وضاح المصري"
-                >
-                  <Volume2 className="w-4 h-4 text-slate-950" />
-                  <span>🔊 تجربة صوت وضاح المصري</span>
-                </button>
-
-                <button
-                  onClick={() => handleSaveWasalnySettings()}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs px-5 py-2.5 rounded-xl transition flex items-center gap-2 shadow-md active:scale-95"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>حفظ إعدادات وصّلني 💾</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Grid of Control Panels */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
-              
-              {/* 1. General Status & Activation */}
-              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">⚙️</span>
-                    <h4 className="font-black text-sm text-slate-900">حالة التفعيل والظهور للعملاء</h4>
-                  </div>
-                  <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${wasalnyEnabled ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                    {wasalnyEnabled ? 'مفعل وشغال' : 'معطل ومخفي'}
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  <label className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-200 cursor-pointer">
-                    <div>
-                      <span className="font-bold text-slate-900 block">تفعيل تطبيق "وصّلني" للعملاء والسائقين</span>
-                      <span className="text-[11px] text-slate-500">إتاحة أيقونة وصّلني والتوجيه الملاحي للمحطات</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={wasalnyEnabled}
-                      onChange={(e) => setWasalnyEnabled(e.target.checked)}
-                      className="w-5 h-5 text-emerald-600 rounded"
-                    />
-                  </label>
-
-                  <div className="space-y-1">
-                    <label className="block font-bold text-slate-700 text-[11px]">
-                      مسمى أيقونة وصّلني في واجهة العميل:
-                    </label>
-                    <input
-                      type="text"
-                      value={wasalnyBtnLabel}
-                      onChange={(e) => setWasalnyBtnLabel(e.target.value)}
-                      placeholder="أقرب محطة كارجاس (وصّلني) 📍"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-900"
-                    />
-                  </div>
-
-                  <label className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-200 cursor-pointer">
-                    <div>
-                      <span className="font-bold text-slate-900 block">إظهار حالة زحام المحطات وكاميرات المراقبة</span>
-                      <span className="text-[11px] text-slate-500">عرض حالة الزحام الخضراء ووقت الانتظار التقديري داخل وصّلني</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={wasalnyShowCrowd}
-                      onChange={(e) => setWasalnyShowCrowd(e.target.checked)}
-                      className="w-5 h-5 text-emerald-600 rounded"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              {/* 2. Voice Guidance Settings */}
-              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">🎙️</span>
-                    <h4 className="font-black text-sm text-slate-900">الصوت المرشد والإرشاد الصوتي</h4>
-                  </div>
-                  <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full">
-                    صوت مصري أصيل
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <label className="block font-bold text-slate-700 text-[11px]">
-                      اختيار نبرة الصوت المرشد في وصّلني:
-                    </label>
-                    <select
-                      value={wasalnyVoice}
-                      onChange={(e) => setWasalnyVoice(e.target.value as any)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-900"
-                    >
-                      <option value="wadah_egyptian">🔊 صوت وضاح المصري الأصيل (ودود وشبابي ومجاني) [موصى به]</option>
-                      <option value="moen_advisor">🎙️ صوت مُعِين الاستشاري الذكي (خبير الأعمال والغاز)</option>
-                      <option value="standard_arabic">📢 لغة عربية فصحى رسمية</option>
-                      <option value="silent">🔇 كتم الصوت (صامت بدون إرشاد صوتي)</option>
-                    </select>
-                  </div>
-
-                  <label className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-200 cursor-pointer">
-                    <div>
-                      <span className="font-bold text-slate-900 block">التشغيل الصوتي التلقائي فور فتح وصّلني</span>
-                      <span className="text-[11px] text-slate-500">تحدث المرشد فوراً لراحة السائق أثناء القيادة دون الحاجة للضغط</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={wasalnyAutoVoice}
-                      onChange={(e) => setWasalnyAutoVoice(e.target.checked)}
-                      className="w-5 h-5 text-emerald-600 rounded"
-                    />
-                  </label>
-
-                  <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200 flex items-center justify-between">
-                    <div className="text-emerald-950">
-                      <span className="font-bold block text-xs">صوت وضاح المصري جاهز ومجاني 100%</span>
-                      <span className="text-[10px] text-emerald-800">يعمل عبر متصفح الهاتف والكمبيوتر فوراً بدون اشتراكات مدفوعة</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleTestWadahVoice}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] px-3 py-1.5 rounded-xl transition shrink-0"
-                    >
-                      تجربة الصوت 🔊
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* 3. Driver Routing Strategy & Priority Station */}
-              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">🎯</span>
-                    <h4 className="font-black text-sm text-slate-900">استراتيجية توجيه السائقين للمحطات</h4>
-                  </div>
-                  <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full">
-                    ذكاء المبيعات
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <label className="block font-bold text-slate-700 text-[11px]">
-                      طريقة تحديد المحطة المستهدفة للسائق:
-                    </label>
-                    <select
-                      value={wasalnyTargetMode}
-                      onChange={(e) => setWasalnyTargetMode(e.target.value as any)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-900"
-                    >
-                      <option value="auto_gps">🛰️ رصد تلقائي لأقرب محطة حقيقية لموقع السائق عبر GPS</option>
-                      <option value="featured_station">⭐ توجيه ترويجي ذكي لمحطة معينة لدعم مبيعاتها وزيادة الإقبال</option>
-                    </select>
-                  </div>
-
-                  {wasalnyTargetMode === 'featured_station' && (
-                    <div className="space-y-1 p-3 bg-amber-50 rounded-2xl border border-amber-200">
-                      <label className="block font-bold text-amber-950 text-[11px]">
-                        اختر المحطة المستهدفة لتوجيه السائقين إليها:
-                      </label>
-                      <select
-                        value={wasalnyFeaturedStationId}
-                        onChange={(e) => setWasalnyFeaturedStationId(e.target.value)}
-                        className="w-full bg-white border border-amber-300 rounded-xl p-2 text-xs font-bold text-slate-900"
-                      >
-                        {stations.map((st) => (
-                          <option key={st.id} value={st.id}>
-                            {st.name} ({st.city}) — مضاعف نقاط {st.promotionalPointsMultiplier || 1}x
-                          </option>
-                        ))}
-                      </select>
-                      <span className="text-[10px] text-amber-800 block mt-1">
-                        سيقوم تطبيق وصّلني بإبراز هذه المحطة كأولوية قصوى ودعوة السائقين لزيارتها!
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="space-y-1">
-                    <label className="block font-bold text-slate-700 text-[11px]">
-                      مسافة رادار تنبيه الوصول للمحطة:
-                    </label>
-                    <select
-                      value={wasalnyAlertDistance}
-                      onChange={(e) => setWasalnyAlertDistance(Number(e.target.value))}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-900 font-mono"
-                    >
-                      <option value={50}>50 متر (دقة محيط المضخة)</option>
-                      <option value={100}>100 متر (مدخل المحطة)</option>
-                      <option value={150}>150 متر (اقتراب قياسي) [افتراضي]</option>
-                      <option value={300}>300 متر (الشارع المؤدي للمحطة)</option>
-                      <option value={500}>500 متر (نطاق نصف كيلو)</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* 4. Navigation & Maps Provider */}
-              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">🗺️</span>
-                    <h4 className="font-black text-sm text-slate-900">مزود الخرائط والملاحة</h4>
-                  </div>
-                  <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded-full">
-                    خرائط جوجل + تفاعلية
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <label className="block font-bold text-slate-700 text-[11px]">
-                      التصرف التلقائي عند الضغط على "وصّلني":
-                    </label>
-                    <select
-                      value={wasalnyProvider}
-                      onChange={(e) => setWasalnyProvider(e.target.value as any)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-900"
-                    >
-                      <option value="google_maps">🚗 فتح نظام الملاحة التفاعلي لخرائط جوجل (Google Maps) فوراً</option>
-                      <option value="in_app">📱 فتح الخريطة التفاعلية المجانية داخل التطبيق</option>
-                      <option value="ask_user">❓ سؤال السائق وتخييره بين الخريطة الداخلية وجوجل مابس</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block font-bold text-slate-700 text-[11px]">
-                      رسالة الترحيب والتوجيه المخصصة التي تظهر للسائق داخل وصّلني:
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={wasalnyWelcomeMsg}
-                      onChange={(e) => setWasalnyWelcomeMsg(e.target.value)}
-                      placeholder="اكتب التوجيهات المخصصة هنا..."
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 leading-relaxed resize-none"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Embedded Station Coordinates & KMZ / KML / Excel Management inside Wasalny */}
-            <div className="bg-white p-6 rounded-3xl border border-emerald-300/80 shadow-md space-y-6">
-              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center text-xl shadow-md">
-                    📍
-                  </div>
-                  <div>
-                    <h4 className="font-black text-base text-slate-900 flex items-center gap-2">
-                      <span>إدارة إحداثيات المحطات ورفع ملفات KMZ / KML والإكسيل</span>
-                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2.5 py-0.5 rounded-full border border-emerald-200">
-                        {stations.length} محطة مسجلة
-                      </span>
-                    </h4>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      ارفع ملف KMZ / KML لمواقع كارجاس أو شيت الإكسيل لتحديث إحداثيات نظام الملاحة والتوجيه وصّلني لحظياً
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="file"
-                    id="wasalnyKmzUploadInput"
-                    accept=".kmz, .kml, .xlsx, .xls"
-                    className="hidden"
-                    onChange={handleStationsFileUpload}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => document.getElementById('wasalnyKmzUploadInput')?.click()}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black py-2.5 px-4 rounded-xl transition flex items-center gap-2 shadow-xs active:scale-95"
-                  >
-                    <Upload className="w-4 h-4" />
-                    <span>رفع ملف KMZ / KML أو إكسيل 🗺️</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={downloadStationsSampleExcel}
-                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-2.5 px-3 rounded-xl transition flex items-center gap-1.5 border border-slate-200"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>نموذج إكسيل</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleOpenAddStation}
-                    className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-black py-2.5 px-4 rounded-xl transition flex items-center gap-1.5 shadow-xs"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>إضافة محطة يدوياً</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Stations Coordinates Table */}
-              <div className="overflow-x-auto rounded-2xl border border-slate-200">
-                <table className="w-full text-xs text-right">
-                  <thead className="bg-slate-50 text-slate-700 font-bold border-b border-slate-200">
-                    <tr>
-                      <th className="p-3">اسم المحطة / المركز</th>
-                      <th className="p-3">المحافظة والعنوان</th>
-                      <th className="p-3 font-mono">خط العرض (Lat)</th>
-                      <th className="p-3 font-mono">خط الطول (Lng)</th>
-                      <th className="p-3 text-center">المنطقة الجغرافية</th>
-                      <th className="p-3 text-center">تكلفة النقطة (ج)</th>
-                      <th className="p-3 text-center">معدل النقاط/م³</th>
-                      <th className="p-3 text-center">برنامج الولاء</th>
-                      <th className="p-3 text-center">الإجراءات</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {stations.map((st) => (
-                      <tr key={st.id} className="hover:bg-slate-50/70 transition">
-                        <td className="p-3 font-bold text-slate-900">
-                          <div className="flex items-center gap-2">
-                            <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs">
-                              ⛽
-                            </span>
-                            <div>
-                              <div>{st.name}</div>
-                              {st.code && <div className="text-[10px] text-slate-400 font-mono">{st.code}</div>}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="p-3 text-slate-600">{st.city} - {st.address}</td>
-                        <td className="p-3 font-mono text-[11px] text-slate-700" dir="ltr">
-                          {st.latitude.toFixed(5)}
-                        </td>
-                        <td className="p-3 font-mono text-[11px] text-slate-700" dir="ltr">
-                          {st.longitude.toFixed(5)}
-                        </td>
-                        <td className="p-3 text-center">
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-800">
-                            {st.region || 'القاهرة الكبرى'}
-                          </span>
-                        </td>
-                        <td className="p-3 text-center font-mono font-black text-amber-700">
-                          {st.costPerPointEgp ?? 0.35} ج
-                        </td>
-                        <td className="p-3 text-center font-mono font-bold text-blue-700">
-                          {st.pointsAwardRatePerMeter ?? 10} ن/م³
-                        </td>
-                        <td className="p-3 text-center">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${st.isLoyaltyProgramActive !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                            {st.isLoyaltyProgramActive !== false ? 'نشط' : 'معطل'}
-                          </span>
-                        </td>
-                        <td className="p-3 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEditStation(st)}
-                              className="text-emerald-700 hover:bg-emerald-50 p-1.5 rounded-lg transition"
-                              title="تعديل بيانات وإحداثيات المحطة"
-                            >
-                              <Edit className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteStation(st.id)}
-                              className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg transition"
-                              title="حذف المحطة"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Bottom Save Action */}
-            <div className="bg-slate-50 border border-slate-200 rounded-3xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">✅</span>
-                <div>
-                  <h5 className="font-black text-slate-900 text-xs">حفظ كافة تعديلات تطبيق وصّلني</h5>
-                  <p className="text-[11px] text-slate-500">يتم تطبيق التعديلات لحظياً على كافة السائقين والصفحات</p>
-                </div>
-              </div>
-
-              <button
-                onClick={() => handleSaveWasalnySettings()}
-                className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black text-xs py-3 px-8 rounded-2xl transition shadow-md active:scale-95 flex items-center justify-center gap-2"
-              >
-                <Save className="w-4 h-4" />
-                <span>حفظ وتعميم إعدادات وصّلني فوراً 💾</span>
-              </button>
-            </div>
+          <div className="p-6">
+            <WasalnyAdminDashboard
+              config={config}
+              stations={stations}
+              onUpdateConfig={onUpdateConfig}
+            />
           </div>
         )}
 
@@ -2498,6 +2347,116 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               <p className="text-xs text-slate-500 mt-0.5">
                 يمكنك إخفاء أو إظهار أي عنصر في صفحات المستخدمين بنقرة زر (مثال: إخفاء أيقونة تعديل بيانات السيارة)
               </p>
+            </div>
+
+            {/* Master Stage Mode Controller (التحكم الحصري لمدير النظام في مراحل إطلاق التطبيق للعملاء) */}
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 rounded-3xl border-2 border-indigo-500/40 shadow-xl space-y-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-indigo-800/50 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-xl shadow-md shrink-0">
+                    🎛️
+                  </div>
+                  <div>
+                    <h4 className="font-black text-sm text-white flex items-center gap-2">
+                      <span>مراحل إطلاق وعرض التطبيق للعملاء (تحكم حصري لمدير النظام)</span>
+                      <span className="text-[10px] bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 px-2 py-0.5 rounded-full">
+                        خفي تماماً عن العميل 🔒
+                      </span>
+                    </h4>
+                    <p className="text-xs text-indigo-200 mt-0.5">
+                      يمكنك كمدير للنظام إخفاء أي نظام بالكامل فتختفي كافة الأيقونات الخاصة به من صفحة العميل تلقائياً بدون أن يشعر أو يعلم، للبدء بمرحلة الملاحة أولاً ثم إطلاق برنامج الولاء لاحقاً.
+                    </p>
+                  </div>
+                </div>
+
+                <span className="bg-white/10 px-3 py-1 rounded-xl text-xs font-bold text-amber-300 border border-white/15 shrink-0">
+                  الوضع المفعل الآن: {
+                    adminCustomerViewMode === 'navigation_only'
+                      ? '🚗 الملاحة فقط (المرحلة 1)'
+                      : adminCustomerViewMode === 'loyalty_only'
+                      ? '🎁 الولاء والهدايا فقط (المرحلة 2)'
+                      : '✨ المنظومة المدمجة الشاملة'
+                  }
+                </span>
+              </div>
+
+              {/* 3 Interactive Mode Selector Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                {/* Mode 1: Navigation Only */}
+                <div
+                  onClick={() => handleUpdateCustomerViewMode('navigation_only')}
+                  className={`p-4 rounded-2xl border-2 cursor-pointer transition text-right flex flex-col justify-between gap-2.5 active:scale-95 ${
+                    adminCustomerViewMode === 'navigation_only'
+                      ? 'bg-gradient-to-br from-emerald-600 to-teal-700 border-emerald-300 text-white shadow-lg ring-2 ring-emerald-400/40'
+                      : 'bg-slate-800/80 hover:bg-slate-800 border-slate-700 text-slate-200 hover:border-slate-500'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xl">🚗</span>
+                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                      adminCustomerViewMode === 'navigation_only' ? 'bg-amber-400 text-slate-950 font-black' : 'bg-slate-700 text-slate-300'
+                    }`}>
+                      {adminCustomerViewMode === 'navigation_only' ? '● نشط حالياً' : 'اختيار لتفعيل'}
+                    </span>
+                  </div>
+                  <div>
+                    <h5 className="font-black text-xs sm:text-sm">المرحلة 1: تطبيق الملاحة وأقرب محطة "وصّلني" فقط</h5>
+                    <p className="text-[11px] opacity-85 mt-1 leading-relaxed">
+                      يظهر للعميل خريطة كارجاس والملاحة وأقرب محطة فقط. <strong className="text-amber-300">تختفي كافة أيقونات وتفاصيل برنامج الولاء وبنك الهدايا والكارت الذهبي تماماً وبدون أن يعلم العميل.</strong>
+                    </p>
+                  </div>
+                </div>
+
+                {/* Mode 2: Loyalty Only */}
+                <div
+                  onClick={() => handleUpdateCustomerViewMode('loyalty_only')}
+                  className={`p-4 rounded-2xl border-2 cursor-pointer transition text-right flex flex-col justify-between gap-2.5 active:scale-95 ${
+                    adminCustomerViewMode === 'loyalty_only'
+                      ? 'bg-gradient-to-br from-amber-500 to-amber-600 border-amber-300 text-slate-950 shadow-lg ring-2 ring-amber-400/40 font-black'
+                      : 'bg-slate-800/80 hover:bg-slate-800 border-slate-700 text-slate-200 hover:border-slate-500'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xl">🎁</span>
+                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                      adminCustomerViewMode === 'loyalty_only' ? 'bg-slate-950 text-amber-300 font-black' : 'bg-slate-700 text-slate-300'
+                    }`}>
+                      {adminCustomerViewMode === 'loyalty_only' ? '● نشط حالياً' : 'اختيار لتفعيل'}
+                    </span>
+                  </div>
+                  <div>
+                    <h5 className="font-black text-xs sm:text-sm">المرحلة 2: برنامج الولاء وبنك الهدايا فقط</h5>
+                    <p className="text-[11px] opacity-85 mt-1 leading-relaxed">
+                      يظهر للعميل الكارت الذهبي وبنك الهدايا والنقاط التراكمية فقط. <strong className="text-amber-950">تختفي خريطة الملاحة وأقرب محطة تماماً.</strong>
+                    </p>
+                  </div>
+                </div>
+
+                {/* Mode 3: Integrated Full Suite */}
+                <div
+                  onClick={() => handleUpdateCustomerViewMode('all_integrated')}
+                  className={`p-4 rounded-2xl border-2 cursor-pointer transition text-right flex flex-col justify-between gap-2.5 active:scale-95 ${
+                    adminCustomerViewMode === 'all_integrated'
+                      ? 'bg-gradient-to-br from-blue-600 to-indigo-700 border-indigo-300 text-white shadow-lg ring-2 ring-indigo-400/40'
+                      : 'bg-slate-800/80 hover:bg-slate-800 border-slate-700 text-slate-200 hover:border-slate-500'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xl">✨</span>
+                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                      adminCustomerViewMode === 'all_integrated' ? 'bg-amber-400 text-slate-950 font-black' : 'bg-slate-700 text-slate-300'
+                    }`}>
+                      {adminCustomerViewMode === 'all_integrated' ? '● نشط حالياً' : 'اختيار لتفعيل'}
+                    </span>
+                  </div>
+                  <div>
+                    <h5 className="font-black text-xs sm:text-sm">المنظومة المدمجة الشاملة (الملاحة + الولاء)</h5>
+                    <p className="text-[11px] opacity-85 mt-1 leading-relaxed">
+                      إتاحة خريطة الملاحة "وصّلني" وأقرب محطة مع كارت الولاء وبنك الهدايا في آن واحد بشكل مدمج ومتناسق.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -6642,55 +6601,138 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     </div>
                   </div>
 
-                  {/* Stations General Logo */}
-                  <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-                    <label className="block font-bold text-slate-800">
-                      2. لوجو المحطات المعمم على الخريطة (لكافة فروع كارجاس)
-                    </label>
-                    <div className="flex items-center gap-4">
-                      <div className="w-16 h-16 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden shrink-0 p-1">
-                        {editStationLogoUrl ? (
-                          <img src={editStationLogoUrl} alt="Station Logo" className="w-full h-full object-contain" />
-                        ) : (
-                          <div className="w-full h-full bg-emerald-600 rounded-lg flex items-center justify-center text-white font-black text-xs">
-                            CARGAS
-                          </div>
-                        )}
+                  {/* Stations General Master Logo (تثبيت دائم وتعميم على خريطة العميل وكافة الخرائط) */}
+                  <div className="bg-gradient-to-br from-emerald-50/70 via-white to-blue-50/50 border-2 border-emerald-300 rounded-2xl p-4.5 space-y-4 shadow-xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-200/60 pb-2.5">
+                      <div>
+                        <label className="block font-black text-slate-900 text-sm flex items-center gap-2">
+                          <MapPin className="w-4 h-4 text-emerald-600" />
+                          <span>2. لوجو المحطات المعمم والدائم على الخرائط (صفحة العميل، خريطة كارجاس، تطبيق وصلني)</span>
+                        </label>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          🔒 نظام التثبيت الدائم (Dynamic Persistent Settings): الشعار يُحفظ تلقائياً ولا يتغير أو يتراجع عند التحديث أو الخروج
+                        </p>
                       </div>
-                      <div className="flex-1 space-y-2">
-                        <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleResetMapLogoToOfficial}
+                        className="text-[11px] font-bold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 px-3 py-1 rounded-xl transition flex items-center gap-1 self-start sm:self-auto shrink-0 shadow-2xs"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>استعادة كارجاس الرسمي</span>
+                      </button>
+                    </div>
+
+                    {/* Dual Live Preview & Controls */}
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+                      {/* Live Previews */}
+                      <div className="md:col-span-5 flex items-center justify-center gap-4 bg-white p-3 rounded-2xl border border-emerald-200 shadow-2xs">
+                        {/* Preview 1: Nearest Station Card Badge Preview */}
+                        <div className="text-center space-y-1">
+                          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50 border-2 border-emerald-500 flex items-center justify-center p-1.5 shadow-sm mx-auto overflow-hidden">
+                            <img
+                              src={editStationLogoUrl || OFFICIAL_CARGAS_VECTOR_LOGO}
+                              alt="Station Badge"
+                              className="w-full h-full object-contain"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).src = OFFICIAL_CARGAS_VECTOR_LOGO;
+                              }}
+                            />
+                          </div>
+                          <span className="text-[9px] font-black text-slate-700 block">بادج صفحة العميل</span>
+                        </div>
+
+                        {/* Preview 2: Map Pin Marker Preview */}
+                        <div className="text-center space-y-1">
+                          <div className="relative inline-block mx-auto">
+                            <div className="w-11 h-11 rounded-full bg-white border-2 border-emerald-600 shadow-md p-1 flex items-center justify-center overflow-hidden">
+                              <img
+                                src={editStationLogoUrl || OFFICIAL_CARGAS_VECTOR_LOGO}
+                                alt="Pin Preview"
+                                className="w-full h-full object-contain"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).src = OFFICIAL_CARGAS_VECTOR_LOGO;
+                                }}
+                              />
+                            </div>
+                            <div className="w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[7px] border-t-emerald-600 mx-auto -mt-0.5"></div>
+                          </div>
+                          <span className="text-[9px] font-black text-slate-700 block">دبوس الخريطة</span>
+                        </div>
+                      </div>
+
+                      {/* Upload & URL Input & Actions */}
+                      <div className="md:col-span-7 space-y-2.5">
+                        <div className="flex flex-wrap items-center gap-2">
                           <input
                             type="file"
-                            id="stationLogoCmsInput"
+                            id="stationLogoCmsMasterInput"
                             accept="image/*"
                             className="hidden"
                             onChange={handleStationLogoUpload}
                           />
                           <button
                             type="button"
-                            onClick={() => document.getElementById('stationLogoCmsInput')?.click()}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-3 rounded-xl transition flex items-center gap-1.5 shadow-xs"
+                            onClick={() => document.getElementById('stationLogoCmsMasterInput')?.click()}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3.5 rounded-xl transition flex items-center gap-1.5 shadow-xs text-xs"
                           >
                             <Upload className="w-3.5 h-3.5" />
-                            <span>رفع صورة</span>
+                            <span>رفع صورة شعار جديدة</span>
                           </button>
-                          {editStationLogoUrl && (
-                            <button
-                              type="button"
-                              onClick={() => setEditStationLogoUrl('')}
-                              className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold py-1.5 px-2.5 rounded-xl transition"
-                            >
-                              استعادة الافتراضي
-                            </button>
-                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMasterStationMapLogo(editStationLogoUrl || OFFICIAL_CARGAS_VECTOR_LOGO);
+                              alert('🔒 تم تثبيت اللوجو بشكل دائم في قاعدة البيانات وتعميمه فوراً على كافة الخرائط!');
+                            }}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-black py-2 px-3.5 rounded-xl transition flex items-center gap-1.5 shadow-xs text-xs"
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                            <span>تثبيت وحفظ اللوجو المعمم فوراً 🔒</span>
+                          </button>
                         </div>
+
                         <input
                           type="text"
-                          placeholder="أو الصق رابط صورة لوجو المحطات هنا..."
+                          placeholder="أو الصق رابط صورة الشعار (URL أو Base64) وسيتم التثبيت فوراً..."
                           value={editStationLogoUrl}
-                          onChange={(e) => setEditStationLogoUrl(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-[11px] font-mono"
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setEditStationLogoUrl(val);
+                            if (val.trim()) setMasterStationMapLogo(val.trim());
+                          }}
+                          className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
+                      </div>
+                    </div>
+
+                    {/* Presets Gallery (نماذج جاهزة للاختيار بنقرة واحدة) */}
+                    <div className="space-y-1.5 pt-1 border-t border-emerald-100">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black text-slate-700">
+                          ⚡ نماذج جاهزة ومعتمدة للاختيار بنقرة واحدة وتثبيتها على كافة الخرائط:
+                        </span>
+                        <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md">
+                          يُطبق في ثانية واحدة
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                        {MASTER_MAP_LOGO_PRESETS.map((preset) => (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => handleApplyPresetMapLogo(preset.url)}
+                            className="bg-white hover:bg-emerald-50/80 border border-slate-200 hover:border-emerald-400 rounded-xl p-2 text-center transition flex flex-col items-center gap-1.5 shadow-2xs group"
+                          >
+                            <div className="w-10 h-10 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center p-1 group-hover:scale-105 transition overflow-hidden">
+                              <img src={preset.url} alt={preset.title} className="w-full h-full object-contain" />
+                            </div>
+                            <span className="text-[10px] font-bold text-slate-800 line-clamp-1 block">
+                              {preset.title}
+                            </span>
+                          </button>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -6717,22 +6759,347 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">كلمة سر المدير العام (0000)</label>
+                  <label className="block font-bold text-slate-700 mb-1">كلمة سر مدير النظام (PIN)</label>
                   <input
-                    type="text"
+                    type="password"
                     value={editAdminPin}
                     onChange={(e) => setEditAdminPin(e.target.value)}
                     className="w-full bg-slate-50 border-2 border-rose-300 rounded-xl p-2.5 text-xs font-mono font-bold text-center tracking-widest text-rose-700"
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">الرقم السري للمالية (1234)</label>
+                  <label className="block font-bold text-slate-700 mb-1">الرقم السري للإدارة المالية</label>
                   <input
-                    type="text"
+                    type="password"
                     value={editFinancePin}
                     onChange={(e) => setEditFinancePin(e.target.value)}
                     className="w-full bg-slate-50 border-2 border-emerald-400 rounded-xl p-2.5 text-xs font-mono font-bold text-center tracking-widest text-emerald-800"
                   />
+                </div>
+                <div className="md:col-span-2 bg-slate-100/80 p-4 rounded-2xl border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block font-black text-slate-800 text-xs">
+                      التحكم في نظام التموين المعروض لشاشة الفني (يدوي أو سكادا أو كلاهما) ⚡
+                    </label>
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2.5 py-0.5 rounded-full">
+                      تحكم حصري لمدير النظام
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditFuelingModeDisplay('both');
+                        const updated = { ...config, fuelingModeDisplay: 'both' as const };
+                        onUpdateConfig(updated);
+                        saveAppConfig(updated);
+                      }}
+                      className={`p-3 rounded-xl border text-right transition ${
+                        editFuelingModeDisplay === 'both'
+                          ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-xs">1. كلاهما معاً ⚡</span>
+                        {editFuelingModeDisplay === 'both' && <Check className="w-4 h-4 text-emerald-400" />}
+                      </div>
+                      <p className="text-[10px] opacity-80 mt-1">العدادات اليدوية + نظام السكادا وماسح QR متاحين للفني</p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditFuelingModeDisplay('manual_only');
+                        const updated = { ...config, fuelingModeDisplay: 'manual_only' as const };
+                        onUpdateConfig(updated);
+                        saveAppConfig(updated);
+                      }}
+                      className={`p-3 rounded-xl border text-right transition ${
+                        editFuelingModeDisplay === 'manual_only'
+                          ? 'bg-emerald-700 text-white border-emerald-700 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-xs">2. التموين اليدوي فقط ⛽</span>
+                        {editFuelingModeDisplay === 'manual_only' && <Check className="w-4 h-4 text-emerald-300" />}
+                      </div>
+                      <p className="text-[10px] opacity-80 mt-1">إخفاء نظام السكادا تماماً وإلزام الفني بإدخال قراءات العدادات</p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditFuelingModeDisplay('scada_only');
+                        const updated = { ...config, fuelingModeDisplay: 'scada_only' as const };
+                        onUpdateConfig(updated);
+                        saveAppConfig(updated);
+                      }}
+                      className={`p-3 rounded-xl border text-right transition ${
+                        editFuelingModeDisplay === 'scada_only'
+                          ? 'bg-indigo-900 text-white border-indigo-900 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-xs">3. نظام السكادا فقط 📡</span>
+                        {editFuelingModeDisplay === 'scada_only' && <Check className="w-4 h-4 text-indigo-300" />}
+                      </div>
+                      <p className="text-[10px] opacity-80 mt-1">إخفاء التموين اليدوي وتشغيل الربط التلقائي والمسح فقط</p>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* قسم التحكم الكامل في إظهار أو إخفاء مسميات المنظومة والشركة والمطور */}
+              <div className="bg-gradient-to-br from-indigo-950 via-slate-900 to-slate-950 text-white rounded-2xl p-5 border border-indigo-500/30 shadow-md space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-indigo-400">
+                      <Sliders className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-white">
+                        التحكم في إظهار أو إخفاء اسم المنظومة واسم الشركة واسم المطور 👑
+                      </h4>
+                      <p className="text-[11px] text-slate-400">
+                        تحكم حصري لمدير النظام لإظهار أو حجب البيانات الرسمية في الهيدر، الفوتر، وكافة الصفحات
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] bg-indigo-500/20 text-indigo-300 font-bold px-3 py-1 rounded-full border border-indigo-500/30">
+                    نظام التخصيص الدائم
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Toggle App Name */}
+                  <div className="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                    <label className="flex items-center justify-between cursor-pointer">
+                      <span className="font-bold text-xs text-white">إظهار اسم المنظومة</span>
+                      <input
+                        type="checkbox"
+                        checked={editShowAppName}
+                        onChange={(e) => setEditShowAppName(e.target.checked)}
+                        className="w-4 h-4 text-emerald-600 rounded"
+                      />
+                    </label>
+                    <input
+                      type="text"
+                      value={editAppName}
+                      onChange={(e) => setEditAppName(e.target.value)}
+                      placeholder="اسم المنظومة..."
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100"
+                    />
+                  </div>
+
+                  {/* Toggle Company Name */}
+                  <div className="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                    <label className="flex items-center justify-between cursor-pointer">
+                      <span className="font-bold text-xs text-white">إظهار اسم الشركة</span>
+                      <input
+                        type="checkbox"
+                        checked={editShowCompanyName}
+                        onChange={(e) => setEditShowCompanyName(e.target.checked)}
+                        className="w-4 h-4 text-emerald-600 rounded"
+                      />
+                    </label>
+                    <input
+                      type="text"
+                      value={editCompanyName}
+                      onChange={(e) => setEditCompanyName(e.target.value)}
+                      placeholder="اسم الشركة المطورة..."
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100"
+                    />
+                  </div>
+
+                  {/* Toggle Developer Name */}
+                  <div className="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                    <label className="flex items-center justify-between cursor-pointer">
+                      <span className="font-bold text-xs text-white">إظهار اسم المطور</span>
+                      <input
+                        type="checkbox"
+                        checked={editShowDeveloperName}
+                        onChange={(e) => setEditShowDeveloperName(e.target.checked)}
+                        className="w-4 h-4 text-emerald-600 rounded"
+                      />
+                    </label>
+                    <input
+                      type="text"
+                      value={editDeveloperName}
+                      onChange={(e) => setEditDeveloperName(e.target.value)}
+                      placeholder="اسم المطور والمهندس..."
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* منظومة إدارة وتوزيع كلمات السر عبر الواتساب لكافة الأدوار والكوادر */}
+              <div className="space-y-3">
+                <div className="border-b border-slate-200 pb-2">
+                  <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-emerald-600" />
+                    <span>إدارة كلمات السر وتوزيعها عبر الواتساب للأدوار والمسؤولين 📲</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    أكواد PIN مشفرة ومستقلة لكل مسؤول، تمنح بضغطة زر واحدة عبر الواتساب مباشرة من مدير النظام
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* بطاقة 1: مسؤول تلقي الشكاوى والمقترحات */}
+                  <div className="bg-gradient-to-r from-rose-950 via-slate-900 to-rose-950 text-white rounded-2xl p-4 border border-rose-500/40 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">📢</span>
+                        <div>
+                          <h5 className="text-xs font-black text-white">مسؤول تلقي الشكاوى والمقترحات</h5>
+                          <span className="text-[10px] text-rose-300">متابعة بلاغات 19058 وحلها</span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] bg-rose-500/20 text-rose-300 font-bold px-2 py-0.5 rounded-full border border-rose-500/30">
+                        شكاوى
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        maxLength={6}
+                        value={editComplaintsOfficerPin}
+                        onChange={(e) => setEditComplaintsOfficerPin(e.target.value)}
+                        className="w-28 bg-slate-800 border-2 border-rose-500/60 rounded-xl p-2 text-center text-sm font-mono font-black text-rose-400 tracking-widest outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const pin = editComplaintsOfficerPin.trim() || '7788';
+                          const msg = `مرحباً، باسوورد الدخول لبوابة مسؤول تلقي الشكاوى والمقترحات اليوم هو: [ ${pin} ]. يرجى استخدامه للتحقيق في البلاغات والرد على العملاء. تحيات مدير نظام كارجاس.`;
+                          window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+                        }}
+                        className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-black py-2 px-3 rounded-xl transition text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>إرسال الباسوورد عبر الواتساب</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* بطاقة 2: خدمة العملاء ومتابعة الحجوزات */}
+                  <div className="bg-gradient-to-r from-amber-950 via-slate-900 to-amber-950 text-white rounded-2xl p-4 border border-amber-500/40 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🎧</span>
+                        <div>
+                          <h5 className="text-xs font-black text-white">خدمة العملاء ومتابعة الحجوزات</h5>
+                          <span className="text-[10px] text-amber-300">تأكيد مواعيد الصيانة والزيوت</span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded-full border border-amber-500/30">
+                        خدمة عملاء
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        maxLength={6}
+                        value={editCustomerServicePin}
+                        onChange={(e) => setEditCustomerServicePin(e.target.value)}
+                        className="w-28 bg-slate-800 border-2 border-amber-500/60 rounded-xl p-2 text-center text-sm font-mono font-black text-amber-400 tracking-widest outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const pin = editCustomerServicePin.trim() || '5566';
+                          const msg = `مرحباً زميلنا في خدمة العملاء، باسوورد الدخول لبوابة متابعة الحجوزات والتواصل مع العملاء اليوم هو: [ ${pin} ]. تحيات مدير نظام كارجاس.`;
+                          window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+                        }}
+                        className="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-black py-2 px-3 rounded-xl transition text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>إرسال الباسوورد عبر الواتساب</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* بطاقة 3: مدير فحص واختبار أسطوانات الغاز */}
+                  <div className="bg-gradient-to-r from-teal-950 via-slate-900 to-teal-950 text-white rounded-2xl p-4 border border-teal-500/40 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🛡️</span>
+                        <div>
+                          <h5 className="text-xs font-black text-white">مدير فحص واختبار أسطوانات الغاز</h5>
+                          <span className="text-[10px] text-teal-300">الفحص الهيدروستاتيكي وشهادة المرور</span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] bg-teal-500/20 text-teal-300 font-bold px-2 py-0.5 rounded-full border border-teal-500/30">
+                        فحص أسطوانات
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        maxLength={6}
+                        value={editCylinderPin}
+                        onChange={(e) => setEditCylinderPin(e.target.value)}
+                        className="w-28 bg-slate-800 border-2 border-teal-500/60 rounded-xl p-2 text-center text-sm font-mono font-black text-teal-400 tracking-widest outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const pin = editCylinderPin.trim() || '8899';
+                          const msg = `مرحباً يا هندسة، باسوورد تفعيل بوابة فحص واختبار أسطوانات الغاز اليوم هو: [ ${pin} ]. لإصدار شهادات المرور الرسمية المعتمدة. تحيات مدير نظام كارجاس.`;
+                          window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+                        }}
+                        className="flex-1 bg-teal-600 hover:bg-teal-500 text-white font-black py-2 px-3 rounded-xl transition text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>إرسال الباسوورد عبر الواتساب</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* بطاقة 4: مسؤول الإدارة المالية */}
+                  <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-950 text-white rounded-2xl p-4 border border-emerald-500/40 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">💼</span>
+                        <div>
+                          <h5 className="text-xs font-black text-white">مسؤول الإدارة المالية والموازنة</h5>
+                          <span className="text-[10px] text-emerald-300">تسعيرة النقاط، المبيعات اليومية، واعتماد المصروفات</span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                        المالية
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        maxLength={6}
+                        value={editFinancePin}
+                        onChange={(e) => setEditFinancePin(e.target.value)}
+                        className="w-28 bg-slate-800 border-2 border-emerald-500/60 rounded-xl p-2 text-center text-sm font-mono font-black text-emerald-400 tracking-widest outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const pin = editFinancePin.trim() || '1234';
+                          const msg = `مرحباً بالزميل المسؤول المالي، باسوورد الدخول لبوابة الإدارة المالية المعتمدة هو: [ ${pin} ]. تحيات مدير عام منظومة كارجاس.`;
+                          window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+                        }}
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-black py-2 px-3 rounded-xl transition text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>إرسال الباسوورد عبر الواتساب</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
 
