@@ -31,6 +31,14 @@ import {
   Tag,
   ArrowRight,
   ShieldAlert,
+  Copy,
+  CheckCheck,
+  X,
+  GitBranch,
+  Terminal,
+  ExternalLink,
+  Code2,
+  CloudUpload,
 } from 'lucide-react';
 import {
   AppConfig,
@@ -59,8 +67,14 @@ import {
   getMasterStationMapLogo,
   getMapFacilityFilters,
   recalculateSystemForFinancialPointCost,
+  getRewards,
 } from '../services/storageService';
-import { syncCurrentStateToCodebase } from '../services/codebaseSyncService';
+import {
+  syncCurrentStateToCodebase,
+  syncEntireAppToCodebase,
+  getGitCommitAndPushCommand,
+  downloadSystemDataBackup,
+} from '../services/codebaseSyncService';
 
 interface FinancialManagementPortalProps {
   config: AppConfig;
@@ -185,6 +199,20 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
   const [bulkPointsRate, setBulkPointsRate] = useState<number>(() => config.pointsPerMeter || 1.0);
   const [bulkActiveStatus, setBulkActiveStatus] = useState<boolean>(true);
   const [isBulkSuccess, setIsBulkSuccess] = useState<boolean>(false);
+
+  // Codebase Sync & Git State for Financial Management (تثبيت القرارات المالية بالكود لـ GitHub و Vercel)
+  const [isSyncingCodebase, setIsSyncingCodebase] = useState<boolean>(false);
+  const [financialSyncModalData, setFinancialSyncModalData] = useState<{
+    isOpen: boolean;
+    success: boolean;
+    message: string;
+    stationCount?: number;
+    costPerPoint: number;
+    recalculatedRewardsCount: number;
+    gitCommand: string;
+    timestamp: string;
+  } | null>(null);
+  const [copiedGitCmd, setCopiedGitCmd] = useState<boolean>(false);
 
   // Financial PIN Management State (تعديل الرقم السري من داخل صفحة المالية)
   const [currentPinInput, setCurrentPinInput] = useState<string>('');
@@ -325,6 +353,105 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
 
     setIsBulkSuccess(true);
     setTimeout(() => setIsBulkSuccess(false), 5000);
+  };
+
+  // اعتماد وتثبيت القرارات المالية بالكامل في الكود المصدري على القرص (GitHub & Vercel)
+  const handleSyncFinancialDecisionsToCodebase = async () => {
+    setIsSyncingCodebase(true);
+    try {
+      const costValue = Number(bulkCostPerPoint) || 0.15;
+      const pointsRate = Number(bulkPointsRate) || 1.0;
+
+      // 1. إعادة حساب وتعميم تكلفة النقطة على كامل المنظومة وبنك الهدايا والمكافآت وحاسبة النقاط
+      const { config: syncedCfg, rewards: syncedRewards } = recalculateSystemForFinancialPointCost(costValue);
+      const recalculatedCount = syncedRewards.length;
+
+      // 2. تحديث قائمة المحطات بتكلفة النقطة الجديدة وتعميمها واعتمادها رسمياً
+      const updatedStations = stationList.map((st) => {
+        const stRegion = st.region || st.city || 'القاهرة الكبرى';
+        if (bulkRegion === 'all' || stRegion === bulkRegion) {
+          return {
+            ...st,
+            costPerPointEgp: costValue,
+            pointsAwardRatePerMeter: pointsRate,
+            isLoyaltyProgramActive: bulkActiveStatus,
+            financialApprovedByAdmin: true,
+            financialApprovedAt: new Date().toISOString(),
+            financialApprovedBy: 'المسؤول المالي المعتمد',
+          };
+        }
+        return st;
+      });
+
+      setStationList(updatedStations);
+      onUpdateStations(updatedStations);
+      saveStationLocations(updatedStations);
+
+      // 3. تحديث إعدادات التطبيق بحوافز الفنيين والنموذج المالي المعتمد
+      const updatedConfig: AppConfig = {
+        ...syncedCfg,
+        pointsPerMeter: pointsRate,
+        technicianIncentiveConfig: incentiveConfig,
+        loyaltyCostModel: {
+          ...syncedCfg.loyaltyCostModel,
+          costPerPointEgp: costValue,
+          officialCostPerPoint: costValue,
+        },
+        pointsFormula: {
+          ...(config.pointsFormula || {}),
+          ratioMode: syncedCfg.pointsFormula?.ratioMode ?? config.pointsFormula?.ratioMode ?? 'points_per_meter',
+          metersPerPointUnit: syncedCfg.pointsFormula?.metersPerPointUnit ?? config.pointsFormula?.metersPerPointUnit ?? 5,
+          basePointsPerMeter: syncedCfg.pointsFormula?.basePointsPerMeter ?? config.pointsFormula?.basePointsPerMeter ?? 1,
+          gasPricePerMeter: syncedCfg.pointsFormula?.gasPricePerMeter ?? config.pointsFormula?.gasPricePerMeter ?? 13,
+          calculationBasis: syncedCfg.pointsFormula?.calculationBasis ?? config.pointsFormula?.calculationBasis ?? 'meters',
+          tierBronzeMultiplier: syncedCfg.pointsFormula?.tierBronzeMultiplier ?? config.pointsFormula?.tierBronzeMultiplier ?? 1.0,
+          tierSilverMultiplier: syncedCfg.pointsFormula?.tierSilverMultiplier ?? config.pointsFormula?.tierSilverMultiplier ?? 1.5,
+          tierGoldMultiplier: syncedCfg.pointsFormula?.tierGoldMultiplier ?? config.pointsFormula?.tierGoldMultiplier ?? 2.0,
+          volumeBonusThresholdM3: syncedCfg.pointsFormula?.volumeBonusThresholdM3 ?? config.pointsFormula?.volumeBonusThresholdM3 ?? 30,
+          volumeBonusPoints: syncedCfg.pointsFormula?.volumeBonusPoints ?? config.pointsFormula?.volumeBonusPoints ?? 10,
+          technicianWelcomePointsPerShift: syncedCfg.pointsFormula?.technicianWelcomePointsPerShift ?? config.pointsFormula?.technicianWelcomePointsPerShift ?? 350,
+          pointsToEgpRedemptionRatio: costValue,
+        },
+      };
+
+      onUpdateConfig(updatedConfig);
+      saveAppConfig(updatedConfig);
+      saveTechnicianIncentiveConfig(incentiveConfig);
+
+      // 4. كتابة وتثبيت البيانات في ملفات الكود المصدري على القرص (customInitialData.ts & initialStations.ts)
+      const syncRes = await syncEntireAppToCodebase({
+        customConfig: updatedConfig,
+        stations: updatedStations,
+      });
+
+      const gitCmd = getGitCommitAndPushCommand(
+        `feat(finance): approve point cost ${costValue} EGP & sync baseline for GitHub/Vercel`
+      );
+
+      setFinancialSyncModalData({
+        isOpen: true,
+        success: syncRes.success,
+        message: syncRes.message,
+        stationCount: syncRes.stationCount || updatedStations.length,
+        costPerPoint: costValue,
+        recalculatedRewardsCount: recalculatedCount,
+        gitCommand: gitCmd,
+        timestamp: new Date().toLocaleString('ar-EG'),
+      });
+    } catch (err: any) {
+      console.error('Error during financial codebase sync:', err);
+      setFinancialSyncModalData({
+        isOpen: true,
+        success: false,
+        message: err?.message || 'حدث خطأ أثناء مزامنة وتثبيت القرارات المالية بالكود',
+        costPerPoint: Number(bulkCostPerPoint) || 0.15,
+        recalculatedRewardsCount: 0,
+        gitCommand: getGitCommitAndPushCommand(),
+        timestamp: new Date().toLocaleString('ar-EG'),
+      });
+    } finally {
+      setIsSyncingCodebase(false);
+    }
   };
 
   // Admin Approve Station Pricing
@@ -638,6 +765,17 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
 
           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-between md:justify-end">
             <button
+              type="button"
+              onClick={handleSyncFinancialDecisionsToCodebase}
+              disabled={isSyncingCodebase}
+              className="bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs px-4 py-2.5 rounded-2xl transition shadow-lg flex items-center gap-2 active:scale-95 cursor-pointer border border-emerald-300"
+              title="اعتماد وتثبيت تكلفة النقاط وحوافز الفنيين والمحطات في ملفات كود المشروع الأساسية لتثبيتها عند الرفع على GitHub و Vercel"
+            >
+              <Save className={`w-4 h-4 ${isSyncingCodebase ? 'animate-spin' : ''}`} />
+              <span>{isSyncingCodebase ? 'جاري التثبيت بالكود...' : '💾 اعتماد وتثبيت القرارات المالية بالكود (GitHub & Vercel) 🚀'}</span>
+            </button>
+
+            <button
               onClick={handleExportSalesReport}
               className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-2xl transition shadow-md flex items-center gap-2 active:scale-95"
             >
@@ -683,7 +821,17 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
           </div>
 
           {/* Quick Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSyncFinancialDecisionsToCodebase}
+              disabled={isSyncingCodebase}
+              className="bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 text-xs font-black px-3.5 py-2 rounded-xl transition shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95"
+              title="تثبيت تكلفة النقاط وحوافز الفنيين والمحطات في ملفات كود المشروع الأساسية"
+            >
+              <CloudUpload className={`w-3.5 h-3.5 ${isSyncingCodebase ? 'animate-spin' : ''}`} />
+              <span>{isSyncingCodebase ? 'جاري التثبيت...' : 'تثبيت بالكود لـ GitHub & Vercel 🚀'}</span>
+            </button>
             <button
               type="button"
               onClick={handleExportSalesReport}
@@ -1679,11 +1827,11 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
                 </select>
               </div>
 
-              <div>
+              <div className="flex flex-col sm:flex-row gap-2">
                 <button
                   type="button"
                   onClick={handleApplyBulkRegion}
-                  className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-2.5 rounded-xl transition shadow-md flex items-center justify-center gap-1.5 active:scale-95"
+                  className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-2.5 rounded-xl transition shadow-md flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
                 >
                   <Check className="w-4 h-4" />
                   <span>
@@ -1691,6 +1839,17 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
                       ? 'اعتماد وتعميم على المنظومة بالكامل ⚡'
                       : 'تطبيق على محطات المنطقة'}
                   </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSyncFinancialDecisionsToCodebase}
+                  disabled={isSyncingCodebase}
+                  className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black text-xs px-4 py-2.5 rounded-xl transition shadow-lg flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer border border-indigo-400/30"
+                  title="تثبيت تكلفة النقطة والتسعير في ملفات الكود المصدري على القرص لتصبح أساسية عند الرفع على GitHub و Vercel"
+                >
+                  <Save className={`w-4 h-4 ${isSyncingCodebase ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingCodebase ? 'جاري التثبيت بالكود...' : '💾 اعتماد وتثبيت القرارات المالية بالكود (GitHub & Vercel) 🚀'}</span>
                 </button>
               </div>
             </div>
@@ -1729,16 +1888,27 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
             </div>
 
             {isBulkSuccess && (
-              <div className="mt-3 p-3.5 bg-emerald-500/25 text-emerald-100 rounded-2xl text-xs font-bold border border-emerald-400/60 flex items-start gap-2.5 animate-in fade-in">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-                <div className="space-y-0.5">
-                  <span className="block font-black text-white">
-                    ✅ تم اعتماد وتعميم تكلفة النقطة ({bulkCostPerPoint} ج) بنجاح على مستوى المنظومة بالكامل!
-                  </span>
-                  <p className="text-[11px] text-emerald-200 leading-relaxed font-normal">
-                    تم التحديث اللحظي لـ: بنك الهدايا والمكافآت (100+ هدية تغيرت نقاطها ديناميكياً)، استوديو توليد الأفكار بالذكاء الاصطناعي، حاسبة ومعادلة النقاط، وجميع عروض ومسابقات السائقين.
-                  </p>
+              <div className="mt-3 p-3.5 bg-emerald-500/25 text-emerald-100 rounded-2xl text-xs font-bold border border-emerald-400/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in">
+                <div className="flex items-start gap-2.5">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <span className="block font-black text-white">
+                      ✅ تم اعتماد وتعميم تكلفة النقطة ({bulkCostPerPoint} ج) بنجاح على مستوى المنظومة بالكامل!
+                    </span>
+                    <p className="text-[11px] text-emerald-200 leading-relaxed font-normal">
+                      تم التحديث اللحظي لـ: بنك الهدايا والمكافآت (100+ هدية تغيرت نقاطها ديناميكياً)، استوديو توليد الأفكار بالذكاء الاصطناعي، حاسبة ومعادلة النقاط، وجميع عروض ومسابقات السائقين.
+                    </p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={handleSyncFinancialDecisionsToCodebase}
+                  disabled={isSyncingCodebase}
+                  className="px-3.5 py-1.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black rounded-xl text-xs flex items-center gap-1.5 shrink-0 shadow-md cursor-pointer active:scale-95 self-end sm:self-auto"
+                >
+                  <CloudUpload className="w-3.5 h-3.5" />
+                  <span>تثبيت بالكود لـ GitHub 🚀</span>
+                </button>
               </div>
             )}
           </div>
@@ -2244,10 +2414,21 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
                       setTimeout(() => setIncentiveSaveSuccess(false), 3500);
                     }, 400);
                   }}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl font-black text-xs flex items-center gap-2 transition shadow-md"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl font-black text-xs flex items-center gap-2 transition shadow-md active:scale-95 cursor-pointer"
                 >
                   <Save className="w-4 h-4" />
                   <span>{isSavingIncentives ? 'جاري الحفظ...' : 'حفظ واعتماد سياسة الحوافز 💾'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSyncFinancialDecisionsToCodebase}
+                  disabled={isSyncingCodebase}
+                  className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-xl font-black text-xs flex items-center gap-2 transition shadow-lg border border-indigo-400/30 cursor-pointer active:scale-95"
+                  title="تثبيت سياسة حوافز الفنيين والقرارات المالية في ملفات كود المشروع الأساسية على القرص لـ GitHub و Vercel"
+                >
+                  <CloudUpload className={`w-4 h-4 ${isSyncingCodebase ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingCodebase ? 'جاري التثبيت بالكود...' : '💾 تثبيت سياسة الحوافز بالكود (GitHub & Vercel) 🚀'}</span>
                 </button>
               </div>
             </div>
@@ -2629,6 +2810,189 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
                 الرقم السري الحالي المسجل في النظام هو: <span className="font-mono font-black text-slate-900">{config.financePin || '1234'}</span>.
                 يمتلك مدير النظام دائماً إمكانية التعديل والإشراف المباشر على هذا الكود من لوحة تحكم المدير الرئيسية لضمان عدم توقف العمل.
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Financial Codebase Sync Modal (اعتماد وتثبيت القرارات المالية في كود المشروع لـ GitHub و Vercel) */}
+      {financialSyncModalData?.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border-2 border-emerald-500/80 text-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl space-y-5 relative max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-4 border-b border-emerald-500/30 pb-4">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shadow-lg shrink-0 ${
+                    financialSyncModalData.success
+                      ? 'bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950'
+                      : 'bg-rose-600 text-white'
+                  }`}
+                >
+                  {financialSyncModalData.success ? '🚀' : '⚠️'}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-black text-white">
+                      اعتماد وتثبيت القرارات المالية في كود المشروع
+                    </h3>
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.5 rounded-full font-bold">
+                      GitHub & Vercel
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    {financialSyncModalData.success
+                      ? 'تم حفظ وتعميم كافة القرارات المالية داخل الملفات المصدرية للمشروع على القرص بنجاح'
+                      : 'فشل التثبيت في ملفات الكود المصدري'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setFinancialSyncModalData(null)}
+                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Status Message */}
+            <div
+              className={`p-4 rounded-2xl border text-xs font-bold flex items-center gap-3 ${
+                financialSyncModalData.success
+                  ? 'bg-emerald-950/60 border-emerald-500/60 text-emerald-200'
+                  : 'bg-rose-950/60 border-rose-500/60 text-rose-200'
+              }`}
+            >
+              {financialSyncModalData.success ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+              )}
+              <span>{financialSyncModalData.message}</span>
+            </div>
+
+            {/* Impact Details Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+              <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700 space-y-1">
+                <span className="text-[10px] text-slate-400 block font-medium">تكلفة النقطة المعتمدة:</span>
+                <span className="text-base font-black font-mono text-emerald-400">
+                  {financialSyncModalData.costPerPoint} جنيه / نقطة
+                </span>
+                <span className="text-[10px] text-slate-400 block">ثابتة في كامل المنظومة</span>
+              </div>
+
+              <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700 space-y-1">
+                <span className="text-[10px] text-slate-400 block font-medium">الهدايا المعاد تسعيرها:</span>
+                <span className="text-base font-black font-mono text-amber-400">
+                  {financialSyncModalData.recalculatedRewardsCount} هدية ومكافأة
+                </span>
+                <span className="text-[10px] text-slate-400 block">في بنك الهدايا والأفكار</span>
+              </div>
+
+              <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700 space-y-1 col-span-2 sm:col-span-1">
+                <span className="text-[10px] text-slate-400 block font-medium">محطات كارجاس المثبتة:</span>
+                <span className="text-base font-black font-mono text-cyan-400">
+                  {financialSyncModalData.stationCount} محطة معتمدة
+                </span>
+                <span className="text-[10px] text-slate-400 block">بإحداثياتها وأسعارها</span>
+              </div>
+            </div>
+
+            {/* Files Written on Disk */}
+            <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 space-y-2">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
+                <Code2 className="w-4 h-4 text-emerald-400" />
+                <span>الملفات المصدرية التي تم تثبيت قراراتك بها على القرص:</span>
+              </div>
+              <ul className="text-[11px] text-slate-400 space-y-1 font-mono pr-2">
+                <li className="flex items-center gap-1.5">
+                  <span className="text-emerald-400">✓</span>
+                  <code className="bg-slate-800 px-1.5 py-0.5 rounded text-emerald-300">src/services/customInitialData.ts</code>
+                  <span className="text-[10px] text-slate-400">(القيم الأساسية لتكلفة النقطة وبنك الهدايا وحوافز الفنيين)</span>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="text-emerald-400">✓</span>
+                  <code className="bg-slate-800 px-1.5 py-0.5 rounded text-emerald-300">src/navigation/data/initialStations.ts</code>
+                  <span className="text-[10px] text-slate-400">(تكلفة النقطة ومعدل المنح لكل محطة)</span>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="text-emerald-400">✓</span>
+                  <code className="bg-slate-800 px-1.5 py-0.5 rounded text-emerald-300">public/assets/cargas-system-snapshot.json</code>
+                  <span className="text-[10px] text-slate-400">(النسخة الاحتياطية المعتمدة لكامل التطبيق)</span>
+                </li>
+              </ul>
+            </div>
+
+            {/* Git Command Box */}
+            <div className="bg-gradient-to-br from-slate-950 to-indigo-950/60 p-4 rounded-2xl border border-indigo-500/30 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-bold text-indigo-300">
+                  <GitBranch className="w-4 h-4 text-indigo-400" />
+                  <span>أمر الرفع المباشر على GitHub & Vercel:</span>
+                </div>
+                <span className="text-[10px] bg-indigo-500/20 text-indigo-200 border border-indigo-400/30 px-2 py-0.5 rounded-full font-mono">
+                  Git CLI
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <code
+                  className="flex-1 bg-black/60 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-emerald-300 select-all overflow-x-auto text-left"
+                  dir="ltr"
+                >
+                  {financialSyncModalData.gitCommand}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(financialSyncModalData.gitCommand);
+                    setCopiedGitCmd(true);
+                    setTimeout(() => setCopiedGitCmd(false), 3000);
+                  }}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shrink-0 cursor-pointer ${
+                    copiedGitCmd
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                  }`}
+                >
+                  {copiedGitCmd ? <CheckCheck className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  <span>{copiedGitCmd ? 'تم النسخ!' : 'نسخ الأمر'}</span>
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                💡 بعد تنفيذ هذا الأمر في سطر الأوامر (Terminal)، سيتم رفع التعديلات فوراً إلى مستودع GitHub وسيتم تفعيل التحديث التلقائي على Vercel أو Render دون الحاجة لأي تعديل يدوي!
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() =>
+                  downloadSystemDataBackup({
+                    navStations: getStationLocations().map((s) => ({ ...s, cng: true })) as any,
+                    stationLocations: stationList,
+                    config,
+                    rewards: getRewards(),
+                    crew: crewList,
+                    mapFilters: getMapFacilityFilters(),
+                    logoUrl: getMasterStationMapLogo() || config.stationLogoUrl,
+                  })
+                }
+                className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold border border-slate-600 flex items-center justify-center gap-2 cursor-pointer transition shadow-sm"
+              >
+                <Download className="w-4 h-4 text-emerald-400" />
+                <span>تحميل نسخة احتياطية مالية JSON 📥</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setFinancialSyncModalData(null)}
+                className="w-full sm:w-auto px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-black transition cursor-pointer shadow-md"
+              >
+                إغلاق والعودة للبوابة ✓
+              </button>
             </div>
           </div>
         </div>

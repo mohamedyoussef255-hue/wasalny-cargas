@@ -1,11 +1,15 @@
 {
-  "timestamp": "2026-11-02T12:40:32.810Z",
+  "timestamp": "2026-11-07T12:57:20.715Z",
   "developer": "محمد عبد الرحمن يوسف",
   "company": "شركة عزوتي للبرمجيات وتكنولوجيا المعلومات",
   "stationsCount": 0,
   "stations": [],
   "locations": [],
   "config": {
-    "appName": "منظومة كارجاس وبرنامج الولاء الذكي"
-  }
+    "appName": "كارجاس مصر",
+    "themeColor": "emerald"
+  },
+  "rewards": [],
+  "crew": [],
+  "mapFilters": []
 }

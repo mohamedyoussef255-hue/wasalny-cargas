@@ -173,7 +173,11 @@ import {
 import { Station as NavStation, AppConfig as NavAppConfig } from '../navigation/types';
 import { INITIAL_CARGAS_STATIONS } from '../navigation/data/initialStations';
 import { getStoredCustomLogo, saveStoredCustomLogo } from '../navigation/utils/imageCompressor';
-import { syncCurrentStateToCodebase, downloadSystemDataBackup } from '../services/codebaseSyncService';
+import {
+  syncCurrentStateToCodebase,
+  downloadSystemDataBackup,
+  getGitCommitAndPushCommand,
+} from '../services/codebaseSyncService';
 
 interface AdminPortalProps {
   config: AppConfig;
@@ -538,6 +542,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     timestamp?: string;
     stationCount?: number;
   } | null>(null);
+  const [copiedAdminGitCmd, setCopiedAdminGitCmd] = useState<boolean>(false);
 
   const handleSyncAllToCodebase = async () => {
     setIsSyncingCodebase(true);
@@ -2019,51 +2024,93 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
       {/* Codebase Sync Notification Banner */}
       {codebaseSyncResult && (
-        <div className={`p-4 rounded-2xl border transition animate-in slide-in-from-top-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
-          codebaseSyncResult.success
-            ? 'bg-gradient-to-r from-emerald-950/90 via-slate-900 to-teal-950/90 border-emerald-500 text-emerald-200'
-            : 'bg-rose-950/90 border-rose-600 text-rose-200'
-        }`}>
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">{codebaseSyncResult.success ? '🎉' : '⚠️'}</span>
-            <div>
-              <div className="font-black text-sm text-white">
-                {codebaseSyncResult.message}
-              </div>
-              <div className="text-xs opacity-90 mt-0.5">
-                {codebaseSyncResult.success ? (
-                  <>
-                    تم تحديث ملفات: <code className="bg-slate-800 px-1.5 py-0.5 rounded text-emerald-300 font-mono">src/navigation/data/initialStations.ts</code> و <code className="bg-slate-800 px-1.5 py-0.5 rounded text-emerald-300 font-mono">src/services/customInitialData.ts</code> • عدد المحطات المثبتة: <b className="text-white font-bold">{codebaseSyncResult.stationCount ?? navStations.length}</b> • جاهز للـ Git Push و Vercel!
-                  </>
-                ) : (
-                  'يرجى مراجعة الخادم والتأكد من إمكانية الكتابة'
-                )}
+        <div
+          className={`p-4 rounded-2xl border transition animate-in slide-in-from-top-2 flex flex-col gap-3 ${
+            codebaseSyncResult.success
+              ? 'bg-gradient-to-r from-emerald-950/90 via-slate-900 to-teal-950/90 border-emerald-500 text-emerald-200'
+              : 'bg-rose-950/90 border-rose-600 text-rose-200'
+          }`}
+        >
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">{codebaseSyncResult.success ? '🎉' : '⚠️'}</span>
+              <div>
+                <div className="font-black text-sm text-white">
+                  {codebaseSyncResult.message}
+                </div>
+                <div className="text-xs opacity-90 mt-0.5">
+                  {codebaseSyncResult.success ? (
+                    <>
+                      تم تحديث ملفات: <code className="bg-slate-800 px-1.5 py-0.5 rounded text-emerald-300 font-mono">src/navigation/data/initialStations.ts</code> و <code className="bg-slate-800 px-1.5 py-0.5 rounded text-emerald-300 font-mono">src/services/customInitialData.ts</code> • عدد المحطات المثبتة: <b className="text-white font-bold">{codebaseSyncResult.stationCount ?? navStations.length}</b> • جاهز للـ Git Push و Vercel!
+                    </>
+                  ) : (
+                    'يرجى مراجعة الخادم والتأكد من إمكانية الكتابة'
+                  )}
+                </div>
               </div>
             </div>
+
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+              <button
+                type="button"
+                onClick={() =>
+                  downloadSystemDataBackup({
+                    navStations,
+                    stationLocations: stations,
+                    config,
+                    rewards,
+                    crew: stationCrew,
+                    mapFilters: getMapFacilityFilters(),
+                    logoUrl: getMasterStationMapLogo(),
+                  })
+                }
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold border border-slate-600 flex items-center gap-1.5 cursor-pointer shadow-sm"
+                title="تحميل نسخة احتياطية من البيانات الثابتة JSON"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400" />
+                <span>تحميل JSON احتياطي</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCodebaseSyncResult(null)}
+                className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => downloadSystemDataBackup({
-                navStations,
-                stationLocations: stations,
-                config,
-                logoUrl: getMasterStationMapLogo(),
-              })}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold border border-slate-600 flex items-center gap-1.5 cursor-pointer shadow-sm"
-              title="تحميل نسخة احتياطية من البيانات الثابتة JSON"
-            >
-              <Download className="w-3.5 h-3.5 text-emerald-400" />
-              <span>تحميل نسخة JSON احتياطية</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setCodebaseSyncResult(null)}
-              className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+
+          {codebaseSyncResult.success && (
+            <div className="pt-2 border-t border-emerald-500/20 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <span className="text-[11px] text-emerald-300 font-bold shrink-0">
+                🚀 أمر الرفع على GitHub & Vercel:
+              </span>
+              <code
+                className="flex-1 bg-black/60 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-mono text-emerald-300 select-all overflow-x-auto text-left"
+                dir="ltr"
+              >
+                {getGitCommitAndPushCommand('feat(cargas): update system baseline and configurations')}
+              </code>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(
+                    getGitCommitAndPushCommand('feat(cargas): update system baseline and configurations')
+                  );
+                  setCopiedAdminGitCmd(true);
+                  setTimeout(() => setCopiedAdminGitCmd(false), 3000);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition shrink-0 cursor-pointer ${
+                  copiedAdminGitCmd
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                }`}
+              >
+                {copiedAdminGitCmd ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedAdminGitCmd ? 'تم النسخ!' : 'نسخ أمر Git'}</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 

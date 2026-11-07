@@ -37,6 +37,15 @@ export interface ComprehensiveCodebasePayload {
  * - طاقم الفنيين بالمحطة (Crew)
  * - فلاتر وأنشطة الخريطة (Facility Filters)
  */
+import {
+  getAppConfig,
+  getStationLocations,
+  getRewards,
+  getStationCrew,
+  getMapFacilityFilters,
+  getMasterStationMapLogo,
+} from './storageService';
+
 export async function syncCurrentStateToCodebase(payload: ComprehensiveCodebasePayload): Promise<SyncCodebaseResponse> {
   try {
     const res = await fetch('/api/admin/sync-codebase', {
@@ -62,6 +71,56 @@ export async function syncCurrentStateToCodebase(payload: ComprehensiveCodebaseP
       error: err.toString(),
     };
   }
+}
+
+/**
+ * دالة التعميم الشاملة لحفظ وتثبيت كامل بيانات المنظومة في الكود المصدري على القرص
+ * تشمل: الإعدادات، تكلفة النقطة، حوافز الفنيين، بنك الهدايا، المحطات، الشعار، والفلاتر
+ * لتصبح جاهزة فوراً للرفع على GitHub والنشر المباشر على Vercel أو أي استضافة
+ */
+export async function syncEntireAppToCodebase(options?: {
+  customConfig?: Partial<AppConfig>;
+  stations?: CargasStationLocation[];
+  rewards?: RewardItem[];
+}): Promise<SyncCodebaseResponse> {
+  try {
+    const baseConfig = options?.customConfig
+      ? { ...getAppConfig(), ...options.customConfig }
+      : getAppConfig();
+    const stationLocations = options?.stations && options.stations.length > 0 ? options.stations : getStationLocations();
+    const navStations = stationLocations.map((st) => ({
+      ...st,
+      cng: true,
+    })) as any;
+    const rewardsList = options?.rewards && options.rewards.length > 0 ? options.rewards : getRewards();
+    const crew = getStationCrew();
+    const mapFilters = getMapFacilityFilters();
+    const logoUrl = getMasterStationMapLogo() || baseConfig.stationLogoUrl;
+
+    return await syncCurrentStateToCodebase({
+      navStations,
+      stationLocations,
+      config: baseConfig,
+      rewards: rewardsList,
+      crew,
+      mapFilters,
+      logoUrl,
+    });
+  } catch (err: any) {
+    console.error('Failed in syncEntireAppToCodebase:', err);
+    return {
+      success: false,
+      message: err.message || 'حدث خطأ أثناء جمع البيانات وتثبيتها في الكود المصدري',
+      error: err.toString(),
+    };
+  }
+}
+
+/**
+ * نص أوامر الرفع على جيت هب للنسخ السريع
+ */
+export function getGitCommitAndPushCommand(message = 'feat(cargas): update system baseline and financial rates'): string {
+  return `git add . && git commit -m "${message}" && git push`;
 }
 
 /**
