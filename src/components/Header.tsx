@@ -55,15 +55,14 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <div className="relative">
                 <div
-                  className="w-12 h-12 rounded-2xl flex items-center justify-center text-white font-black text-2xl shadow-md transition-all group-hover:rotate-6 group-hover:scale-105 overflow-hidden"
-                  style={{ backgroundColor: config.themeColor || '#059669' }}
+                  className="w-12 h-12 rounded-2xl flex items-center justify-center text-white font-black text-2xl shadow-md transition-all group-hover:rotate-6 group-hover:scale-105 overflow-hidden bg-emerald-50 border border-emerald-400/30"
                 >
                   <img
-                    src={config.appLogoUrl || '/cargas-logo.svg'}
+                    src={config.appLogoUrl || '/assets/cargas-master-logo.png'}
                     alt="لوجو كارجاس"
                     className="w-full h-full object-contain p-1"
                     onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).src = '/cargas-logo.svg';
+                      (e.currentTarget as HTMLImageElement).src = '/cargas-logo.png';
                     }}
                   />
                 </div>
@@ -78,11 +77,11 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="flex items-center gap-2">
                   {config.showAppName !== false && (
                     <h1 className="font-extrabold text-base sm:text-lg text-slate-900 tracking-tight">
-                      {config.appName}
+                      {config.appName && config.appName.includes('طريقنا واحد') ? config.appName : 'كارجاس - طريقنا واحد'}
                     </h1>
                   )}
                   <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full border border-emerald-200">
-                    كارجاس CNG
+                    طريقنا واحد 🇪🇬
                   </span>
                 </div>
                 {(config.showCompanyName !== false || config.showDeveloperName !== false) && (

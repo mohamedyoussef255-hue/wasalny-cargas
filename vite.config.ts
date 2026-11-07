@@ -212,6 +212,13 @@ function codebaseSyncPlugin(): Plugin {
               const { navStations, stationLocations, config, rewards, crew, mapFilters, logoUrl } = payload;
 
               let cleanLogoUrl = logoUrl || config?.stationLogoUrl || '';
+              const assetsDir = path.resolve(__dirname, 'public/assets');
+              const publicDir = path.resolve(__dirname, 'public');
+              const masterPngPath = path.join(assetsDir, 'cargas-master-logo.png');
+
+              if (!fs.existsSync(assetsDir)) {
+                fs.mkdirSync(assetsDir, { recursive: true });
+              }
 
               // حفظ اللوجو على القرص إذا كان base64
               if (cleanLogoUrl && cleanLogoUrl.startsWith('data:image/')) {
@@ -220,42 +227,56 @@ function codebaseSyncPlugin(): Plugin {
                   if (match) {
                     const ext = match[1].includes('svg') ? 'svg' : match[1].includes('jpeg') ? 'jpg' : 'png';
                     const base64Data = match[2];
-                    const assetsDir = path.resolve(__dirname, 'public/assets');
-                    if (!fs.existsSync(assetsDir)) {
-                      fs.mkdirSync(assetsDir, { recursive: true });
-                    }
                     const filename = `cargas-master-logo.${ext}`;
                     const targetLogoPath = path.join(assetsDir, filename);
                     fs.writeFileSync(targetLogoPath, Buffer.from(base64Data, 'base64'));
                     cleanLogoUrl = `/assets/${filename}`;
+
+                    // أيضاً تحديث ومزامنة public/cargas-logo.png و public/cargas-logo.svg بنفس الشعار تماماً
+                    const publicLogoPng = path.join(publicDir, 'cargas-logo.png');
+                    fs.writeFileSync(publicLogoPng, Buffer.from(base64Data, 'base64'));
+
+                    const publicLogoSvg = path.join(publicDir, 'cargas-logo.svg');
+                    const svgWrapper = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">\n  <image href="data:image/${ext};base64,${base64Data}" width="256" height="256" preserveAspectRatio="xMidYMid meet" />\n</svg>`;
+                    fs.writeFileSync(publicLogoSvg, svgWrapper, 'utf-8');
                   }
                 } catch (logoErr) {
                   console.error('Failed to save master logo to disk:', logoErr);
                 }
-              }
-
-              // تحديث إعدادات اللوجو المعتمدة
-              const cleanConfig = config ? { ...config } : {};
-              if (cleanLogoUrl) {
-                cleanConfig.stationLogoUrl = cleanLogoUrl;
-                cleanConfig.appLogoUrl = cleanLogoUrl;
-                cleanConfig.customAppLogoUrl = cleanLogoUrl;
-                if (cleanConfig.wasalnyConfig) {
-                  cleanConfig.wasalnyConfig.stationUnifiedLogoUrl = cleanLogoUrl;
+              } else if (!cleanLogoUrl || cleanLogoUrl === '/cargas-logo.svg') {
+                if (fs.existsSync(masterPngPath)) {
+                  cleanLogoUrl = '/assets/cargas-master-logo.png';
                 }
               }
 
+              if (!cleanLogoUrl && fs.existsSync(masterPngPath)) {
+                cleanLogoUrl = '/assets/cargas-master-logo.png';
+              }
+
+              // تحديث إعدادات اللوجو المعتمدة وتثبيت اسم وعنوان "كارجاس - طريقنا واحد"
+              const cleanConfig = config ? { ...config } : {};
+              cleanConfig.appName = 'كارجاس - طريقنا واحد';
+              cleanConfig.appTitle = 'كارجاس - طريقنا واحد';
+              cleanConfig.appSubtitle = cleanConfig.appSubtitle || 'برنامج الولاء الذكي وملاحة المحطات • شركة غاز السيارات (كارجاس)';
+              cleanConfig.stationLogoUrl = cleanLogoUrl || '/assets/cargas-master-logo.png';
+              cleanConfig.appLogoUrl = cleanLogoUrl || '/assets/cargas-master-logo.png';
+              cleanConfig.customAppLogoUrl = cleanLogoUrl || '/assets/cargas-master-logo.png';
+              if (cleanConfig.wasalnyConfig) {
+                cleanConfig.wasalnyConfig.stationUnifiedLogoUrl = cleanLogoUrl || '/assets/cargas-master-logo.png';
+                cleanConfig.wasalnyConfig.wasalnyLogoUrl = cleanLogoUrl || '/assets/cargas-master-logo.png';
+              }
+
               // تثبيت وتحديث محطات الخريطة في src/navigation/data/initialStations.ts
+              const initialStationsFilePath = path.resolve(__dirname, 'src/navigation/data/initialStations.ts');
               let cleanNavStations: any[] = [];
               if (Array.isArray(navStations) && navStations.length > 0) {
                 cleanNavStations = navStations.map((st: any) => ({
                   ...st,
                   customLogoUrl: (st.customLogoUrl && st.customLogoUrl.length > 500 && st.customLogoUrl.startsWith('data:'))
                     ? (cleanLogoUrl || undefined)
-                    : st.customLogoUrl,
+                    : (st.customLogoUrl || cleanLogoUrl || '/assets/cargas-master-logo.png'),
                 }));
 
-                const initialStationsFilePath = path.resolve(__dirname, 'src/navigation/data/initialStations.ts');
                 const initialStationsContent = `import { Station } from '../types';\n\n/**\n * محطات كارجاس المعتمدة الافتراضية (${cleanNavStations.length} محطة)\n * تم تثبيتها وحفظها مباشرة من لوحة تحكم مدير النظام (المطور محمد عبد الرحمن يوسف)\n * جاهزة للرفع على GitHub والعمل على Vercel بدون أي فقد\n */\nexport const INITIAL_CARGAS_STATIONS: Station[] = ${JSON.stringify(cleanNavStations, null, 2)};\n`;
                 fs.writeFileSync(initialStationsFilePath, initialStationsContent, 'utf-8');
               }
@@ -267,8 +288,10 @@ function codebaseSyncPlugin(): Plugin {
                   ...st,
                   customLogoUrl: (st.customLogoUrl && st.customLogoUrl.length > 500 && st.customLogoUrl.startsWith('data:'))
                     ? (cleanLogoUrl || undefined)
-                    : st.customLogoUrl,
+                    : (st.customLogoUrl || cleanLogoUrl || '/assets/cargas-master-logo.png'),
                 }));
+              } else if (cleanNavStations.length > 0) {
+                cleanLocations = cleanNavStations;
               }
 
               // تثبيت وتعميم كافة التعديلات في src/services/customInitialData.ts
@@ -288,15 +311,15 @@ function codebaseSyncPlugin(): Plugin {
  */
 export const COMMITTED_CUSTOM_CONFIG: Partial<AppConfig> | null = ${JSON.stringify(cleanConfig, null, 2)};
 
-export const COMMITTED_CUSTOM_STATIONS_LOCATIONS: CargasStationLocation[] | null = ${JSON.stringify(cleanLocations, null, 2)};
+export const COMMITTED_CUSTOM_STATIONS_LOCATIONS: CargasStationLocation[] | null = ${cleanLocations.length > 0 ? JSON.stringify(cleanLocations, null, 2) : 'null'};
 
-export const COMMITTED_MASTER_LOGO: string | null = ${JSON.stringify(cleanLogoUrl || null)};
+export const COMMITTED_MASTER_LOGO: string | null = ${JSON.stringify(cleanLogoUrl || '/assets/cargas-master-logo.png')};
 
-export const COMMITTED_REWARDS: RewardItem[] | null = ${JSON.stringify(rewards || null, null, 2)};
+export const COMMITTED_REWARDS: RewardItem[] | null = ${rewards && rewards.length > 0 ? JSON.stringify(rewards, null, 2) : 'null'};
 
-export const COMMITTED_CREW: TechnicianCrewMember[] | null = ${JSON.stringify(crew || null, null, 2)};
+export const COMMITTED_CREW: TechnicianCrewMember[] | null = ${crew && crew.length > 0 ? JSON.stringify(crew, null, 2) : 'null'};
 
-export const COMMITTED_MAP_FILTERS: MapFacilityFilterItem[] | null = ${JSON.stringify(mapFilters || null, null, 2)};
+export const COMMITTED_MAP_FILTERS: MapFacilityFilterItem[] | null = ${mapFilters && mapFilters.length > 0 ? JSON.stringify(mapFilters, null, 2) : 'null'};
 `;
               fs.writeFileSync(customDataFilePath, customDataContent, 'utf-8');
 

@@ -490,7 +490,7 @@ export const DEFAULT_WASALNY_CONFIG: WasalnyConfig = {
   appSlogan: 'مشوارك أسرع مع غاز كارجاس وأنظف للبيئة',
   appStatus: 'active',
   appVersion: 'v3.5 Enterprise',
-  wasalnyLogoUrl: '/cargas-logo.svg',
+  wasalnyLogoUrl: '/assets/cargas-master-logo.png',
   wasalnyLogoShape: 'rounded',
   wasalnyThemeColor: '#059669',
   wasalnyAccentColor: '#0284c7',
@@ -512,7 +512,7 @@ export const DEFAULT_WASALNY_CONFIG: WasalnyConfig = {
   maxDiscountPerTripEgp: 50,
   // التحكم في لوجوهات المحطات على الخريطة
   stationMarkerLogoMode: 'unified_cargas',
-  stationUnifiedLogoUrl: '/cargas-logo.svg',
+  stationUnifiedLogoUrl: '/assets/cargas-master-logo.png',
   stationMarkerStyle: 'cargas_badge',
   stationCustomLogos: {},
   stationMarkerGlowColor: '#059669',
@@ -1129,9 +1129,9 @@ export const DEFAULT_TECHNICIAN_INCENTIVE_CONFIG: TechnicianIncentiveConfig = {
 };
 
 export const DEFAULT_CONFIG: AppConfig = {
-  appName: 'منظومة كارجاس وبرنامج الولاء الذكي',
-  appSubtitle: 'لوحة التحكم والتموين الرقمي الشامل - محطة شبرا النموذجية',
-  companyName: 'شركة عزوتي للبرمجيات وتكنولوجيا المعلومات',
+  appName: 'كارجاس - طريقنا واحد',
+  appSubtitle: 'برنامج الولاء الذكي وملاحة المحطات • شركة غاز السيارات (كارجاس)',
+  companyName: 'شركة غاز السيارات (كارجاس)',
   developerName: 'محمد عبد الرحمن يوسف',
   gasPricePerMeter: 13, // 13 EGP per cubic meter
   pointsPerMeter: 1, // 1 point per 1 m3
@@ -1147,9 +1147,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   themeColor: '#059669', // Emerald
   isDarkMode: false,
   language: 'ar',
-  appLogoUrl: '/cargas-logo.svg',
-  customAppLogoUrl: '/cargas-logo.svg',
-  stationLogoUrl: '/cargas-logo.svg',
+  appLogoUrl: '/assets/cargas-master-logo.png',
+  customAppLogoUrl: '/assets/cargas-master-logo.png',
+  stationLogoUrl: '/assets/cargas-master-logo.png',
   assistantEnabled: true,
   assistantOnlyAdmin: false,
   assistantAutoSpeak: true,
@@ -2108,19 +2108,20 @@ export function getAppConfig(): AppConfig {
   if (!data) return effectiveDefault;
   try {
     const parsed = JSON.parse(data);
-    const resolvedMasterLogo = COMMITTED_MASTER_LOGO || COMMITTED_CUSTOM_CONFIG?.stationLogoUrl;
+    const resolvedMasterLogo = COMMITTED_MASTER_LOGO || COMMITTED_CUSTOM_CONFIG?.stationLogoUrl || '/assets/cargas-master-logo.png';
     return {
       ...effectiveDefault,
       ...parsed,
+      appName: parsed.appName && parsed.appName.includes('طريقنا واحد') ? parsed.appName : (effectiveDefault.appName || 'كارجاس - طريقنا واحد'),
       appLogoUrl: (parsed.appLogoUrl && parsed.appLogoUrl !== '/cargas-logo.svg' && parsed.appLogoUrl.trim().length > 0)
         ? parsed.appLogoUrl
-        : (resolvedMasterLogo || effectiveDefault.appLogoUrl || '/cargas-logo.svg'),
+        : (resolvedMasterLogo || effectiveDefault.appLogoUrl || '/assets/cargas-master-logo.png'),
       customAppLogoUrl: (parsed.customAppLogoUrl && parsed.customAppLogoUrl !== '/cargas-logo.svg' && parsed.customAppLogoUrl.trim().length > 0)
         ? parsed.customAppLogoUrl
-        : (resolvedMasterLogo || effectiveDefault.customAppLogoUrl || '/cargas-logo.svg'),
+        : (resolvedMasterLogo || effectiveDefault.customAppLogoUrl || '/assets/cargas-master-logo.png'),
       stationLogoUrl: (parsed.stationLogoUrl && parsed.stationLogoUrl !== '/cargas-logo.svg' && parsed.stationLogoUrl.trim().length > 0)
         ? parsed.stationLogoUrl
-        : (resolvedMasterLogo || effectiveDefault.stationLogoUrl || '/cargas-logo.svg'),
+        : (resolvedMasterLogo || effectiveDefault.stationLogoUrl || '/assets/cargas-master-logo.png'),
       visibility: {
         ...DEFAULT_VISIBILITY,
         ...(parsed.visibility || {}),
@@ -5177,29 +5178,8 @@ export function terminateTechnicianDeviceSession(rawPhone: string): void {
 export const MASTER_STATION_MAP_LOGO_KEY = 'cargas_master_station_map_logo_permanent';
 export const MASTER_MAP_LOGO_EVENT = 'cargas_map_logo_updated';
 
-// لوجو كارجاس الرسمي المعتمد عالي الدقة (SVG Data URI) لضمان عدم تلف الصورة مطلقاً
-export const OFFICIAL_CARGAS_VECTOR_LOGO = `data:image/svg+xml;utf8,${encodeURIComponent(`
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <defs>
-    <linearGradient id="cargasGreenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#059669" />
-      <stop offset="100%" stop-color="#022c22" />
-    </linearGradient>
-    <linearGradient id="flameGrad" x1="0%" y1="100%" x2="0%" y2="0%">
-      <stop offset="0%" stop-color="#f59e0b" />
-      <stop offset="50%" stop-color="#eab308" />
-      <stop offset="100%" stop-color="#38bdf8" />
-    </linearGradient>
-  </defs>
-  <rect width="100" height="100" rx="22" fill="url(#cargasGreenGrad)" />
-  <circle cx="50" cy="50" r="42" fill="none" stroke="#fbbf24" stroke-width="2.5" stroke-dasharray="4 2" />
-  <!-- Gas Flame Emblem -->
-  <path d="M50 18 C56 28 68 38 68 53 C68 64 59 73 49 73 C39 73 31 64 31 53 C31 43 40 32 46 25 C45 32 48 37 52 38 C53 32 52 24 50 18 Z" fill="url(#flameGrad)" />
-  <ellipse cx="49" cy="58" rx="8" ry="12" fill="#ffffff" opacity="0.9" />
-  <!-- Text Label -->
-  <text x="50" y="88" font-family="Arial, sans-serif" font-weight="900" font-size="11" fill="#fef08a" text-anchor="middle" letter-spacing="1.5">CARGAS</text>
-</svg>
-`)}`;
+// لوجو كارجاس الرسمي المعتمد عالي الدقة (شعار NGV الأخضر والذهبي الأصلي لكارجاس)
+export const OFFICIAL_CARGAS_VECTOR_LOGO = '/assets/cargas-master-logo.png';
 
 export interface MasterLogoPreset {
   id: string;
@@ -5215,7 +5195,7 @@ export const MASTER_MAP_LOGO_PRESETS: MasterLogoPreset[] = [
     id: 'cargas_official',
     title: 'شعار كارجاس الرسمي المعتمد (NGV)',
     subtitle: 'الشعار الأخضر والذهبي الأصلي لشركة الغاز الطبيعي للسيارات',
-    url: OFFICIAL_CARGAS_VECTOR_LOGO,
+    url: '/assets/cargas-master-logo.png',
     badgeText: 'CARGAS NGV',
     accentColor: '#059669',
   },

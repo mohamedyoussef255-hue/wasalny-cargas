@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { DriverProfile, AppConfig, VehicleLicenseAndConversion } from '../types';
-import { Car, User, Phone, Mail, ShieldCheck, CheckCircle2, ChevronRight, Fuel, X, Camera, Sparkles, Upload, AlertTriangle, KeyRound } from 'lucide-react';
-import { isCustomerPhoneRegistered, registerCustomerPhone, getDriverProfile } from '../services/storageService';
+import { Car, User, Phone, Mail, ShieldCheck, CheckCircle2, ChevronRight, Fuel, X, Camera, Sparkles, Upload, AlertTriangle, KeyRound, Award, MapPin } from 'lucide-react';
+import { isCustomerPhoneRegistered, registerCustomerPhone, getDriverProfile, getMasterStationMapLogo } from '../services/storageService';
 
 interface Props {
   isOpen: boolean;
@@ -203,122 +203,290 @@ export const CustomerRegistrationModal: React.FC<Props> = ({ isOpen, config, onS
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-xl w-full p-6 sm:p-8 space-y-6 text-right my-8 relative">
+      <div className="bg-white rounded-3xl max-w-xl w-full p-6 sm:p-8 space-y-6 text-right my-8 relative shadow-2xl border-2 border-emerald-500/20">
         {onClose && (
           <button
             onClick={onClose}
-            className="absolute top-4 left-4 p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition"
+            className="absolute top-4 left-4 p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition cursor-pointer"
+            title="إغلاق والتصفح كزائر"
           >
             <X className="w-5 h-5" />
           </button>
         )}
 
-        <div className="border-b border-slate-100 pb-4 text-center">
-          <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
-            استمارة تسجيل {config.customTexts?.welcomeDriverLabel || 'صديق كارجاس'}
-          </span>
-          <h2 className="text-xl font-black text-slate-900 mt-2">
-            {step === 'personal' ? '1. البيانات الشخصية وبيانات التواصل' : '2. بيانات رخصة السيارة والتحويل للغاز'}
-          </h2>
+        {/* 1. Official Header: كارجاس - طريقنا واحد (يظهر بشكل ثابت في استمارة التسجيل قبل الدخول للتطبيق) */}
+        <div className="border-b border-slate-100 pb-5 text-center space-y-3">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-100 border-2 border-emerald-500/40 p-1.5 shadow-md flex items-center justify-center overflow-hidden shrink-0">
+              <img
+                src={getMasterStationMapLogo() || config.customAppLogoUrl || config.appLogoUrl || '/assets/cargas-master-logo.png'}
+                alt="شعار كارجاس"
+                className="w-full h-full object-contain"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = '/cargas-logo.png';
+                }}
+              />
+            </div>
+            <div className="text-center sm:text-right">
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                  كارجاس - طريقنا واحد
+                </h1>
+                <span className="text-[10px] bg-emerald-600 text-white font-black px-2.5 py-0.5 rounded-full shadow-xs">
+                  طريقنا واحد 🇪🇬
+                </span>
+              </div>
+              <p className="text-xs font-bold text-emerald-800 mt-0.5">
+                شركة غاز السيارات (كارجاس) • إحدى شركات قطاع البترول المصري
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Badges */}
+          <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1">
+            <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 px-3 py-0.5 rounded-full flex items-center gap-1">
+              <span>🧭</span>
+              <span>خريطة وملاحة المحطات عبر خرائط جوجل</span>
+            </span>
+            <span className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-300 px-3 py-0.5 rounded-full flex items-center gap-1">
+              <span>🎁</span>
+              <span>150 نقطة بونص ترحيبي فوري</span>
+            </span>
+            <span className="text-[11px] font-bold text-teal-800 bg-teal-50 border border-teal-300 px-3 py-0.5 rounded-full flex items-center gap-1">
+              <span>⛽</span>
+              <span>300+ محطة ومراكز صيانة وفحص أسطوانات</span>
+            </span>
+          </div>
+
+          {/* Steps Progress Indicator (if in form mode) */}
+          {step !== 'splash' && (
+            <div className="pt-2">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-700 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                <span className={step === 'personal' ? 'text-emerald-700 font-black' : 'text-slate-400'}>
+                  1. البيانات الشخصية وبيانات التواصل
+                </span>
+                <span className="text-slate-300">←</span>
+                <span className={step === 'vehicle' ? 'text-emerald-700 font-black' : 'text-slate-400'}>
+                  2. رخصة وسيارة الغاز وفحص الأسطوانة
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
-        <form onSubmit={step === 'personal' ? handlePersonalNext : handleSubmit} className="space-y-4 text-xs">
-          {step === 'personal' ? (
-            <>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">الاسم بالكامل *</label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="مثال: أحمد عبد الرحمن مصطفى"
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900"
-                />
+        {/* 2. Step: Splash Welcoming Screen (قبل بدء ملء البيانات) */}
+        {step === 'splash' && (
+          <div className="space-y-4 animate-in fade-in">
+            <div className="bg-gradient-to-br from-emerald-950 via-slate-900 to-teal-950 text-white p-5 rounded-2xl border border-emerald-500/40 text-center space-y-2.5 shadow-inner">
+              <div className="inline-flex items-center gap-1.5 text-xs font-black text-emerald-400 bg-emerald-500/20 px-3 py-1 rounded-full border border-emerald-500/30">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>منظومة وبرنامج الولاء وملاحة محطات كارجاس 🇪🇬</span>
               </div>
+              <h3 className="text-base sm:text-lg font-black text-white">
+                أهلاً بك في تطبيق كارجاس (طريقنا واحد)!
+              </h3>
+              <p className="text-xs text-slate-300 leading-relaxed max-w-md mx-auto">
+                سجل بياناتك وسيارتك الآن لتحصل فوراً على <strong className="text-amber-400">150 نقطة ولاء ترحيبية مجاناً</strong>، وتستمتع بالملاحة اللحظية لأقرب 3 محطات ومراكز تحويل وصيانة وفحص أسطوانات وزيوت معتمدة عبر خرائط جوجل، ومسح الـ QR عند كل تفويلة لكسب النقاط والهدايا الفورية!
+              </p>
+            </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1 flex items-center justify-between">
-                  <span>رقم الموبايل *</span>
-                  <span className="text-[10px] text-slate-400">لا يُسمح بتكرار نفس الرقم لحسابين</span>
-                </label>
+            {/* Quick 3 Feature Highlights */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-center space-y-1">
+                <span className="text-2xl block">🧭</span>
+                <span className="font-black text-slate-900 block">ملاحة جوجل ماب</span>
+                <span className="text-[10px] text-slate-500 block">توجيه فوري لأقرب 3 محطات ومراكز فحص وزيوت</span>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-center space-y-1">
+                <span className="text-2xl block">🎁</span>
+                <span className="font-black text-slate-900 block">بنك الهدايا 100+</span>
+                <span className="text-[10px] text-slate-500 block">خصومات على جراكن الزيت وأمتار غاز مجانية</span>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-center space-y-1">
+                <span className="text-2xl block">🛠️</span>
+                <span className="font-black text-slate-900 block">متابعة الفحص والصيانة</span>
+                <span className="text-[10px] text-slate-500 block">تنبيهات مواعيد فحص الأسطوانة وتغيير الزيت</span>
+              </div>
+            </div>
+
+            {/* Direct Quick Login for Existing Account */}
+            <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200 space-y-2">
+              <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                <KeyRound className="w-4 h-4 text-amber-700" />
+                <span>لديك حساب مسجل بالفعل؟ ادخل برقم هاتفك فوراً:</span>
+              </span>
+              <div className="flex gap-2">
                 <input
                   type="tel"
-                  required
+                  placeholder="010XXXXXXXX"
                   value={phone}
                   onChange={(e) => {
                     setPhone(e.target.value);
                     setPhoneError('');
                     setRegisteredDriverFound(null);
                   }}
-                  placeholder="010XXXXXXXX"
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-900"
+                  className="flex-1 p-2.5 bg-white border border-amber-300 rounded-xl font-mono font-bold text-xs text-slate-900 text-left"
+                  dir="ltr"
                 />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!phone.trim()) {
+                      setPhoneError('يرجى إدخال رقم الهاتف أولاً');
+                      return;
+                    }
+                    const check = isCustomerPhoneRegistered(phone);
+                    if (check.isRegistered && check.driver) {
+                      handleRecoverExistingAccount(check.driver);
+                    } else {
+                      setPhoneError('هذا الرقم غير مسجل مسبقاً. يمكنك تسجيل حساب جديد الآن.');
+                    }
+                  }}
+                  className="bg-amber-600 hover:bg-amber-700 text-white font-black px-4 py-2 rounded-xl text-xs transition cursor-pointer shadow-sm active:scale-95"
+                >
+                  دخول سريع 📱
+                </button>
               </div>
-
               {phoneError && (
-                <div className="p-3.5 bg-rose-50 border-2 border-rose-300 rounded-2xl text-rose-800 space-y-2 animate-in fade-in">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                    <p className="font-bold text-[11px] leading-relaxed">{phoneError}</p>
-                  </div>
-                  {registeredDriverFound && (
-                    <button
-                      type="button"
-                      onClick={() => handleRecoverExistingAccount(registeredDriverFound)}
-                      className="w-full bg-rose-700 hover:bg-rose-800 text-white font-black py-2 px-3 rounded-xl transition text-xs flex items-center justify-center gap-1.5 shadow-sm"
-                    >
-                      <KeyRound className="w-3.5 h-3.5" />
-                      <span>استرجاع الحساب المسجل ({registeredDriverFound.name}) والدخول به فوراً</span>
-                    </button>
-                  )}
-                </div>
+                <p className="text-[11px] font-bold text-rose-700 mt-1">{phoneError}</p>
               )}
+            </div>
 
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer">
+            {/* Primary Action Buttons */}
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setPhoneError('');
+                  setStep('personal');
+                }}
+                className="w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black py-3.5 rounded-2xl text-sm transition shadow-lg flex items-center justify-center gap-2 active:scale-98 cursor-pointer"
+              >
+                <Car className="w-4 h-4" />
+                <span>تسجيل حساب جديد كصديق كارجاس (150 نقطة هدية) 🚗</span>
+              </button>
+
+              {onClose && (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs transition cursor-pointer"
+                >
+                  تخطي والدخول للتطبيق واستكشاف الخريطة كزائر 🏃
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 3. Steps Form (Personal & Vehicle) */}
+        {step !== 'splash' && (
+          <form onSubmit={step === 'personal' ? handlePersonalNext : handleSubmit} className="space-y-4 text-xs animate-in fade-in">
+            {step === 'personal' ? (
+              <>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">الاسم بالكامل *</label>
                   <input
-                    type="checkbox"
-                    checked={isWhatsApp}
-                    onChange={(e) => setIsWhatsApp(e.target.checked)}
-                    className="w-4 h-4 text-emerald-600 rounded"
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="مثال: أحمد عبد الرحمن مصطفى"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900"
                   />
-                  <span className="font-bold text-slate-800">رقم الموبايل أعلاه هو نفسه رقم الواتساب الرسمي</span>
-                </label>
-                {!isWhatsApp && (
-                  <div>
-                    <label className="block text-[11px] text-slate-500 mb-1">اكتب رقم الواتساب الخاص بك:</label>
-                    <input
-                      type="tel"
-                      value={whatsappPhone}
-                      onChange={(e) => setWhatsappPhone(e.target.value)}
-                      placeholder="رقم الواتساب لاستقبال الهدايا..."
-                      className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-mono text-xs"
-                    />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1 flex items-center justify-between">
+                    <span>رقم الموبايل *</span>
+                    <span className="text-[10px] text-slate-400">لا يُسمح بتكرار نفس الرقم لحسابين</span>
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={phone}
+                    onChange={(e) => {
+                      setPhone(e.target.value);
+                      setPhoneError('');
+                      setRegisteredDriverFound(null);
+                    }}
+                    placeholder="010XXXXXXXX"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-900"
+                  />
+                </div>
+
+                {phoneError && (
+                  <div className="p-3.5 bg-rose-50 border-2 border-rose-300 rounded-2xl text-rose-800 space-y-2 animate-in fade-in">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      <p className="font-bold text-[11px] leading-relaxed">{phoneError}</p>
+                    </div>
+                    {registeredDriverFound && (
+                      <button
+                        type="button"
+                        onClick={() => handleRecoverExistingAccount(registeredDriverFound)}
+                        className="w-full bg-rose-700 hover:bg-rose-800 text-white font-black py-2 px-3 rounded-xl transition text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <KeyRound className="w-3.5 h-3.5" />
+                        <span>استرجاع الحساب المسجل ({registeredDriverFound.name}) والدخول به فوراً</span>
+                      </button>
+                    )}
                   </div>
                 )}
-              </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">البريد الإلكتروني (اختياري)</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@example.com"
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs"
-                />
-              </div>
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isWhatsApp}
+                      onChange={(e) => setIsWhatsApp(e.target.checked)}
+                      className="w-4 h-4 text-emerald-600 rounded"
+                    />
+                    <span className="font-bold text-slate-800">رقم الموبايل أعلاه هو نفسه رقم الواتساب الرسمي</span>
+                  </label>
+                  {!isWhatsApp && (
+                    <div>
+                      <label className="block text-[11px] text-slate-500 mb-1">اكتب رقم الواتساب الخاص بك:</label>
+                      <input
+                        type="tel"
+                        value={whatsappPhone}
+                        onChange={(e) => setWhatsappPhone(e.target.value)}
+                        placeholder="رقم الواتساب لاستقبال الهدايا..."
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-mono text-xs"
+                      />
+                    </div>
+                  )}
+                </div>
 
-              <button
-                type="submit"
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-xl text-sm transition mt-4 shadow-md"
-              >
-                التالي: بيانات رخصة السيارة والتحويل ←
-              </button>
-            </>
-          ) : (
-            <>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">البريد الإلكتروني (اختياري)</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setStep('splash')}
+                    className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer transition"
+                  >
+                    ← عودة للرئيسية
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-xl text-sm transition shadow-md cursor-pointer"
+                  >
+                    التالي: بيانات رخصة السيارة والتحويل ←
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
               {/* Photo & Plate OCR Trigger Banner */}
               <div
                 onClick={handleOpenPlateScanner}
@@ -487,6 +655,7 @@ export const CustomerRegistrationModal: React.FC<Props> = ({ isOpen, config, onS
             </>
           )}
         </form>
+        )}
 
         {/* Live Camera License Plate OCR Modal */}
         {isPlateScannerOpen && (

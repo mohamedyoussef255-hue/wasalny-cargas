@@ -125,15 +125,14 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           >
             <div className="relative w-11 h-11 md:w-12 md:h-12 rounded-full shadow-md border-2 border-emerald-600 overflow-hidden bg-white p-0.5">
               <div className="w-full h-full flex items-center justify-center">
-                {config.customAppLogoUrl ? (
-                  <img
-                    src={config.customAppLogoUrl}
-                    alt="Logo"
-                    className="w-full h-full object-contain"
-                  />
-                ) : (
-                  <div dangerouslySetInnerHTML={{ __html: CARGAS_LOGO_SVG }} className="w-full h-full" />
-                )}
+                <img
+                  src={config.customAppLogoUrl || '/assets/cargas-master-logo.png'}
+                  alt="شعار كارجاس"
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = '/cargas-logo.png';
+                  }}
+                />
               </div>
               {tapCount > 1 && (
                 <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black flex items-center justify-center animate-bounce">
