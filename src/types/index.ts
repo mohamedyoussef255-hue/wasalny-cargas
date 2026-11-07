@@ -186,6 +186,7 @@ export interface RewardItem {
   discountPercentage?: number;    // نسبة الخصم %
   couponCodeValue?: string;       // كود الكوبون
   aiAuditNotes?: string;          // تقرير وتوصية الذكاء الاصطناعي لتحري دقة التسعير
+  marketingDescription?: string;  // الوصف التسويقي الجذاب المخصص للعميل
   freeMetersEquivalent?: number;  // للأمتار للتوافق الخلفي
 }
 
@@ -299,6 +300,20 @@ export interface VisibilitySettings {
   };
 }
 
+// إعدادات إظهار وإخفاء الأيقونات والخدمات السريعة في بطاقة الترحيب بصفحة العميل
+export interface DriverQuickIconsVisibility {
+  qr_code: boolean;         // كود التموين QR 📱
+  navigation: boolean;      // طريقنا واحد 🧭 (الملاحة لأقرب محطة)
+  golden_card: boolean;     // كارت الولاء الذهبي 💳
+  rewards: boolean;         // استبدال النقاط 🎁
+  maintenance: boolean;     // جدول الصيانة 🔧
+  history: boolean;         // سجل التموينات 📋
+  rating: boolean;          // تقييم الفني ⭐
+  complaints: boolean;      // خدمة العملاء 19058 📨
+  chat: boolean;            // شات الدعم 💬
+  update_profile: boolean;  // طلب تعديل بياناتي ✏️
+}
+
 // مقاييس مبيعات ومستهدفات وانحرافات الشهر الواحد
 export interface MonthSalesMetric {
   actual: number;      // المبيعات الفعلية للشهر (م³)
@@ -358,7 +373,7 @@ export interface CustomComputedColumn {
   operand2Type: 'column' | 'constant'; // عمود آخر أم رقم ثابت
   operand2Key?: string; // مفتاح العمود الثاني
   operand2Label?: string;
-  operand2Constant?: number; // الرقم الثابت (مثل 13 جنيه/متر أو 180 يوم أو 0.35 جنيه/نقطة)
+  operand2Constant?: number; // الرقم الثابت (مثل 13 جنيه/متر أو 180 يوم أو 0.15 جنيه/نقطة)
   unit?: string; // الوحدة (م³، جنية، %، نقطة، يوم)
   displayFormat: 'standard' | 'signed' | 'percentage' | 'currency'; // طريقة العرض والتنسيق
   createdAt: string;
@@ -367,13 +382,13 @@ export interface CustomComputedColumn {
 // نموذج إدارة وتكلفة النقاط والعائد والمعيار الاقتصادي الرسمي
 export interface LoyaltyCostModel {
   activeModelName: 'قياسي 1:1' | 'ترويجي للمحطات المنخفضة' | 'باقة التاكسي والشركات' | 'أوقات غير الذروة';
-  costPerPointEgp: number;         // تكلفة النقطة الواحدة على الشركة بالجنية (افتراضي 0.35 ج)
+  costPerPointEgp: number;         // تكلفة النقطة الواحدة على الشركة بالجنية (معتمد الإدارة المالية 0.15 ج)
   expectedMarginGainPct: number;   // العائد المتوقع من زيادة الولاء % (افتراضي 28%)
   totalPromotionalBudgetEgp: number; // إجمالي موازنة الترويج المعتمدة
   allocatedBudgetSumEgp: number;
   // المعيار الاقتصادي الرسمي القابل للتعديل بالكامل
   officialGasPrice?: number;                 // سعر المتر الرسمي الافتراضي 13 ج
-  officialCostPerPoint?: number;             // تكلفة النقطة الرسمية الافتراضية 0.35 ج
+  officialCostPerPoint?: number;             // تكلفة النقطة الرسمية المعتمدة من المالية (0.15 ج)
   officialGasolineSavingsPerMeter?: number;  // وفر السائق لكل متر مقارنة بالبنزين 10.5 ج
   officialMarginGainPct?: number;            // نسبة نمو هامش أرباح الشركة 28%
   centennialMeters?: number;                 // أمتار باقة المئوية 108 م³
@@ -452,6 +467,8 @@ export interface AppConfig {
   customSalesColumns?: CustomComputedColumn[];
   // الحملات الترويجية والمسابقات وبانر العروض للعملاء
   promotionalCampaigns?: PromotionalCampaign[];
+  // إخفاء التحليل الاستشاري الذكي لمُعِين عن العميل والسائق عند عرض الهدايا
+  hideAiAuditFromCustomers?: boolean;
   // بنك الأفكار والهدايا والروابط لمدير النظام
   ideasBank?: IdeaBankItem[];
   // إعدادات وتحكم مدير النظام في تطبيق وصّلني والملاحة
@@ -496,12 +513,20 @@ export interface SectionLayoutItem {
   icon?: string;
 }
 
-// إعدادات ترتيب ومواضع ومقاسات عناصر صفحات العميل والفني
+// إعدادات ترتيب ومواضع ومقاسات عناصر كافة صفحات التطبيق (العميل، الفني، المشرف، الشكاوى، خدمة العملاء، المالية)
 export interface PageLayoutSettings {
   driverSectionsOrder: string[];
   technicianSectionsOrder: string[];
   driverSections: SectionLayoutItem[];
   technicianSections: SectionLayoutItem[];
+  supervisorSectionsOrder?: string[];
+  supervisorSections?: SectionLayoutItem[];
+  complaintsSectionsOrder?: string[];
+  complaintsSections?: SectionLayoutItem[];
+  customerServiceSectionsOrder?: string[];
+  customerServiceSections?: SectionLayoutItem[];
+  financeSectionsOrder?: string[];
+  financeSections?: SectionLayoutItem[];
 }
 
 // هيكل جلسة التموين التلقائية بنظام السكادا (fueling_sessions)
@@ -570,7 +595,7 @@ export interface PointsFormulaConfig {
   volumeBonusThresholdM3: number;    // كمية التموين التي تمنح بونص حجم إضافي (مثلاً 30 م³)
   volumeBonusPoints: number;         // بونص النقاط عند تجاوز الحد (مثلاً 10 نقاط)
   technicianWelcomePointsPerShift: number; // رصيد النقاط الترحيبية المتاح للفني في الوردية لتوزيعه (مثلاً 350 نقطة)
-  pointsToEgpRedemptionRatio: number;// القيمة التقديرية للنقطة بالجنيه (0.35 ج)
+  pointsToEgpRedemptionRatio: number;// القيمة التقديرية للنقطة بالجنيه (معتمد المالية 0.15 ج)
 }
 
 // خدمات حجز مواعيد الصيانة وفحص الأسطوانات
@@ -670,7 +695,7 @@ export interface WasalnyConfig {
   wasalnyLogoShape?: 'square' | 'rounded' | 'circle'; // شكل اللوجو
   wasalnyThemeColor?: string;            // اللون الرئيسي
   wasalnyAccentColor?: string;           // اللون الثانوي
-  voiceGuidance: 'wadah_egyptian' | 'moen_advisor' | 'standard_arabic' | 'silent'; // الصوت المرشد
+  voiceGuidance: 'shakir_egyptian' | 'hamed_arabic' | 'wadah_egyptian' | 'moen_advisor' | 'standard_arabic' | 'silent'; // الصوت المرشد (شاكر، حامد، وضاح، مُعين، فصحى، صامت)
   autoVoiceOnOpen: boolean;              // تشغيل الصوت التوجيهي تلقائياً فور فتح وصّلني
   navigationProvider: 'google_maps' | 'in_app' | 'ask_user'; // مزود الملاحة الافتراضي
   targetStationMode: 'auto_gps' | 'featured_station'; // توجيه تلقائي لأقرب محطة بالـ GPS أم لمحطة مستهدفة محددة
@@ -935,6 +960,30 @@ export interface TechnicianIncentiveConfig {
   volumeBonusThresholdM3: number;       // حد كمية الأمتار الإضافية للبونص (مثلاً: 500 م³)
   volumeBonusRewardEgp: number;         // مكافأة تجاوز حد الكمية بالجنيه (مثلاً: 50 جنيه)
   isEnabled: boolean;                   // تفعيل احتساب الحوافز المالية
+}
+
+// طلب تعديل بيانات العميل المرسل لخدمة العملاء ومدير النظام
+export interface CustomerDataUpdateRequest {
+  id: string;
+  driverId: string;
+  driverName: string;
+  driverPhone: string;
+  currentCarPlate: string;
+  currentCarModel: string;
+  currentCngCylinderCapacity: number;
+  currentOdometerKm: number;
+  requestedName: string;
+  requestedPhone: string;
+  requestedCarPlate: string;
+  requestedCarModel: string;
+  requestedCngCylinderCapacity: number;
+  requestedOdometerKm: number;
+  requestNotes?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  submittedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  adminNotes?: string;
 }
 
 

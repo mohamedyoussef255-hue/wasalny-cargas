@@ -46,7 +46,7 @@ export const MoenAssistant: React.FC<MoenAssistantProps> = ({
   useEffect(() => {
     if (messages.length === 0) {
       const welcomeText =
-        'يا مرحب بيك يا بطل! أنا "مُعِين"، مساعدك الشخصي الذكي والمطور حصرياً بواسطة شركة عِزوتي للبرمجيات وتكنولوجيا المعلومات والمهندس محمد عبد الرحمن يوسف. مِتولِّف بروح وضاح الجدع وعقل كابتن لوكا وإنجازه السريع.. أؤمرني: عايز تفهم تفاصيل التموين ونقاط الولاء؟ ولا مسح الـ QR والـ GPS؟ ولا شرح تطبيق ستوب للسلامة ومتابعة محطات كارجاس؟ أنا في ضهرك دايماً!';
+        'يا مرحب بيك يا بطل! أنا "مُعِين"، مساعدك الشخصي الذكي لمنظومة كارجاس.. مِتولِّف بروح وطنية وإنجاز سريع. أؤمرني: عايز تفهم تفاصيل التموين ونقاط الولاء؟ ولا مسح الـ QR والـ GPS؟ ولا شرح تطبيق ستوب للسلامة ومتابعة محطات كارجاس؟ أنا في ضهرك دايماً!';
       
       setMessages([
         {
@@ -54,7 +54,7 @@ export const MoenAssistant: React.FC<MoenAssistantProps> = ({
           sender: 'moen',
           text: welcomeText,
           timestamp: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
-          badge: 'عزوتي الذكية',
+          badge: 'مساعد كارجاس الذكي',
         },
       ]);
     }
@@ -189,9 +189,9 @@ export const MoenAssistant: React.FC<MoenAssistantProps> = ({
       return 'لوحة مدير النظام بتفتح بطريقة ذكية وسرية: اضغط 5 مرات متتالية ورا بعض على لوجو المحطة فوق في الهيدر، هيطلب منك كلمة السر الافتراضية وهى (0000). من جوة هتقدر تعدل أي كلمة في التطبيق، وتغير سعر المتر، وتولد أكواد المضخات والمتاجر وتطبعها، وترفع شيت إكسيل الطاقم وتبعت لهم على الواتساب!';
     }
 
-    // 7. Identity & Ezouti & Mohamed Youssef
-    if (q.includes('مين انت') || q.includes('عزوتي') || q.includes('محمد عبد الرحمن') || q.includes('مين طورك') || q.includes('حقوق')) {
-      return 'أنا "مُعِين"، المساعد الذكي الحصري لشركة عزوتي للبرمجيات وتكنولوجيا المعلومات ومبتكري ومالكي هو المطور والمهندس محمد عبد الرحمن يوسف. كافة حقوق الملكية وتصميم المنظومة وبرمجتها ملكية حصرية بالكامل لشركة عزوتي ومحمد عبد الرحمن يوسف، ومصمم لخدمة كارجاس بأعلى معايير الحوكمة والذكاء.';
+    // 7. Identity & Cargas System
+    if (q.includes('مين انت') || q.includes('مين طورك') || q.includes('حقوق') || q.includes('النظام')) {
+      return 'أنا "مُعِين"، المساعد الذكي الرسمي لمنظومة كارجاس للغاز الطبيعي للسيارات، أساعدك في توجيه الملاحة، معرفة رصيد نقاط التموين، وإرشادات السلامة بأعلى معايير الجودة.';
     }
 
     // Default friendly answer
@@ -336,11 +336,11 @@ export const MoenAssistant: React.FC<MoenAssistantProps> = ({
             </div>
           </div>
 
-          {/* Subheader info: Intellectual Property badge */}
+          {/* Subheader info */}
           <div className="bg-emerald-50 px-3.5 py-1.5 border-b border-emerald-100 flex items-center justify-between text-[10px] text-emerald-900">
             <span className="font-semibold flex items-center gap-1">
               <Shield className="w-3 h-3 text-emerald-600" />
-              مبتكر ومنفذ بواسطة: م. محمد عبد الرحمن يوسف
+              منظومة كارجاس الذكية للدعم وخدمة العملاء
             </span>
             <span className="text-emerald-700 font-mono">v2.6 Enterprise</span>
           </div>

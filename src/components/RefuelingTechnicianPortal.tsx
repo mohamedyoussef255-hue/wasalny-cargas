@@ -664,7 +664,7 @@ export const RefuelingTechnicianPortal: React.FC<RefuelingTechnicianPortalProps>
                 كارجاس تتمنى لكم رحلة آمنة • خط الشكاوى: 19058
               </p>
               <p className="text-[9px] text-slate-400 mt-0.5">
-                نظام إدارة المحطات - تطوير شركة عزوتي (م/ محمد عبد الرحمن يوسف)
+                منظومة كارجاس الذكية المعتمدة لإدارة المحطات والتموين
               </p>
             </div>
 

@@ -456,7 +456,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
 
       {/* Google Maps Style Floating Zoom Controls */}
       {!navigationState.isActive && (
-        <div className="fixed bottom-24 right-4 z-[500] flex flex-col gap-1.5 shadow-2xl">
+        <div className="absolute bottom-20 sm:bottom-24 right-4 z-[400] flex flex-col gap-1.5 shadow-2xl">
           <button
             onClick={handleZoomIn}
             className="w-11 h-11 bg-white hover:bg-slate-100 text-slate-800 rounded-xl shadow-lg border border-slate-200 flex items-center justify-center font-bold text-lg cursor-pointer transition active:scale-95"

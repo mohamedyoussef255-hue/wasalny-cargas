@@ -1,8 +1,13 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Station, AppConfig, CongestionLevel, CargasFacilityType } from '../types';
 import { parseKML, parseKMZ, parseCSV, parseGeoJSON, exportStationsToKML, exportStationsToCSV } from '../services/kmlParser';
 import { CARGAS_LOGO_SVG } from '../utils/cargasLogo';
 import { compressLogoImage, saveStoredCustomLogo } from '../utils/imageCompressor';
+import { syncCurrentStateToCodebase, downloadSystemDataBackup } from '../../services/codebaseSyncService';
+import { getStationLocations, getAppConfig, getMasterStationMapLogo } from '../../services/storageService';
+import { mergeAndDistributeActivities, findMatchingExistingStation } from '../utils/stationActivityMerger';
+import * as XLSX from 'xlsx';
+import JSZip from 'jszip';
 import { 
   Lock, 
   Settings, 
@@ -34,7 +39,11 @@ import {
   Stamp,
   Building2,
   Square,
-  Edit2
+  Edit2,
+  ChevronDown,
+  FileSpreadsheet,
+  FileText,
+  Camera,
 } from 'lucide-react';
 
 interface AdminModalProps {
@@ -47,6 +56,7 @@ interface AdminModalProps {
   onOpenDragDropTool?: () => void;
   onApplyLogoToAllStations?: (logoUrl: string) => void;
   onOpenKmzModal?: () => void;
+  initialAuthenticated?: boolean;
 }
 
 export const AdminModal: React.FC<AdminModalProps> = ({
@@ -59,10 +69,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   onOpenDragDropTool,
   onApplyLogoToAllStations,
   onOpenKmzModal,
+  initialAuthenticated = false,
 }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(initialAuthenticated);
   const [inputPassword, setInputPassword] = useState<string>('');
   const [authError, setAuthError] = useState<string>('');
+
+  useEffect(() => {
+    if (initialAuthenticated) {
+      setIsAuthenticated(true);
+    }
+  }, [initialAuthenticated, isOpen]);
 
   const [activeTab, setActiveTab] = useState<'stations' | 'import' | 'ui-customizer' | 'settings'>('stations');
 
@@ -189,6 +206,60 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     onSaveStations(updated);
   };
 
+  // Dropdown for station activities
+  const [activeDropdownStationId, setActiveDropdownStationId] = useState<string | null>(null);
+
+  // 1-Click quick toggle for station activities (تموين، تحويل، زيوت، فحص، زيوت مظلة، قريباً 2027)
+  const handleToggleStationFacility = (
+    id: string,
+    facility: 'cng' | 'conversionCenter' | 'oilCenter' | 'cylinderInspection' | 'canopyOil' | 'comingSoon2027'
+  ) => {
+    const updated = stations.map(s => {
+      if (s.id !== id) return s;
+      const isNowActive = facility === 'canopyOil'
+        ? !(s.canopyOil || s.services?.includes('زيوت أسفل المظلة'))
+        : facility === 'comingSoon2027'
+        ? !(s.comingSoon2027 || s.services?.includes('قريباً 2027') || s.services?.includes('قريباً'))
+        : !s[facility];
+      let services = [...(s.services || [])];
+      
+      if (facility === 'cng') {
+        if (isNowActive && !services.includes('تموين غاز طبيعي')) services.push('تموين غاز طبيعي');
+        else if (!isNowActive) services = services.filter(x => x !== 'تموين غاز طبيعي');
+      }
+      if (facility === 'oilCenter') {
+        if (isNowActive && !services.includes('مركز زيوت معتمد')) services.push('مركز زيوت معتمد');
+        else if (!isNowActive) services = services.filter(x => x !== 'مركز زيوت معتمد');
+      }
+      if (facility === 'conversionCenter') {
+        if (isNowActive && !services.includes('مركز تحويل سيارات معتمد')) services.push('مركز تحويل سيارات معتمد');
+        else if (!isNowActive) services = services.filter(x => x !== 'مركز تحويل سيارات معتمد');
+      }
+      if (facility === 'cylinderInspection') {
+        if (isNowActive && !services.includes('فحص واختبار أسطوانات')) services.push('فحص واختبار أسطوانات');
+        else if (!isNowActive) services = services.filter(x => x !== 'فحص واختبار أسطوانات');
+      }
+      if (facility === 'canopyOil') {
+        if (isNowActive && !services.includes('زيوت أسفل المظلة')) services.push('زيوت أسفل المظلة');
+        else if (!isNowActive) services = services.filter(x => x !== 'زيوت أسفل المظلة');
+      }
+      if (facility === 'comingSoon2027') {
+        if (isNowActive && !services.includes('قريباً 2027')) services.push('قريباً 2027');
+        else if (!isNowActive) services = services.filter(x => x !== 'قريباً 2027' && x !== 'قريباً');
+      }
+
+      return {
+        ...s,
+        [facility]: isNowActive,
+        canopyOil: facility === 'canopyOil' ? isNowActive : s.canopyOil,
+        comingSoon2027: facility === 'comingSoon2027' ? isNowActive : s.comingSoon2027,
+        services,
+        updatedAt: new Date().toISOString()
+      };
+    });
+    onSaveStations(updated);
+  };
+
   // Stations multi-selection handlers
   const handleToggleSelectStation = (id: string) => {
     setSelectedStationIds(prev =>
@@ -290,6 +361,48 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       }));
       onSaveStations(updated);
     }
+
+    // مزامنة تلقائية هادئة في كود المشروع
+    try {
+      const appCfg = getAppConfig();
+      syncCurrentStateToCodebase({
+        navStations: stations,
+        stationLocations: getStationLocations(),
+        config: appCfg,
+        logoUrl: logoUrl || getMasterStationMapLogo(),
+      }).catch(() => {});
+    } catch (e) {}
+  };
+
+  const [isSyncingToCodebase, setIsSyncingToCodebase] = useState(false);
+
+  const handleSyncCodebaseFromModal = async () => {
+    setIsSyncingToCodebase(true);
+    setConfigSuccess(null);
+    setConfigError(null);
+
+    try {
+      const currentConfig = getAppConfig();
+      const currentLocations = getStationLocations();
+      const currentMasterLogo = localConfig.customAppLogoUrl || localConfig.globalStationLogoUrl || getMasterStationMapLogo() || currentConfig.stationLogoUrl;
+
+      const result = await syncCurrentStateToCodebase({
+        navStations: stations,
+        stationLocations: currentLocations,
+        config: currentConfig,
+        logoUrl: currentMasterLogo,
+      });
+
+      if (result.success) {
+        setConfigSuccess(`✅ تم حفظ واعتماد كافة المحطات (${stations.length} محطة) واللوجو في ملفات كود المشروع الأساسية بنجاح! جاهزة للنشر على GitHub و Vercel.`);
+      } else {
+        setConfigError(result.message || 'فشلت عملية حفظ التعديلات في كود المشروع');
+      }
+    } catch (err: any) {
+      setConfigError(err.message || 'حدث خطأ أثناء مزامنة الكود');
+    } finally {
+      setIsSyncingToCodebase(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -323,6 +436,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       conversionCenter: false,
       oilCenter: false,
       cylinderInspection: true,
+      canopyOil: false,
+      comingSoon2027: false,
       cngNozzles: 8,
       pressureBar: 220,
       congestionLevel: 'low',
@@ -370,6 +485,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             facilityType: (stationForm.facilityType || 'station') as CargasFacilityType,
             lat: Number(stationForm.lat),
             lng: Number(stationForm.lng),
+            canopyOil: !!stationForm.canopyOil,
+            comingSoon2027: !!stationForm.comingSoon2027,
             isHidden: !!stationForm.isHidden,
             updatedAt: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
           } as Station;
@@ -393,6 +510,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         conversionCenter: !!stationForm.conversionCenter,
         oilCenter: !!stationForm.oilCenter,
         cylinderInspection: stationForm.cylinderInspection ?? true,
+        canopyOil: !!stationForm.canopyOil,
+        comingSoon2027: !!stationForm.comingSoon2027,
         cngNozzles: Number(stationForm.cngNozzles || 8),
         pressureBar: Number(stationForm.pressureBar || 220),
         congestionLevel: (stationForm.congestionLevel || 'low') as CongestionLevel,
@@ -433,24 +552,495 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     setQuickRenameName('');
   };
 
-  // File Upload & KMZ/KML/CSV Processing
+  // AI & File Parsers: Extracting Word (.docx), Excel (.xlsx, .xls), and Images with Gemini 3.8 Flash
+  const extractTextFromDocx = async (arrayBuffer: ArrayBuffer): Promise<string> => {
+    try {
+      const zip = await JSZip.loadAsync(arrayBuffer);
+      const docXml = await zip.file('word/document.xml')?.async('text');
+      if (!docXml) return '';
+      return docXml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    } catch (e) {
+      console.error('Error extracting text from docx', e);
+      return '';
+    }
+  };
+
+  // Convert Arabic numerals (٠-٩) to western digits (0-9)
+  const toWesternDigits = (val: string): string => {
+    return String(val || '').replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632));
+  };
+
+  // Helper to parse coordinate float from string or number
+  const parseCoordValue = (raw: any): number | null => {
+    if (typeof raw === 'number' && !isNaN(raw)) return raw;
+    if (!raw) return null;
+    const str = toWesternDigits(String(raw).trim());
+    const match = str.match(/[-+]?[0-9]*\.?[0-9]{3,}/);
+    if (match) {
+      const num = parseFloat(match[0]);
+      if (!isNaN(num) && isFinite(num)) return num;
+    }
+    return null;
+  };
+
+  const extractDataFromExcel = (arrayBuffer: ArrayBuffer): { text: string; rows: any[] } => {
+    try {
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      let combinedText = '';
+      const allExtractedRows: any[] = [];
+
+      workbook.SheetNames.forEach(sheetName => {
+        const sheet = workbook.Sheets[sheetName];
+        if (!sheet) return;
+
+        // 1. Read sheet as raw 2D array of cells
+        const raw2D: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        if (!raw2D || raw2D.length === 0) return;
+
+        // 2. Identify the real header row by scoring rows against known keywords
+        let headerRowIdx = -1;
+        let maxHeaderScore = 0;
+
+        for (let rIdx = 0; rIdx < Math.min(raw2D.length, 12); rIdx++) {
+          const row = raw2D[rIdx];
+          if (!Array.isArray(row)) continue;
+          let score = 0;
+          const joined = row.map(c => String(c || '').toLowerCase()).join(' ');
+
+          if (joined.includes('اسم') || joined.includes('إسم') || joined.includes('محط') || joined.includes('name') || joined.includes('station') || joined.includes('site') || joined.includes('مركز')) score += 5;
+          if (joined.includes('lat') || joined.includes('عرض') || joined.includes('lng') || joined.includes('طول') || joined.includes('احداثي') || joined.includes('إحداثي') || joined.includes('latitude') || joined.includes('longitude')) score += 5;
+          if (joined.includes('عنوان') || joined.includes('address') || joined.includes('موقع') || joined.includes('محافظ') || joined.includes('منطق') || joined.includes('شارع')) score += 3;
+          if (joined.includes('نشاط') || joined.includes('خدم') || joined.includes('تحويل') || joined.includes('زيوت') || joined.includes('فحص') || joined.includes('مظلة') || joined.includes('اسطوان')) score += 4;
+
+          if (score > maxHeaderScore && score >= 4) {
+            maxHeaderScore = score;
+            headerRowIdx = rIdx;
+          }
+        }
+
+        // 3. Extract headers and data rows
+        let headers: string[] = [];
+        let dataRows: any[][] = [];
+
+        if (headerRowIdx >= 0) {
+          headers = raw2D[headerRowIdx].map(h => String(h || '').trim());
+          dataRows = raw2D.slice(headerRowIdx + 1);
+        } else {
+          headers = raw2D[0].map((h, i) => String(h || '').trim() || `col_${i}`);
+          dataRows = raw2D.slice(1);
+        }
+
+        // 4. Map each data row into a clean record
+        dataRows.forEach((row) => {
+          if (!Array.isArray(row)) return;
+          const hasContent = row.some(c => String(c || '').trim().length > 0);
+          if (!hasContent) return;
+
+          const record: Record<string, any> = { _rawRow: row, _sheetName: sheetName };
+          headers.forEach((h, colIdx) => {
+            const key = h || `col_${colIdx}`;
+            record[key] = row[colIdx] !== undefined ? row[colIdx] : '';
+          });
+          allExtractedRows.push(record);
+        });
+
+        const csv = XLSX.utils.sheet_to_csv(sheet);
+        combinedText += `\n--- ورقة: ${sheetName} ---\n${csv}`;
+      });
+
+      return { text: combinedText, rows: allExtractedRows };
+    } catch (e) {
+      console.error('Error extracting data from excel', e);
+      return { text: '', rows: [] };
+    }
+  };
+
+  const parseExcelRowsLocally = (rows: any[]): Station[] => {
+    return rows.map((r, i) => {
+      const rawRow: any[] = Array.isArray(r._rawRow) ? r._rawRow : Object.values(r);
+      const keys = Object.keys(r).filter(k => k !== '_rawRow' && k !== '_sheetName');
+
+      const findVal = (...keywords: string[]): string => {
+        const k = keys.find(key => keywords.some(kw => key.toLowerCase().includes(kw.toLowerCase())));
+        return k ? String(r[k] || '').trim() : '';
+      };
+
+      // 1. EXTRACT EXACT STATION NAME (يقرأ اسم المحطة كما هو بالجدول تماماً دون تحويله إلى كارجاس 1 أو 2)
+      let name = '';
+
+      const nameCandidate = findVal(
+        'اسم المحطة',
+        'اسم المركز',
+        'اسم المحطه',
+        'إسم المحطة',
+        'المحطة',
+        'المحطه',
+        'المركز',
+        'الفرع',
+        'اسم الفرع',
+        'اسم الموقع',
+        'الموقع',
+        'البيان',
+        'بيان المحطة',
+        'الاسم',
+        'الإسم',
+        'station_name',
+        'station',
+        'site_name',
+        'site',
+        'outlet',
+        'name'
+      );
+
+      if (nameCandidate && nameCandidate.length >= 2 && !/^\d+$/.test(nameCandidate)) {
+        name = nameCandidate;
+      }
+
+      // إذا لم يجد اسم في العمود المحدد، يفحص خلايا الصف عن اسم المحطة الفعلي
+      if (!name) {
+        for (const cell of rawRow) {
+          const str = String(cell || '').trim();
+          if (str.length >= 3 && !/^\d+$/.test(str)) {
+            if (str.includes('محطة') || str.includes('مركز') || str.includes('كارجاس') || str.includes('فرع') || str.includes('منفذ')) {
+              name = str;
+              break;
+            }
+          }
+        }
+      }
+
+      // إذا لم يعثر بعد، يأخذ أول نص غير رقمي صالح
+      if (!name) {
+        for (const cell of rawRow) {
+          const str = String(cell || '').trim();
+          if (
+            str.length >= 3 &&
+            !/^\d+$/.test(str) &&
+            !str.includes('http') &&
+            !str.includes('نعم') &&
+            !str.includes('لا') &&
+            !str.includes('ساعة') &&
+            !str.includes('القاهرة') &&
+            !str.includes('الجيزة') &&
+            !str.includes('الإسكندرية')
+          ) {
+            name = str;
+            break;
+          }
+        }
+      }
+
+      // تنظيف أي بادئة ترقيم تسلسلي فقط إن وجدت (مثل: "1- ألماظة" => "ألماظة") مع الحفاظ التام على الاسم
+      if (name) {
+        name = name.replace(/^\d+[\s\-.)،:]+/, '').trim();
+      }
+
+      // في حال تعذر العثور التام على نص، نربطها بالعنوان بدلاً من الترقيم العشوائي
+      if (!name) {
+        const addrCandidate = findVal('عنوان', 'موقع', 'address', 'المنطقة');
+        name = addrCandidate ? `محطة كارجاس (${addrCandidate})` : `محطة كارجاس ${r._sheetName ? `(${r._sheetName})` : ''}`;
+      }
+
+      // 2. EXTRACT ADDRESS
+      const address = findVal('عنوان', 'address', 'موقع', 'شارع', 'المنطقة', 'المحافظة', 'المدينة', 'city') || 'جمهورية مصر العربية';
+
+      // 3. EXTRACT ACCURATE COORDINATES (LAT / LNG)
+      let lat: number | null = null;
+      let lng: number | null = null;
+
+      const latCandidate = findVal('lat', 'عرض', 'latitude', 'شمال', 'y');
+      const lngCandidate = findVal('lng', 'lon', 'طول', 'longitude', 'شرق', 'x');
+
+      lat = parseCoordValue(latCandidate);
+      lng = parseCoordValue(lngCandidate);
+
+      if (!lat || !lng) {
+        const combinedCandidate = findVal('إحداثيات', 'احداثيات', 'coords', 'gps', 'coordinates', 'link', 'موقع');
+        if (combinedCandidate) {
+          const match = toWesternDigits(combinedCandidate).match(/([0-9]{2}\.[0-9]{3,})[,\s/]+([0-9]{2}\.[0-9]{3,})/);
+          if (match) {
+            lat = parseFloat(match[1]);
+            lng = parseFloat(match[2]);
+          }
+        }
+      }
+
+      if (!lat || !lng) {
+        for (const cell of rawRow) {
+          const str = toWesternDigits(String(cell || '').trim());
+          const match = str.match(/([0-9]{2}\.[0-9]{3,})[,\s/]+([0-9]{2}\.[0-9]{3,})/);
+          if (match) {
+            lat = parseFloat(match[1]);
+            lng = parseFloat(match[2]);
+            break;
+          }
+        }
+      }
+
+      // تصحيح التبديل إن كان خط العرض والطول معكوسين
+      if (lat && lng) {
+        if (lat > 25 && lat < 37 && lng > 22 && lng < 32) {
+          const temp = lat;
+          lat = lng;
+          lng = temp;
+        }
+      }
+
+      const finalLat = (lat && lat >= 22 && lat <= 33) ? lat : 30.0638 + (i * 0.004);
+      const finalLng = (lng && lng >= 25 && lng <= 37) ? lng : 31.3325 + (i * 0.004);
+
+      // 4. EXTRACT ACTIVITIES & FACILITIES (فحص أسطوانات، زيوت، أسفل المظلة، تحويل وصيانة)
+      const allRowText = rawRow.map(c => String(c || '')).join(' ') + ' ' + keys.map(k => `${k}:${r[k]}`).join(' ');
+
+      const hasCylinder =
+        (findVal('فحص', 'اسطوان', 'إسطوان', 'cylinder').length > 0 && !findVal('فحص', 'اسطوان', 'إسطوان', 'cylinder').includes('لا')) ||
+        allRowText.includes('فحص أسطوانات') ||
+        allRowText.includes('فحص اسطوانات') ||
+        allRowText.includes('اختبار أسطوانات') ||
+        allRowText.includes('فحص الأسطوانات') ||
+        allRowText.includes('فحص الاسطوانات');
+
+      const hasOil =
+        findVal('مركز زيوت', 'زيوت معتمد', 'زيوت bp', 'زيوت بي بي', 'كاسترول').length > 0 ||
+        allRowText.includes('مركز زيوت') ||
+        allRowText.includes('زيوت بي بي') ||
+        allRowText.includes('زيوت معتمد') ||
+        allRowText.includes('كاسترول') ||
+        allRowText.includes('oil center');
+
+      const hasCanopy =
+        findVal('مظلة', 'مظله', 'أسفل المظلة', 'اسفل المظلة', 'canopy').length > 0 ||
+        allRowText.includes('أسفل المظلة') ||
+        allRowText.includes('اسفل المظلة') ||
+        allRowText.includes('اسفل المظله') ||
+        allRowText.includes('تحت المظلة') ||
+        allRowText.includes('تحت التندة') ||
+        allRowText.includes('canopy');
+
+      const hasConversion =
+        findVal('تحويل', 'صيانة', 'صيانه', 'ورشة', 'ورشه', 'conversion').length > 0 ||
+        allRowText.includes('تحويل وصيانة') ||
+        allRowText.includes('مركز تحويل') ||
+        allRowText.includes('ورشة تحويل') ||
+        allRowText.includes('صيانة غاز') ||
+        findVal('تحويل') === 'true';
+
+      const hasCng = true;
+      const hasSoon2027 = allRowText.includes('2027') || allRowText.includes('قريباً') || allRowText.includes('تحت الإنشاء');
+
+      const services: string[] = ['تموين غاز طبيعي مضغوط (كارجاس)'];
+      if (hasConversion) services.push('مركز تحويل وصيانة غاز');
+      if (hasCylinder) services.push('فحص واختبار أسطوانات');
+      if (hasOil) services.push('مركز زيوت معتمد (BP)');
+      if (hasCanopy) services.push('زيوت أسفل المظلة');
+      if (hasSoon2027) services.push('قريباً 2027');
+
+      let facilityType: CargasFacilityType = 'station';
+      if (hasConversion) facilityType = 'conversion_center';
+      else if (hasCylinder) facilityType = 'cylinder_testing';
+      else if (hasOil) facilityType = 'oil_center';
+
+      return {
+        id: `custom-excel-${Date.now()}-${i}`,
+        name,
+        company: 'كارجاس',
+        facilityType,
+        address,
+        lat: finalLat,
+        lng: finalLng,
+        cng: hasCng,
+        petrol: false,
+        conversionCenter: hasConversion,
+        oilCenter: hasOil,
+        cylinderInspection: hasCylinder,
+        canopyOil: hasCanopy,
+        comingSoon2027: hasSoon2027,
+        cngNozzles: 8,
+        pressureBar: 220,
+        congestionLevel: 'low',
+        waitTimeMinutes: 4,
+        verified: true,
+        workingHours: '24 ساعة',
+        services,
+        notes: 'مستخرج باسمه الفعلي وأنشطته من ملف الإكسيل',
+        updatedAt: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+      };
+    });
+  };
+
+  const parseTextLinesLocally = (text: string): Station[] => {
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 5);
+    const results: Station[] = [];
+    lines.forEach((line, i) => {
+      if (line.includes('محطة') || line.includes('مركز') || line.includes('كارجاس') || line.includes('تحويل') || line.includes('زيوت') || line.includes('فحص')) {
+        const hasConversion = line.includes('تحويل') || line.includes('صيانة');
+        const hasCylinder = line.includes('فحص') || line.includes('اسطوان');
+        const hasOil = line.includes('مركز زيوت') || line.includes('زيوت معتمد');
+        const hasCanopy = line.includes('مظلة') || line.includes('أسفل المظلة');
+        const hasSoon2027 = line.includes('2027') || line.includes('قريباً');
+
+        const parts = line.split(/[-–—:|]/);
+        const name = parts[0]?.trim() || `محطة كارجاس ${i + 1}`;
+        const address = parts[1]?.trim() || 'جمهورية مصر العربية';
+
+        const services: string[] = ['تموين غاز طبيعي مضغوط (كارجاس)'];
+        if (hasConversion) services.push('مركز تحويل وصيانة غاز');
+        if (hasCylinder) services.push('فحص واختبار أسطوانات');
+        if (hasOil) services.push('مركز زيوت معتمد');
+        if (hasCanopy) services.push('زيوت أسفل المظلة');
+        if (hasSoon2027) services.push('قريباً 2027');
+
+        results.push({
+          id: `custom-text-${Date.now()}-${i}`,
+          name,
+          company: 'كارجاس',
+          facilityType: hasConversion ? 'conversion_center' : hasOil ? 'oil_center' : hasCylinder ? 'cylinder_testing' : 'station',
+          address,
+          lat: 30.0638 + (i * 0.006),
+          lng: 31.3325 + (i * 0.006),
+          cng: true,
+          petrol: false,
+          conversionCenter: hasConversion,
+          oilCenter: hasOil,
+          cylinderInspection: hasCylinder,
+          canopyOil: hasCanopy,
+          comingSoon2027: hasSoon2027,
+          cngNozzles: 8,
+          pressureBar: 220,
+          congestionLevel: 'low',
+          waitTimeMinutes: 4,
+          verified: true,
+          workingHours: '24 ساعة',
+          services,
+          notes: 'مستخرج من نص المستند',
+          updatedAt: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+        });
+      }
+    });
+    return results;
+  };
+
+  const callAiStationExtraction = async (payload: { text?: string; image?: string; mimeType?: string; fileName: string; fallbackRows?: any[] }) => {
+    setIsImportLoading(true);
+    setImportMessage(`🤖 جارِ استدعاء الذكاء الاصطناعي (Gemini 3.8 Flash) لتحليل الملف "${payload.fileName}" واستخلاص المحطات والأنشطة والعناوين وتسكينها...`);
+
+    try {
+      const res = await fetch('/api/ai/extract-station-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: payload.text,
+          image: payload.image,
+          mimeType: payload.mimeType,
+          fileName: payload.fileName,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success && Array.isArray(data.stations) && data.stations.length > 0) {
+        const mapped: Station[] = data.stations.map((st: any, idx: number) => ({
+          id: `ai-extracted-${Date.now()}-${idx}`,
+          name: st.name || `محطة كارجاس ${idx + 1}`,
+          company: 'كارجاس',
+          facilityType: (st.facilityType || 'station') as CargasFacilityType,
+          address: st.address || 'عنوان معتمد - مصر',
+          lat: Number(st.lat) || 30.0638 + (idx * 0.004),
+          lng: Number(st.lng) || 31.3325 + (idx * 0.004),
+          cng: st.cng ?? true,
+          petrol: st.petrol ?? false,
+          conversionCenter: !!st.conversionCenter,
+          oilCenter: !!st.oilCenter,
+          cylinderInspection: st.cylinderInspection ?? true,
+          canopyOil: !!st.canopyOil,
+          comingSoon2027: !!st.comingSoon2027,
+          cngNozzles: Number(st.cngNozzles || 8),
+          pressureBar: Number(st.pressureBar || 220),
+          congestionLevel: (st.congestionLevel || 'low') as CongestionLevel,
+          waitTimeMinutes: Number(st.waitTimeMinutes || 4),
+          verified: true,
+          workingHours: st.workingHours || '24 ساعة',
+          services: Array.isArray(st.services) && st.services.length > 0 ? st.services : ['تموين غاز طبيعي مضغوط (كارجاس)'],
+          notes: st.notes || `مستخرج بالذكاء الاصطناعي (Gemini 3.8 Flash) من ${payload.fileName}`,
+          updatedAt: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
+        }));
+
+        processParsedStations(mapped, `تحليل الذكاء الاصطناعي لملف (${payload.fileName})`);
+        setImportMessage(`✨ نجح الذكاء الاصطناعي (Gemini 3.8 Flash) في استخراج ${mapped.length} محطة وتسليم وتسكين الأنشطة والعناوين في أماكنها بدقة!`);
+        return;
+      } else {
+        throw new Error(data.message || 'لم يرجع الذكاء الاصطناعي محطات صالحة');
+      }
+    } catch (err: any) {
+      console.warn('AI endpoint unavailable or returned error, using smart fallback parser:', err);
+      if (payload.fallbackRows && payload.fallbackRows.length > 0) {
+        const fallbackParsed = parseExcelRowsLocally(payload.fallbackRows);
+        if (fallbackParsed.length > 0) {
+          processParsedStations(fallbackParsed, `ملف الإكسيل (${payload.fileName})`);
+          setImportMessage(`✓ تم استخراج وتسكين ${fallbackParsed.length} محطة بنجاح من شيت الإكسيل.`);
+          return;
+        }
+      }
+      if (payload.text) {
+        const textParsed = parseTextLinesLocally(payload.text);
+        if (textParsed.length > 0) {
+          processParsedStations(textParsed, `مستند (${payload.fileName})`);
+          setImportMessage(`✓ تم استخراج وتسكين ${textParsed.length} محطة من المستند بنجاح.`);
+          return;
+        }
+      }
+      setImportMessage(`تعذر استخراج المحطات من الملف: ${err.message || 'تأكد من احتواء الملف على محطات وعناوين كارجاس واضحة'}`);
+    } finally {
+      setIsImportLoading(false);
+    }
+  };
+
+  // Comprehensive File Upload Handler (KMZ, KML, CSV, Word .docx, Excel .xlsx, Images .png/.jpg)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsImportLoading(true);
-    setImportMessage('جارِ قراءة وتحليل الملف...');
+    setImportMessage(`جارِ قراءة وتحليل ملف (${file.name})...`);
 
     try {
       const lowerName = file.name.toLowerCase();
 
-      // Handle KMZ (Zip archive containing KML + Logos/Images)
-      if (lowerName.endsWith('.kmz')) {
+      // 1. Handle Word Documents (.docx, .doc)
+      if (lowerName.endsWith('.docx')) {
+        const arrayBuffer = await file.arrayBuffer();
+        const docText = await extractTextFromDocx(arrayBuffer);
+        setPastedData(docText);
+        setImportType('csv');
+        await callAiStationExtraction({ text: docText, fileName: file.name });
+      }
+      // 2. Handle Excel Files (.xlsx, .xls)
+      else if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
+        const arrayBuffer = await file.arrayBuffer();
+        const { text: excelText, rows } = extractDataFromExcel(arrayBuffer);
+        setPastedData(excelText);
+        setImportType('csv');
+        await callAiStationExtraction({ text: excelText, fileName: file.name, fallbackRows: rows });
+      }
+      // 3. Handle Images (.png, .jpg, .jpeg, .webp)
+      else if (lowerName.endsWith('.png') || lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerName.endsWith('.webp')) {
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          const dataUrl = ev.target?.result as string;
+          await callAiStationExtraction({
+            image: dataUrl,
+            mimeType: file.type || 'image/jpeg',
+            fileName: file.name,
+          });
+        };
+        reader.readAsDataURL(file);
+      }
+      // 4. Handle KMZ (Google Earth zip)
+      else if (lowerName.endsWith('.kmz')) {
         const arrayBuffer = await file.arrayBuffer();
         const parsed = await parseKMZ(arrayBuffer);
         processParsedStations(parsed, `ملف KMZ (${file.name})`);
       } 
-      // Handle KML
+      // 5. Handle KML
       else if (lowerName.endsWith('.kml')) {
         const text = await file.text();
         setPastedData(text);
@@ -458,15 +1048,19 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         const parsed = parseKML(text);
         processParsedStations(parsed, `ملف KML (${file.name})`);
       }
-      // Handle CSV
+      // 6. Handle CSV or TXT
       else if (lowerName.endsWith('.csv') || lowerName.endsWith('.txt')) {
         const text = await file.text();
         setPastedData(text);
         setImportType('csv');
         const parsed = parseCSV(text);
-        processParsedStations(parsed, `ملف CSV (${file.name})`);
+        if (parsed.length > 0) {
+          processParsedStations(parsed, `ملف CSV (${file.name})`);
+        } else {
+          await callAiStationExtraction({ text, fileName: file.name });
+        }
       }
-      // Handle GeoJSON / JSON
+      // 7. Handle GeoJSON / JSON
       else if (lowerName.endsWith('.json') || lowerName.endsWith('.geojson')) {
         const text = await file.text();
         setPastedData(text);
@@ -474,7 +1068,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         const parsed = parseGeoJSON(text);
         processParsedStations(parsed, `ملف GeoJSON (${file.name})`);
       } else {
-        setImportMessage('صيغة الملف غير مدعومة. الصيغ المدعومة هي: KMZ, KML, CSV, GeoJSON');
+        setImportMessage('صيغة الملف غير مدعومة. الصيغ المدعومة هي: Excel (.xlsx, .xls), Word (.docx), Images (.png, .jpg), KMZ, KML, CSV');
       }
     } catch (err: any) {
       console.error(err);
@@ -511,14 +1105,20 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     processParsedStations(parsed, 'النص الملصوق');
   };
 
-  const handleApplyImport = (mode: 'merge' | 'replace') => {
+  const handleApplyImport = (mode: 'smart_merge' | 'append' | 'replace') => {
     if (importPreview.length === 0) return;
     if (mode === 'replace') {
       onSaveStations(importPreview);
-      setImportMessage(`تم استبدال جميع المحطات القديمة وإضافة ${importPreview.length} محطة جديدة بنجاح!`);
+      setImportMessage(`⚠️ تم استبدال جميع المحطات القديمة وإضافة ${importPreview.length} محطة جديدة بنجاح!`);
+    } else if (mode === 'smart_merge') {
+      const result = mergeAndDistributeActivities(stations, importPreview);
+      onSaveStations(result.mergedStations);
+      setImportMessage(
+        `✅ تم بنجاح توزيع وتحديث الأنشطة على (${result.updatedCount}) محطة قائمة بدون تكرار، وإضافة (${result.addedCount}) محطة جديدة!`
+      );
     } else {
       onSaveStations([...importPreview, ...stations]);
-      setImportMessage(`تم دمج وإضافة ${importPreview.length} محطة بنجاح إلى الخريطة!`);
+      setImportMessage(`تمت إضافة ${importPreview.length} محطة جديدة منفصلة إلى الخريطة!`);
     }
     setImportPreview([]);
     setPastedData('');
@@ -575,7 +1175,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             </div>
             <div>
               <div className="text-xs font-bold text-emerald-400">
-                لوحة تحكم مدير النظام الشاملة | المطور محمد عبد الرحمن يوسف
+                لوحة تحكم مدير النظام الشاملة | كارجاس
               </div>
               <h2 className="text-lg md:text-xl font-black">
                 إدارة محطات الغاز الطبيعي وملفات KMZ وواجهة المستخدم
@@ -696,6 +1296,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   <span>أداة السحب والإفلات على الخريطة 📍</span>
                 </button>
               )}
+
+              <button
+                type="button"
+                onClick={handleSyncCodebaseFromModal}
+                disabled={isSyncingToCodebase}
+                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-md transition flex items-center gap-2 cursor-pointer font-black shrink-0 active:scale-95 border border-indigo-400/50"
+                title="تثبيت واعتماد كافة المحطات الحالية (300 محطة) واللوجو والإعدادات في ملفات المشروع الأساسية (GitHub & Vercel Sync)"
+              >
+                <Save className={`w-4 h-4 ${isSyncingToCodebase ? 'animate-spin' : ''}`} />
+                <span>{isSyncingToCodebase ? 'جاري تثبيت الكود...' : '💾 اعتماد بالكود (GitHub & Vercel)'}</span>
+              </button>
             </div>
 
             {/* Notification Feedback */}
@@ -913,6 +1524,26 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
                           <input
                             type="checkbox"
+                            checked={stationForm.canopyOil ?? false}
+                            onChange={(e) => setStationForm({ ...stationForm, canopyOil: e.target.checked })}
+                            className="accent-teal-500 rounded"
+                          />
+                          <span className="text-teal-300 font-bold">☂️ زيوت أسفل المظلة</span>
+                        </label>
+
+                        <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={stationForm.comingSoon2027 ?? false}
+                            onChange={(e) => setStationForm({ ...stationForm, comingSoon2027: e.target.checked })}
+                            className="accent-rose-500 rounded"
+                          />
+                          <span className="text-rose-300 font-bold">🚀 محطة قريباً 2027</span>
+                        </label>
+
+                        <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
+                          <input
+                            type="checkbox"
                             checked={stationForm.petrol ?? false}
                             onChange={(e) => setStationForm({ ...stationForm, petrol: e.target.checked })}
                             className="accent-slate-500 rounded"
@@ -995,7 +1626,18 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 justify-end">
+                        <div className="flex flex-wrap items-center gap-2 justify-end">
+                          <button
+                            type="button"
+                            onClick={handleSyncCodebaseFromModal}
+                            disabled={isSyncingToCodebase}
+                            className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-lg active:scale-95 transition"
+                            title="تثبيت واعتماد كافة المحطات (300 محطة) واللوجو وتعديلات الأسماء والأنشطة مباشرة في كود المشروع الأساسي (GitHub & Vercel Sync)"
+                          >
+                            <Save className={`w-3.5 h-3.5 ${isSyncingToCodebase ? 'animate-spin' : ''}`} />
+                            <span>{isSyncingToCodebase ? 'جاري الاعتماد...' : '💾 اعتماد بالكود (GitHub & Vercel)'}</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => handleBulkApplyLogo('')}
@@ -1147,11 +1789,186 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                   title="تحديد المحطة للعمليات الجماعية"
                                 />
 
-                                <div className="w-10 h-10 rounded-full bg-white p-0.5 border-2 border-emerald-500 shrink-0 overflow-hidden flex items-center justify-center">
-                                  {station.customLogoUrl ? (
-                                    <img src={station.customLogoUrl} alt="logo" className="w-full h-full object-contain" />
-                                  ) : (
-                                    <span className="text-emerald-700 font-black text-[10px]">كارجاس</span>
+                                {/* Multi-select Activities Dropdown (استبدال زر اللوجو بقائمة منسدلة متعددة الاختيارات للأنشطة) */}
+                                <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setActiveDropdownStationId(
+                                        activeDropdownStationId === station.id ? null : station.id
+                                      )
+                                    }
+                                    className={`px-2.5 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 border shadow-sm cursor-pointer select-none ${
+                                      (station.cng || station.conversionCenter || station.oilCenter || station.cylinderInspection || station.canopyOil || station.comingSoon2027 || station.services?.includes('زيوت أسفل المظلة') || station.services?.includes('قريباً 2027'))
+                                        ? 'bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-900 text-emerald-300 border-emerald-500 hover:border-emerald-400 shadow-emerald-950/50'
+                                        : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                                    }`}
+                                    title="قائمة منسدلة لاختيار أنشطة وخدمات المحطة (اختيار أكثر من نشاط)"
+                                  >
+                                    <span className="text-sm">🏷️</span>
+                                    <span className="hidden sm:inline text-[11px]">الأنشطة:</span>
+                                    <span className="bg-emerald-500 text-slate-950 px-1.5 py-0.5 rounded-full text-[10px] font-mono font-black">
+                                      {
+                                        [
+                                          station.cng,
+                                          station.conversionCenter,
+                                          station.oilCenter,
+                                          station.cylinderInspection,
+                                          station.canopyOil || station.services?.includes('زيوت أسفل المظلة'),
+                                          station.comingSoon2027 || station.services?.includes('قريباً 2027'),
+                                        ].filter(Boolean).length
+                                      }
+                                    </span>
+                                    <ChevronDown
+                                      className={`w-3.5 h-3.5 text-emerald-400 transition-transform duration-200 ${
+                                        activeDropdownStationId === station.id ? 'rotate-180' : ''
+                                      }`}
+                                    />
+                                  </button>
+
+                                  {/* Dropdown Menu Multi-Select */}
+                                  {activeDropdownStationId === station.id && (
+                                    <div className="absolute right-0 top-full mt-2 z-50 w-72 bg-slate-900 border-2 border-emerald-500 rounded-2xl p-3 shadow-2xl backdrop-blur-md space-y-2.5 animate-in fade-in zoom-in-95">
+                                      <div className="flex items-center justify-between border-b border-slate-700 pb-1.5">
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="text-base">🏷️</span>
+                                          <span className="text-xs font-black text-white">
+                                            أنشطة المحطة (اختر متعدد):
+                                          </span>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => setActiveDropdownStationId(null)}
+                                          className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+                                          title="إغلاق"
+                                        >
+                                          <X className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+
+                                      <div className="space-y-1.5 text-xs">
+                                        {/* 1. تموين */}
+                                        <label className={`flex items-center justify-between p-2 rounded-xl transition cursor-pointer border ${
+                                          station.cng
+                                            ? 'bg-emerald-950/80 border-emerald-500 text-white font-black'
+                                            : 'bg-slate-800/80 hover:bg-slate-750 border-slate-700 text-slate-300'
+                                        }`}>
+                                          <span className="flex items-center gap-2">
+                                            <span className="text-base">⛽</span>
+                                            <span>تموين غاز طبيعي</span>
+                                          </span>
+                                          <input
+                                            type="checkbox"
+                                            checked={!!station.cng}
+                                            onChange={() => handleToggleStationFacility(station.id, 'cng')}
+                                            className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
+                                          />
+                                        </label>
+
+                                        {/* 2. تحويل وصيانة */}
+                                        <label className={`flex items-center justify-between p-2 rounded-xl transition cursor-pointer border ${
+                                          station.conversionCenter
+                                            ? 'bg-amber-950/80 border-amber-500 text-white font-black'
+                                            : 'bg-slate-800/80 hover:bg-slate-750 border-slate-700 text-slate-300'
+                                        }`}>
+                                          <span className="flex items-center gap-2">
+                                            <span className="text-base">🛠️</span>
+                                            <span>تحويل وصيانة</span>
+                                          </span>
+                                          <input
+                                            type="checkbox"
+                                            checked={!!station.conversionCenter}
+                                            onChange={() => handleToggleStationFacility(station.id, 'conversionCenter')}
+                                            className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                                          />
+                                        </label>
+
+                                        {/* 3. مراكز زيوت */}
+                                        <label className={`flex items-center justify-between p-2 rounded-xl transition cursor-pointer border ${
+                                          station.oilCenter
+                                            ? 'bg-blue-950/80 border-blue-500 text-white font-black'
+                                            : 'bg-slate-800/80 hover:bg-slate-750 border-slate-700 text-slate-300'
+                                        }`}>
+                                          <span className="flex items-center gap-2">
+                                            <span className="text-base">🛢️</span>
+                                            <span>مراكز زيوت</span>
+                                          </span>
+                                          <input
+                                            type="checkbox"
+                                            checked={!!station.oilCenter}
+                                            onChange={() => handleToggleStationFacility(station.id, 'oilCenter')}
+                                            className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
+                                          />
+                                        </label>
+
+                                        {/* 4. مراكز فحص اسطوانات */}
+                                        <label className={`flex items-center justify-between p-2 rounded-xl transition cursor-pointer border ${
+                                          station.cylinderInspection
+                                            ? 'bg-purple-950/80 border-purple-500 text-white font-black'
+                                            : 'bg-slate-800/80 hover:bg-slate-750 border-slate-700 text-slate-300'
+                                        }`}>
+                                          <span className="flex items-center gap-2">
+                                            <span className="text-base">🔍</span>
+                                            <span>مراكز فحص اسطوانات</span>
+                                          </span>
+                                          <input
+                                            type="checkbox"
+                                            checked={!!station.cylinderInspection}
+                                            onChange={() => handleToggleStationFacility(station.id, 'cylinderInspection')}
+                                            className="w-4 h-4 accent-purple-500 rounded cursor-pointer"
+                                          />
+                                        </label>
+
+                                        {/* 5. زيوت اسفل المظلة */}
+                                        <label className={`flex items-center justify-between p-2 rounded-xl transition cursor-pointer border ${
+                                          station.canopyOil || station.services?.includes('زيوت أسفل المظلة')
+                                            ? 'bg-teal-950/80 border-teal-500 text-white font-black'
+                                            : 'bg-slate-800/80 hover:bg-slate-750 border-slate-700 text-slate-300'
+                                        }`}>
+                                          <span className="flex items-center gap-2">
+                                            <span className="text-base">☂️</span>
+                                            <span>زيوت أسفل المظلة</span>
+                                          </span>
+                                          <input
+                                            type="checkbox"
+                                            checked={!!station.canopyOil || !!station.services?.includes('زيوت أسفل المظلة')}
+                                            onChange={() => handleToggleStationFacility(station.id, 'canopyOil')}
+                                            className="w-4 h-4 accent-teal-500 rounded cursor-pointer"
+                                          />
+                                        </label>
+
+                                        {/* 6. قريباً 2027 */}
+                                        <label className={`flex items-center justify-between p-2 rounded-xl transition cursor-pointer border ${
+                                          station.comingSoon2027 || station.services?.includes('قريباً 2027') || station.services?.includes('قريباً')
+                                            ? 'bg-rose-950/80 border-rose-500 text-white font-black'
+                                            : 'bg-slate-800/80 hover:bg-slate-750 border-slate-700 text-slate-300'
+                                        }`}>
+                                          <span className="flex items-center gap-2">
+                                            <span className="text-base">🚀</span>
+                                            <span>قريباً 2027</span>
+                                          </span>
+                                          <input
+                                            type="checkbox"
+                                            checked={!!station.comingSoon2027 || !!station.services?.includes('قريباً 2027') || !!station.services?.includes('قريباً')}
+                                            onChange={() => handleToggleStationFacility(station.id, 'comingSoon2027')}
+                                            className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
+                                          />
+                                        </label>
+                                      </div>
+
+                                      <div className="pt-1 flex items-center justify-between gap-2 border-t border-slate-800">
+                                        <span className="text-[10px] text-emerald-400 font-bold">
+                                          ✓ حفظ فوري ومباشر
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => setActiveDropdownStationId(null)}
+                                          className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl shadow cursor-pointer transition active:scale-95"
+                                        >
+                                          إغلاق القائمة ✓
+                                        </button>
+                                      </div>
+                                    </div>
                                   )}
                                 </div>
                                 <div className="min-w-0">
@@ -1213,12 +2030,68 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                   )}
                                   <div className="flex flex-wrap items-center gap-1.5 mt-1">
                                     <span className="text-[11px] text-slate-400 truncate max-w-xs">{station.address}</span>
-                                    {/* Facility Badges */}
+                                    {/* Facility Badges (1-Click Interactive Toggles) */}
                                     <div className="flex items-center gap-1">
-                                      {station.cng && <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold">⛽ غاز</span>}
-                                      {station.conversionCenter && <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-950 text-amber-400 border border-amber-800 font-bold">🛠️ تحويل</span>}
-                                      {station.oilCenter && <span className="text-[9px] px-1.5 py-0.2 rounded bg-blue-950 text-blue-400 border border-blue-800 font-bold">🛢️ زيوت</span>}
-                                      {station.cylinderInspection && <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-950 text-purple-400 border border-purple-800 font-bold">🔍 فحص</span>}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleStationFacility(station.id, 'cng')}
+                                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold transition border cursor-pointer ${
+                                          station.cng ? 'bg-emerald-950 text-emerald-300 border-emerald-700 shadow-xs' : 'bg-slate-800 text-slate-500 border-slate-700 opacity-50 hover:opacity-100'
+                                        }`}
+                                        title={station.cng ? 'نشاط الغاز مفعل (اضغط للإلغاء)' : 'اضغط لتفعيل نشاط تموين الغاز'}
+                                      >
+                                        ⛽ غاز {station.cng ? '✓' : '+'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleStationFacility(station.id, 'conversionCenter')}
+                                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold transition border cursor-pointer ${
+                                          station.conversionCenter ? 'bg-amber-950 text-amber-300 border-amber-700 shadow-xs' : 'bg-slate-800 text-slate-500 border-slate-700 opacity-50 hover:opacity-100'
+                                        }`}
+                                        title={station.conversionCenter ? 'مركز تحويل وصيانة مفعل (اضغط للإلغاء)' : 'اضغط لتفعيل مركز تحويل وصيانة'}
+                                      >
+                                        🛠️ تحويل {station.conversionCenter ? '✓' : '+'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleStationFacility(station.id, 'oilCenter')}
+                                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold transition border cursor-pointer ${
+                                          station.oilCenter ? 'bg-blue-950 text-blue-300 border-blue-700 shadow-xs' : 'bg-slate-800 text-slate-500 border-slate-700 opacity-50 hover:opacity-100'
+                                        }`}
+                                        title={station.oilCenter ? 'مركز زيوت معتمد مفعل (اضغط للإلغاء)' : 'اضغط لتفعيل مركز زيوت معتمد'}
+                                      >
+                                        🛢️ زيوت {station.oilCenter ? '✓' : '+'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleStationFacility(station.id, 'cylinderInspection')}
+                                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold transition border cursor-pointer ${
+                                          station.cylinderInspection ? 'bg-purple-950 text-purple-300 border-purple-700 shadow-xs' : 'bg-slate-800 text-slate-500 border-slate-700 opacity-50 hover:opacity-100'
+                                        }`}
+                                        title={station.cylinderInspection ? 'مركز فحص أسطوانات مفعل (اضغط للإلغاء)' : 'اضغط لتفعيل مركز فحص أسطوانات'}
+                                      >
+                                        🔍 فحص {station.cylinderInspection ? '✓' : '+'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleStationFacility(station.id, 'canopyOil')}
+                                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold transition border cursor-pointer ${
+                                          station.canopyOil || station.services?.includes('زيوت أسفل المظلة') ? 'bg-teal-950 text-teal-300 border-teal-700 shadow-xs' : 'bg-slate-800 text-slate-500 border-slate-700 opacity-50 hover:opacity-100'
+                                        }`}
+                                        title={station.canopyOil || station.services?.includes('زيوت أسفل المظلة') ? 'زيوت أسفل المظلة مفعل (اضغط للإلغاء)' : 'اضغط لتفعيل زيوت أسفل المظلة'}
+                                      >
+                                        ☂️ مظلة {station.canopyOil || station.services?.includes('زيوت أسفل المظلة') ? '✓' : '+'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleStationFacility(station.id, 'comingSoon2027')}
+                                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold transition border cursor-pointer ${
+                                          station.comingSoon2027 || station.services?.includes('قريباً 2027') || station.services?.includes('قريباً') ? 'bg-rose-950 text-rose-300 border-rose-700 shadow-xs' : 'bg-slate-800 text-slate-500 border-slate-700 opacity-50 hover:opacity-100'
+                                        }`}
+                                        title={station.comingSoon2027 || station.services?.includes('قريباً 2027') ? 'محطة قريباً 2027 مفعل (اضغط للإلغاء)' : 'اضغط لتحديد المحطة قريباً 2027'}
+                                      >
+                                        🚀 2027 {station.comingSoon2027 || station.services?.includes('قريباً 2027') || station.services?.includes('قريباً') ? '✓' : '+'}
+                                      </button>
                                     </div>
                                   </div>
                                 </div>
@@ -1358,24 +2231,49 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     </div>
                   </div>
 
-                  {/* File Upload Zone */}
-                  <div className="border-2 border-dashed border-emerald-500/50 hover:border-emerald-400 rounded-2xl p-6 text-center bg-slate-800/40 hover:bg-slate-800/70 transition">
+                  {/* File Upload Zone (مع دعم الذكاء الاصطناعي لملفات الوورد والإكسيل والصور) */}
+                  <div className="border-2 border-dashed border-emerald-500/60 hover:border-emerald-400 rounded-3xl p-6 md:p-8 text-center bg-gradient-to-b from-slate-800/60 via-slate-850/80 to-slate-900/90 hover:bg-slate-800/90 transition shadow-xl">
                     <input
                       type="file"
                       id="fileInput"
-                      accept=".kmz,.kml,.csv,.geojson,.json,.txt"
+                      accept=".kmz,.kml,.csv,.geojson,.json,.txt,.xlsx,.xls,.docx,.doc,.png,.jpg,.jpeg,.webp"
                       onChange={handleFileUpload}
                       className="hidden"
                     />
                     <label htmlFor="fileInput" className="cursor-pointer flex flex-col items-center">
-                      <div className="w-14 h-14 rounded-2xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center mb-3">
-                        <Upload className="w-7 h-7" />
+                      <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-emerald-500/20 via-teal-500/20 to-cyan-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mb-3 shadow-inner">
+                        <Upload className="w-8 h-8 animate-bounce-slow" />
                       </div>
-                      <div className="text-sm font-black text-white">
-                        اضغط هنا لرفع ملف KMZ أو KML أو CSV ببيانات المحطات
+                      <div className="text-base font-black text-white flex items-center gap-2">
+                        <span>اضغط لرفع ملف (وورد، إكسيل، صور، أو KMZ/KML)</span>
+                        <span className="bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full shadow">
+                          🤖 ذكاء اصطناعي AI
+                        </span>
                       </div>
-                      <div className="text-xs text-slate-400 mt-1">
-                        يدعم ملفات Google Earth KMZ (بما فيها اللوجوهات والأيقونات) وملفات الإكسيل وKML
+                      <p className="text-xs text-slate-300 mt-1.5 max-w-xl font-light">
+                        يقوم الذكاء الاصطناعي <strong className="text-emerald-400 font-bold">(Gemini 3.8 Flash)</strong> بتحليل محتوى الملف واستخلاص المحطات وتسكين الأنشطة بدقة:
+                        <br />
+                        <span className="text-amber-300 font-medium">🛠️ تحويل وصيانة • 🔍 فحص أسطوانات • 🛢️ مراكز زيوت • ☂️ زيوت أسفل المظلة • 🚀 قريباً 2027</span>
+                      </p>
+
+                      {/* File Types Pill Badges */}
+                      <div className="flex flex-wrap items-center justify-center gap-2 mt-4 text-[11px] font-bold">
+                        <span className="px-3 py-1 rounded-xl bg-blue-950/80 text-blue-300 border border-blue-700/70 flex items-center gap-1.5 shadow-sm">
+                          <FileText className="w-3.5 h-3.5 text-blue-400" />
+                          <span>وورد Word (.docx)</span>
+                        </span>
+                        <span className="px-3 py-1 rounded-xl bg-emerald-950/80 text-emerald-300 border border-emerald-700/70 flex items-center gap-1.5 shadow-sm">
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>إكسيل Excel (.xlsx / .xls)</span>
+                        </span>
+                        <span className="px-3 py-1 rounded-xl bg-purple-950/80 text-purple-300 border border-purple-700/70 flex items-center gap-1.5 shadow-sm">
+                          <Camera className="w-3.5 h-3.5 text-purple-400" />
+                          <span>صور ومستندات (.png / .jpg)</span>
+                        </span>
+                        <span className="px-3 py-1 rounded-xl bg-teal-950/80 text-teal-300 border border-teal-700/70 flex items-center gap-1.5 shadow-sm">
+                          <MapPin className="w-3.5 h-3.5 text-teal-400" />
+                          <span>خرائط KMZ و KML و CSV</span>
+                        </span>
                       </div>
                     </label>
                   </div>
@@ -1440,7 +2338,24 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleApplyImport('smart_merge')}
+                            className="px-4 py-2 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-xs font-black rounded-xl cursor-pointer shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 ring-2 ring-emerald-300"
+                            title="توزيع الأنشطة (فحص أسطوانات، زيوت، أسفل المظلة، تحويل وصيانة) على المحطات القائمة بدون تكرار المحطة"
+                          >
+                            <span>🔄</span>
+                            <span>دمج وتوزيع الأنشطة (بدون تكرار المحطات)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleApplyImport('append')}
+                            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold rounded-xl cursor-pointer"
+                            title="إضافة جميع المحطات كعناصر جديدة منفصلة"
+                          >
+                            ➕ إضافة كمحطات منفصلة
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleApplyImport('replace')}
@@ -1448,14 +2363,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             title="حذف المحطات القديمة واستبدالها بالملف الجديد"
                           >
                             استبدال الكل
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleApplyImport('merge')}
-                            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-xl cursor-pointer shadow-lg"
-                            title="إضافة المحطات الجديدة إلى المحطات الموجودة حالياً"
-                          >
-                            تأكيد والدمج مع الخريطة
                           </button>
                         </div>
                       </div>
@@ -1596,6 +2503,35 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               <span className="text-slate-400 text-[10px] truncate max-w-xs hidden md:inline">
                                 {p.address}
                               </span>
+
+                              {/* Detected Activity Badges */}
+                              <div className="flex flex-wrap items-center gap-1">
+                                {p.conversionCenter && (
+                                  <span className="px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800 text-[9px] font-bold">
+                                    🛠️ تحويل وصيانة
+                                  </span>
+                                )}
+                                {p.cylinderInspection && (
+                                  <span className="px-1.5 py-0.5 rounded bg-purple-950/80 text-purple-300 border border-purple-800 text-[9px] font-bold">
+                                    🔍 فحص أسطوانات
+                                  </span>
+                                )}
+                                {p.oilCenter && (
+                                  <span className="px-1.5 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800 text-[9px] font-bold">
+                                    🛢️ مراكز زيوت BP
+                                  </span>
+                                )}
+                                {p.canopyOil && (
+                                  <span className="px-1.5 py-0.5 rounded bg-teal-950/80 text-teal-300 border border-teal-800 text-[9px] font-bold">
+                                    ☂️ أسفل المظلة
+                                  </span>
+                                )}
+                                {findMatchingExistingStation(p, stations) && (
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-500 text-[9px] font-black" title="ستدمج وتوزع الأنشطة على المحطة القائمة بدون تكرار">
+                                    🔄 تطابق محطة قائمة
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
                             <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">

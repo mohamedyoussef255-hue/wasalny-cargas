@@ -58,11 +58,14 @@ export const Header: React.FC<HeaderProps> = ({
                   className="w-12 h-12 rounded-2xl flex items-center justify-center text-white font-black text-2xl shadow-md transition-all group-hover:rotate-6 group-hover:scale-105 overflow-hidden"
                   style={{ backgroundColor: config.themeColor || '#059669' }}
                 >
-                  {config.appLogoUrl ? (
-                    <img src={config.appLogoUrl} alt="لوجو كارجاس" className="w-full h-full object-cover" />
-                  ) : (
-                    <span>⛽</span>
-                  )}
+                  <img
+                    src={config.appLogoUrl || '/cargas-logo.svg'}
+                    alt="لوجو كارجاس"
+                    className="w-full h-full object-contain p-1"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = '/cargas-logo.svg';
+                    }}
+                  />
                 </div>
                 {clickCount > 0 && clickCount < 5 && (
                   <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow animate-ping">

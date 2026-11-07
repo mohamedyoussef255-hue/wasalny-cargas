@@ -141,8 +141,8 @@ export const StationsListDrawer: React.FC<StationsListDrawerProps> = ({
 
   return (
     <div
-      className={`fixed bottom-0 inset-x-0 z-[600] pointer-events-none transition-all duration-300 ${
-        isExpanded ? 'h-[80vh] sm:h-[75vh]' : 'h-14 md:h-16'
+      className={`absolute bottom-0 inset-x-0 z-[500] pointer-events-none transition-all duration-300 ${
+        isExpanded ? 'h-[85%] max-h-[85%]' : 'h-14 md:h-16'
       }`}
     >
       <div className="max-w-3xl mx-auto h-full p-2 md:p-3 flex flex-col justify-end">

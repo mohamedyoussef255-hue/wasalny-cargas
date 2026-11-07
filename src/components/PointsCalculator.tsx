@@ -16,7 +16,11 @@ import {
   Zap,
 } from 'lucide-react';
 import { AppConfig, PointsFormulaConfig } from '../types';
-import { calculatePointsFromFormula, DEFAULT_POINTS_FORMULA } from '../services/storageService';
+import {
+  calculatePointsFromFormula,
+  DEFAULT_POINTS_FORMULA,
+  recalculateSystemForFinancialPointCost,
+} from '../services/storageService';
 
 interface PointsCalculatorProps {
   config: AppConfig;
@@ -33,10 +37,26 @@ export const PointsCalculator: React.FC<PointsCalculatorProps> = ({
   const initialFormula = config.pointsFormula || DEFAULT_POINTS_FORMULA;
   const [formula, setFormula] = useState<PointsFormulaConfig>(initialFormula);
   const [costPerPointEgp, setCostPerPointEgp] = useState<number>(
-    config.loyaltyCostModel?.costPerPointEgp || 0.35
+    config.loyaltyCostModel?.costPerPointEgp || 0.15
   );
   const [gasPrice, setGasPrice] = useState<number>(config.gasPricePerMeter || 13);
   const [hasSaved, setHasSaved] = useState(false);
+
+  // استماع لحظي لأي تحديث لتكلفة النقطة من الإدارة المالية
+  React.useEffect(() => {
+    const handleSync = (e: any) => {
+      if (e.detail?.costPerPointEgp) {
+        const newCost = Number(e.detail.costPerPointEgp);
+        setCostPerPointEgp(newCost);
+        setFormula((prev) => ({
+          ...prev,
+          pointsToEgpRedemptionRatio: newCost,
+        }));
+      }
+    };
+    window.addEventListener('cargas_financial_rate_updated' as any, handleSync);
+    return () => window.removeEventListener('cargas_financial_rate_updated' as any, handleSync);
+  }, []);
 
   // Simulator Test Inputs
   const [simMeters, setSimMeters] = useState<number>(20);
@@ -71,19 +91,22 @@ export const PointsCalculator: React.FC<PointsCalculatorProps> = ({
     };
   }, [simMeters, simTier, isPromotionalStation, formula, costPerPointEgp, gasPrice]);
 
-  // Save changes to Global Config
+  // Save changes to Global Config & Recalculate System
   const handleSave = () => {
+    const { config: syncedCfg } = recalculateSystemForFinancialPointCost(costPerPointEgp);
     const updated: AppConfig = {
-      ...config,
+      ...syncedCfg,
       gasPricePerMeter: gasPrice,
       pointsPerMeter: formula.basePointsPerMeter,
       pointsFormula: {
         ...formula,
         gasPricePerMeter: gasPrice,
+        pointsToEgpRedemptionRatio: costPerPointEgp,
       },
       loyaltyCostModel: {
-        ...config.loyaltyCostModel,
+        ...syncedCfg.loyaltyCostModel,
         costPerPointEgp,
+        officialCostPerPoint: costPerPointEgp,
       },
     };
 
@@ -96,7 +119,7 @@ export const PointsCalculator: React.FC<PointsCalculatorProps> = ({
   const handleResetDefaults = () => {
     if (confirm('هل ترغب في استعادة إعدادات المعادلة الافتراضية المعتمدة لكارجاس؟')) {
       setFormula(DEFAULT_POINTS_FORMULA);
-      setCostPerPointEgp(0.35);
+      setCostPerPointEgp(0.15);
       setGasPrice(13);
     }
   };
@@ -119,28 +142,63 @@ export const PointsCalculator: React.FC<PointsCalculatorProps> = ({
                 إدارة مالية معتمدة 💼
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-300 font-light mt-1 max-w-2xl">
-              التحكم المركزي الكامل في تكلفة النقطة على شركة كارجاس، وضبط متغيرات المعادلة الرئيسية، ومعاينة نتائج احتساب النقاط تلقائياً في جلسات السكادا وكافة أرجاء المنظومة.
+            <p className="text-xs text-indigo-200 mt-1">
+              معادلة دقيقة مرنة لتحديد تكلفة النقاط لكل متر مكعب وضبط مخصصات الولاء للمحطات
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full md:w-auto">
+        <div className="flex items-center gap-3 w-full md:w-auto">
           <button
             onClick={handleResetDefaults}
-            className="flex-1 md:flex-none bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-4 py-3 rounded-2xl border border-slate-700 transition flex items-center justify-center gap-1.5 active:scale-95"
+            className="flex-1 md:flex-none px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition flex items-center justify-center gap-2 border border-slate-700"
           >
             <RotateCcw className="w-4 h-4" />
-            <span>القيم الافتراضية</span>
+            <span>استعادة الافتراضي</span>
           </button>
 
           <button
             onClick={handleSave}
-            className="flex-1 md:flex-none bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-xs sm:text-sm font-black px-6 py-3 rounded-2xl shadow-lg transition flex items-center justify-center gap-2 active:scale-95"
+            className={`flex-1 md:flex-none px-6 py-2.5 rounded-2xl text-xs font-black transition flex items-center justify-center gap-2 shadow-lg ${
+              hasSaved
+                ? 'bg-emerald-500 text-slate-950'
+                : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950'
+            }`}
           >
-            {hasSaved ? <Check className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
-            <span>{hasSaved ? 'تم الحفظ والاعتماد ✓' : 'اعتماد وحفظ المعادلة'}</span>
+            {hasSaved ? (
+              <>
+                <Check className="w-4 h-4" />
+                <span>تم التعميم بنجاح ✓</span>
+              </>
+            ) : (
+              <>
+                <ShieldCheck className="w-4 h-4" />
+                <span>اعتماد وتعميم المعادلة</span>
+              </>
+            )}
           </button>
+        </div>
+      </div>
+
+      {/* Financial Endorsement & Sync Notice */}
+      <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black shrink-0">
+            💼
+          </div>
+          <div>
+            <div className="font-black text-emerald-300">
+              تكلفة النقطة معتمدة من الإدارة المالية
+            </div>
+            <div className="text-slate-300 text-[11px] mt-0.5">
+              التسعير الساري حالياً: <span className="font-mono font-black text-amber-300">{costPerPointEgp.toFixed(2)} ج/نقطة</span> (معتمد تلقائياً في بنك الهدايا 100+ هدية، استوديو الأفكار بالذكاء الاصطناعي، وعروض السائقين)
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full border border-emerald-500/30 font-bold text-[10px]">
+            متزامن مع بنك الهدايا ✓
+          </span>
         </div>
       </div>
 
@@ -185,13 +243,13 @@ export const PointsCalculator: React.FC<PointsCalculatorProps> = ({
                     min="0.05"
                     max="5.0"
                     value={costPerPointEgp}
-                    onChange={(e) => setCostPerPointEgp(parseFloat(e.target.value) || 0.35)}
+                    onChange={(e) => setCostPerPointEgp(parseFloat(e.target.value) || 0.15)}
                     className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm font-mono font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />
                   <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold">ج.م</span>
                 </div>
                 <p className="text-[10px] text-slate-500">
-                  مثلاً: 0.35 ج تعني أن كل 100 نقطة تمنح للعميل تكلف الشركة 35 جنيهاً.
+                  مثلاً: 0.15 ج تعني أن كل 100 نقطة تمنح للعميل تكلف الشركة 15 جنيهاً (معتمد الإدارة المالية).
                 </p>
               </div>
 
@@ -428,11 +486,11 @@ export const PointsCalculator: React.FC<PointsCalculatorProps> = ({
                     type="number"
                     step="0.05"
                     min="0.1"
-                    value={formula.pointsToEgpRedemptionRatio || 0.35}
+                    value={formula.pointsToEgpRedemptionRatio || 0.15}
                     onChange={(e) =>
                       setFormula({
                         ...formula,
-                        pointsToEgpRedemptionRatio: parseFloat(e.target.value) || 0.35,
+                        pointsToEgpRedemptionRatio: parseFloat(e.target.value) || 0.15,
                       })
                     }
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-mono font-black text-slate-900"

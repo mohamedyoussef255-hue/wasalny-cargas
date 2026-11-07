@@ -547,6 +547,66 @@ export const InlineNearestStationMap: React.FC<InlineNearestStationMapProps> = (
         </div>
       </div>
 
+      {/* ======================================================== */}
+      {/* 6 SEPARATED FACILITY BUTTONS DIRECTLY ABOVE THE MAP */}
+      {/* 1. تموين غاز | 2. مراكز الزيوت | 3. زيوت أسفل المظلة | 4. تحويل وصيانة | 5. فحص أسطوانات | 6. قريباً 2027 */}
+      {/* ======================================================== */}
+      <div className="relative z-10 space-y-2 bg-slate-900/90 backdrop-blur-md p-3 sm:p-3.5 rounded-2xl border border-emerald-500/30">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-bold text-emerald-300 flex items-center gap-1.5">
+            <span>🏷️</span>
+            <span>أنشطة وخدمات محطات كارجاس (فلترة وتوجيه مباشر على الخريطة):</span>
+          </span>
+          <span className="text-[10px] text-slate-300 font-medium">
+            {activeFacilityKey ? '⚡ فلتر نشط (اضغط للإلغاء)' : 'اضغط على أي نشاط لعرض مواقعه فقط'}
+          </span>
+        </div>
+
+        {/* The 6 Separated Facility Buttons in responsive grid that never hides any icon */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          {facilityFilters.map((fac) => {
+            const isSelected = activeFacilityKey === fac.key;
+            // Calculate count of matching stations for each filter
+            const count = currentStations.filter((s) => isStationMatchingFacilityFilter(s, fac.key)).length;
+
+            return (
+              <button
+                key={fac.id}
+                type="button"
+                onClick={() => handleFacilityClick(fac.key)}
+                className={`py-2 px-2.5 rounded-xl text-right transition-all duration-150 active:scale-95 shadow-sm flex items-center justify-between gap-1.5 border cursor-pointer select-none ${
+                  isSelected
+                    ? 'bg-emerald-600 text-white border-emerald-300 shadow-md shadow-emerald-900/50 ring-2 ring-emerald-400'
+                    : 'bg-slate-800/90 hover:bg-slate-750 text-slate-200 border-slate-700 hover:border-emerald-500/60'
+                }`}
+                title={`${fac.label} (${count} موقع متوفر)`}
+              >
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-base shrink-0">
+                    {fac.iconText}
+                  </span>
+                  <span className="font-bold text-[11px] sm:text-xs truncate">
+                    {fac.label}
+                  </span>
+                </div>
+
+                <div className="shrink-0">
+                  {isSelected ? (
+                    <span className="w-4 h-4 rounded-full bg-white text-emerald-800 flex items-center justify-center text-[9px] font-black">
+                      ✓
+                    </span>
+                  ) : (
+                    <span className="text-[9px] font-mono font-bold text-emerald-300 bg-slate-950/80 px-1.5 py-0.5 rounded border border-slate-700/80">
+                      {count}
+                    </span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* ACTIVE FILTER NOTIFICATION PILL (تنبيه الفلترة المباشرة) */}
       {activeFilterInfo && (
         <div className={`relative z-10 flex items-center justify-between gap-3 p-2.5 px-4 rounded-2xl sm:rounded-full border shadow-md text-xs animate-in slide-in-from-top duration-200 ${
@@ -676,64 +736,7 @@ export const InlineNearestStationMap: React.FC<InlineNearestStationMapProps> = (
           </div>
         </div>
       )}
-
-      {/* ======================================================== */}
-      {/* SEPARATED CAPSULE GRADIENT FACILITY BUTTONS (نمط الكبسولات المتدرجة المتنوعة) */}
-      {/* 1. تموين غاز | 2. مراكز الزيوت | 3. زيوت أسفل المظلة | 4. تحويل وصيانة | 5. فحص أسطوانات | 6. قريباً 2027 */}
-      {/* ======================================================== */}
-      <div className="relative z-10 pt-2 space-y-2 border-t border-white/10">
-        <div className="flex items-center justify-between text-xs">
-          <span className="font-bold text-emerald-300 flex items-center gap-1.5">
-            <span>🏷️</span>
-            <span>أنشطة وخدمات محطات كارجاس (فلترة وتوجيه مباشر):</span>
-          </span>
-          <span className="text-[10px] text-slate-400">
-            {activeFacilityKey ? 'فلتر مفعل ✓ اضغط للإلغاء' : 'اضغط على أي خدمة لاستعراض وتوجيه المحطات الموفرة لها'}
-          </span>
-        </div>
-
-        {/* The 6 Separated Facility Buttons in Normal Clean Colors */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-          {facilityFilters.map((fac) => {
-            const isSelected = activeFacilityKey === fac.key;
-
-            return (
-              <button
-                key={fac.id}
-                type="button"
-                onClick={() => handleFacilityClick(fac.key)}
-                className={`py-2.5 px-3 rounded-2xl text-right transition-all duration-150 active:scale-95 shadow-sm flex items-center justify-between gap-1.5 border ${
-                  isSelected
-                    ? 'bg-emerald-600 text-white border-emerald-400 shadow-emerald-900/40 ring-2 ring-emerald-400/40'
-                    : 'bg-slate-800/90 hover:bg-slate-750 text-slate-200 border-slate-700/80 hover:border-slate-500'
-                }`}
-                title={fac.description || fac.label}
-              >
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="text-base shrink-0">
-                    {fac.iconText}
-                  </span>
-                  <span className="font-bold text-xs truncate">
-                    {fac.label}
-                  </span>
-                </div>
-
-                <div className="shrink-0">
-                  {isSelected ? (
-                    <span className="w-4 h-4 rounded-full bg-white text-emerald-800 flex items-center justify-center text-[9px] font-black">
-                      ✓
-                    </span>
-                  ) : (
-                    <span className="text-[9px] font-medium text-slate-400 bg-slate-900/80 px-1.5 py-0.5 rounded-md border border-slate-700/60">
-                      {fac.key === 'coming_soon_2027' ? '2027' : 'متاح'}
-                    </span>
-                  )}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
     </div>
   );
 };
+

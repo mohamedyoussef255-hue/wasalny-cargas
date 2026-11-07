@@ -106,6 +106,41 @@ function MainAppContent() {
     };
   }, []);
 
+  // Keep driver state synced when admin, customer service or user modifies profile
+  useEffect(() => {
+    const handleDriverUpdate = (e: any) => {
+      if (e?.detail) {
+        setDriver(e.detail);
+      } else {
+        setDriver(getDriverProfile());
+      }
+    };
+    window.addEventListener('cargas_driver_profile_updated', handleDriverUpdate);
+    return () => {
+      window.removeEventListener('cargas_driver_profile_updated', handleDriverUpdate);
+    };
+  }, []);
+
+  // Keep app config and rewards dynamically synced when Financial Management updates point cost
+  useEffect(() => {
+    const handleFinancialUpdate = (e: any) => {
+      if (e?.detail?.config) {
+        setConfig(e.detail.config);
+      } else {
+        setConfig(getAppConfig());
+      }
+      if (e?.detail?.rewards) {
+        setRewards(e.detail.rewards);
+      } else {
+        setRewards(getRewards());
+      }
+    };
+    window.addEventListener('cargas_financial_rate_updated', handleFinancialUpdate);
+    return () => {
+      window.removeEventListener('cargas_financial_rate_updated', handleFinancialUpdate);
+    };
+  }, []);
+
   const [currentRole, setCurrentRole] = useState<UserRole>('driver');
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
@@ -609,23 +644,11 @@ function MainAppContent() {
       <footer className="bg-white border-t border-slate-200 py-6 mt-12 text-center text-xs text-slate-500 no-print">
         <div className="max-w-7xl mx-auto px-4 space-y-2">
           <div className="flex flex-wrap items-center justify-center gap-2 text-slate-700 font-bold">
-            {config.showAppName !== false && (
-              <span>{config.appName || 'منظومة كارجاس المتكاملة لإدارة المحطات وبرنامج الولاء الذكي'}</span>
-            )}
-            {config.showAppName !== false && (config.showCompanyName !== false || config.showDeveloperName !== false) && <span>•</span>}
-            {config.showCompanyName !== false && (
-              <span className="text-emerald-700">{config.companyName || 'شركة عزوتي للبرمجيات وتكنولوجيا المعلومات'}</span>
-            )}
-            {config.showCompanyName !== false && config.showDeveloperName !== false && <span>•</span>}
-            {config.showDeveloperName !== false && (
-              <span className="text-slate-900">المطور: {config.developerName || 'محمد عبد الرحمن يوسف'}</span>
-            )}
+            <span>{config.appName || 'منظومة كارجاس المتكاملة لإدارة المحطات وبرنامج الولاء الذكي'}</span>
           </div>
-          {(config.showCompanyName !== false || config.showDeveloperName !== false) && (
-            <p className="text-[11px] text-slate-400">
-              كافة حقوق الملكية الفكرية وتصميم المنظومة وبرمجتها ومساعدها الذكي "مُعين" تعود بالكامل وبشكل حصري لـ {config.showCompanyName !== false ? `"${config.companyName || 'شركة عزوتي للبرمجيات وتكنولوجيا المعلومات'}"` : ''} {config.showCompanyName !== false && config.showDeveloperName !== false ? 'و' : ''} {config.showDeveloperName !== false ? `المالك والمطور "${config.developerName || 'محمد عبد الرحمن يوسف'}"` : ''}.
-            </p>
-          )}
+          <p className="text-[11px] text-slate-400">
+            جميع الحقوق محفوظة لشركة كارجاس للغاز الطبيعي للسيارات (ش.م.م) © 2026
+          </p>
           <div className="pt-1 text-[10px] text-slate-400 flex items-center justify-center gap-2">
             <span>سعر المتر: {config.gasPricePerMeter} ج</span>
             <span>•</span>

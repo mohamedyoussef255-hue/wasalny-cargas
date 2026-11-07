@@ -26,22 +26,43 @@ import {
   TrendingUp,
   Award,
   Coins,
+  Headphones,
+  Users,
+  DollarSign,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { AppConfig, SectionLayoutItem, SectionColSpan, SectionHeightMode, PageLayoutSettings } from '../types';
-import { DEFAULT_DRIVER_SECTIONS, DEFAULT_TECHNICIAN_SECTIONS } from '../services/storageService';
+import {
+  DEFAULT_DRIVER_SECTIONS,
+  DEFAULT_TECHNICIAN_SECTIONS,
+  DEFAULT_SUPERVISOR_SECTIONS,
+  DEFAULT_COMPLAINTS_SECTIONS,
+  DEFAULT_CUSTOMER_SERVICE_SECTIONS,
+  DEFAULT_FINANCE_SECTIONS,
+} from '../services/storageService';
 
 interface DynamicLayoutManagerProps {
   config: AppConfig;
   onUpdateConfig: (updated: AppConfig) => void;
+  onOpenDriverPreview?: () => void;
 }
+
+export type RoleLayoutTab =
+  | 'driver'
+  | 'technician'
+  | 'supervisor'
+  | 'complaints'
+  | 'customer_service'
+  | 'finance';
 
 export const DynamicLayoutManager: React.FC<DynamicLayoutManagerProps> = ({
   config,
   onUpdateConfig,
+  onOpenDriverPreview,
 }) => {
-  const [activeTab, setActiveTab] = useState<'driver' | 'technician'>('driver');
+  const [activeTab, setActiveTab] = useState<RoleLayoutTab>('driver');
 
-  // Working copy of layout sections
+  // Working copy of layout sections for all 6 roles
   const [driverSections, setDriverSections] = useState<SectionLayoutItem[]>(() => {
     return (
       config.layoutSettings?.driverSections && config.layoutSettings.driverSections.length > 0
@@ -58,11 +79,107 @@ export const DynamicLayoutManager: React.FC<DynamicLayoutManagerProps> = ({
     );
   });
 
+  const [supervisorSections, setSupervisorSections] = useState<SectionLayoutItem[]>(() => {
+    return (
+      config.layoutSettings?.supervisorSections && config.layoutSettings.supervisorSections.length > 0
+        ? config.layoutSettings.supervisorSections
+        : DEFAULT_SUPERVISOR_SECTIONS
+    );
+  });
+
+  const [complaintsSections, setComplaintsSections] = useState<SectionLayoutItem[]>(() => {
+    return (
+      config.layoutSettings?.complaintsSections && config.layoutSettings.complaintsSections.length > 0
+        ? config.layoutSettings.complaintsSections
+        : DEFAULT_COMPLAINTS_SECTIONS
+    );
+  });
+
+  const [customerServiceSections, setCustomerServiceSections] = useState<SectionLayoutItem[]>(() => {
+    return (
+      config.layoutSettings?.customerServiceSections && config.layoutSettings.customerServiceSections.length > 0
+        ? config.layoutSettings.customerServiceSections
+        : DEFAULT_CUSTOMER_SERVICE_SECTIONS
+    );
+  });
+
+  const [financeSections, setFinanceSections] = useState<SectionLayoutItem[]>(() => {
+    return (
+      config.layoutSettings?.financeSections && config.layoutSettings.financeSections.length > 0
+        ? config.layoutSettings.financeSections
+        : DEFAULT_FINANCE_SECTIONS
+    );
+  });
+
   const [hasSaved, setHasSaved] = useState(false);
 
   // Active list based on selected tab
-  const currentSections = activeTab === 'driver' ? driverSections : techSections;
-  const setCurrentSections = activeTab === 'driver' ? setDriverSections : setTechSections;
+  const getCurrentSections = (): SectionLayoutItem[] => {
+    switch (activeTab) {
+      case 'driver':
+        return driverSections;
+      case 'technician':
+        return techSections;
+      case 'supervisor':
+        return supervisorSections;
+      case 'complaints':
+        return complaintsSections;
+      case 'customer_service':
+        return customerServiceSections;
+      case 'finance':
+        return financeSections;
+      default:
+        return driverSections;
+    }
+  };
+
+  const currentSections = getCurrentSections();
+
+  const setCurrentSections = (updated: SectionLayoutItem[] | ((prev: SectionLayoutItem[]) => SectionLayoutItem[])) => {
+    if (typeof updated === 'function') {
+      switch (activeTab) {
+        case 'driver':
+          setDriverSections((prev) => updated(prev));
+          break;
+        case 'technician':
+          setTechSections((prev) => updated(prev));
+          break;
+        case 'supervisor':
+          setSupervisorSections((prev) => updated(prev));
+          break;
+        case 'complaints':
+          setComplaintsSections((prev) => updated(prev));
+          break;
+        case 'customer_service':
+          setCustomerServiceSections((prev) => updated(prev));
+          break;
+        case 'finance':
+          setFinanceSections((prev) => updated(prev));
+          break;
+      }
+    } else {
+      switch (activeTab) {
+        case 'driver':
+          setDriverSections(updated);
+          break;
+        case 'technician':
+          setTechSections(updated);
+          break;
+        case 'supervisor':
+          setSupervisorSections(updated);
+          break;
+        case 'complaints':
+          setComplaintsSections(updated);
+          break;
+        case 'customer_service':
+          setCustomerServiceSections(updated);
+          break;
+        case 'finance':
+          setFinanceSections(updated);
+          break;
+      }
+    }
+  };
 
   // Move section UP
   const handleMoveUp = (index: number) => {
@@ -120,6 +237,14 @@ export const DynamicLayoutManager: React.FC<DynamicLayoutManagerProps> = ({
       technicianSectionsOrder: techSections.map((s) => s.id),
       driverSections,
       technicianSections: techSections,
+      supervisorSectionsOrder: supervisorSections.map((s) => s.id),
+      supervisorSections,
+      complaintsSectionsOrder: complaintsSections.map((s) => s.id),
+      complaintsSections,
+      customerServiceSectionsOrder: customerServiceSections.map((s) => s.id),
+      customerServiceSections,
+      financeSectionsOrder: financeSections.map((s) => s.id),
+      financeSections,
     };
 
     const updatedConfig: AppConfig = {
@@ -134,11 +259,26 @@ export const DynamicLayoutManager: React.FC<DynamicLayoutManagerProps> = ({
 
   // Reset to default
   const handleReset = () => {
-    if (confirm('هل ترغب في استعادة ترتيب وتوزيع المساحات الافتراضي؟')) {
-      if (activeTab === 'driver') {
-        setDriverSections(DEFAULT_DRIVER_SECTIONS);
-      } else {
-        setTechSections(DEFAULT_TECHNICIAN_SECTIONS);
+    if (confirm('هل ترغب في استعادة ترتيب وتوزيع المساحات الافتراضي لهذه الصفحة؟')) {
+      switch (activeTab) {
+        case 'driver':
+          setDriverSections(DEFAULT_DRIVER_SECTIONS);
+          break;
+        case 'technician':
+          setTechSections(DEFAULT_TECHNICIAN_SECTIONS);
+          break;
+        case 'supervisor':
+          setSupervisorSections(DEFAULT_SUPERVISOR_SECTIONS);
+          break;
+        case 'complaints':
+          setComplaintsSections(DEFAULT_COMPLAINTS_SECTIONS);
+          break;
+        case 'customer_service':
+          setCustomerServiceSections(DEFAULT_CUSTOMER_SERVICE_SECTIONS);
+          break;
+        case 'finance':
+          setFinanceSections(DEFAULT_FINANCE_SECTIONS);
+          break;
       }
     }
   };
@@ -182,6 +322,46 @@ export const DynamicLayoutManager: React.FC<DynamicLayoutManagerProps> = ({
         return <MapPin className="w-4 h-4 text-rose-500" />;
       case 'technician_incentives':
         return <Coins className="w-4 h-4 text-amber-500" />;
+      case 'supervisor_stats_kpi':
+        return <TrendingUp className="w-4 h-4 text-emerald-400" />;
+      case 'supervisor_technicians_crew':
+        return <Users className="w-4 h-4 text-blue-400" />;
+      case 'supervisor_scada_monitor':
+        return <Gauge className="w-4 h-4 text-amber-400" />;
+      case 'supervisor_daily_target':
+        return <Award className="w-4 h-4 text-purple-400" />;
+      case 'supervisor_quality_safety':
+        return <ShieldCheck className="w-4 h-4 text-cyan-400" />;
+      case 'supervisor_shift_handoff':
+        return <Clock className="w-4 h-4 text-rose-400" />;
+      case 'complaints_stats':
+        return <TrendingUp className="w-4 h-4 text-rose-500" />;
+      case 'complaints_inbox':
+        return <MessageSquare className="w-4 h-4 text-amber-400" />;
+      case 'complaints_filter_actions':
+        return <Star className="w-4 h-4 text-blue-400" />;
+      case 'complaints_reports':
+        return <FileSpreadsheet className="w-4 h-4 text-purple-400" />;
+      case 'cs_chat_channels':
+        return <Headphones className="w-4 h-4 text-emerald-400" />;
+      case 'cs_booking_management':
+        return <Calendar className="w-4 h-4 text-indigo-400" />;
+      case 'cs_station_directory':
+        return <MapPin className="w-4 h-4 text-teal-400" />;
+      case 'cs_quick_responses':
+        return <Sparkles className="w-4 h-4 text-amber-400" />;
+      case 'finance_sales_summary':
+        return <TrendingUp className="w-4 h-4 text-emerald-400" />;
+      case 'finance_points_budget':
+        return <CreditCard className="w-4 h-4 text-amber-400" />;
+      case 'finance_promotions_allocation':
+        return <Award className="w-4 h-4 text-rose-400" />;
+      case 'finance_scada_reconciliation':
+        return <Gauge className="w-4 h-4 text-blue-400" />;
+      case 'finance_incentives_payout':
+        return <DollarSign className="w-4 h-4 text-amber-500" />;
+      case 'finance_export_reports':
+        return <FileSpreadsheet className="w-4 h-4 text-teal-400" />;
       default:
         return <LayoutGrid className="w-4 h-4 text-slate-500" />;
     }
@@ -199,30 +379,42 @@ export const DynamicLayoutManager: React.FC<DynamicLayoutManagerProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl sm:text-2xl font-black text-white">
-                نظام إدارة وترتيب المساحات والأيقونات المرن
+                نظام إدارة وترتيب المساحات والأيقونات لكافة الصفحات
               </h2>
               <span className="bg-teal-400 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full">
-                تحكم ديناميكي 📐
+                تحكم ديناميكي شامل (6 شاشات) 📐
               </span>
             </div>
             <p className="text-xs sm:text-sm text-slate-300 font-light mt-1 max-w-2xl">
-              تحكم كامل في موضع كل مساحة، ترتيب ظهورها في مقدمة أو مؤخرة الصفحة، تغيير حجمها وعرضها (عرض كامل، نصف، ثلث)، وتفعيل أو إخفاء أي مساحة على شاشتي العميل والفني.
+              تحكم كامل في موضع كل مساحة، ترتيب ظهورها في مقدمة أو مؤخرة الصفحة، تغيير حجمها وعرضها (عرض كامل، نصف، ثلث)، وتفعيل أو إخفاء أي مساحة على شاشات: العميل، الفني، المشرف، الشكاوى، خدمة العملاء، والمالية.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full md:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          {onOpenDriverPreview && (
+            <button
+              type="button"
+              onClick={onOpenDriverPreview}
+              className="flex-1 md:flex-none bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500 hover:from-amber-300 hover:to-orange-300 text-slate-950 text-xs sm:text-sm font-black px-4 py-3 rounded-2xl shadow-lg transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+              title="معاينة شاشة العميل والضغط 10 مرات لتحريك العناصر مباشرة"
+            >
+              <Smartphone className="w-4 h-4 text-slate-950" />
+              <span>معاينة صفحة العميل (تحريك بـ 10 نقرات) 📱</span>
+            </button>
+          )}
+
           <button
             onClick={handleReset}
-            className="flex-1 md:flex-none bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-4 py-3 rounded-2xl border border-slate-700 transition flex items-center justify-center gap-1.5 active:scale-95"
+            className="flex-1 md:flex-none bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-4 py-3 rounded-2xl border border-slate-700 transition flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
           >
             <RotateCcw className="w-4 h-4" />
-            <span>الترتيب الافتراضي</span>
+            <span>الترتيب الافتراضي للصفحة</span>
           </button>
 
           <button
             onClick={handleSaveLayout}
-            className="flex-1 md:flex-none bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-xs sm:text-sm font-black px-6 py-3 rounded-2xl shadow-lg transition flex items-center justify-center gap-2 active:scale-95"
+            className="flex-1 md:flex-none bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-xs sm:text-sm font-black px-6 py-3 rounded-2xl shadow-lg transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
           >
             {hasSaved ? <Check className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
             <span>{hasSaved ? 'تم حفظ التخطيط ✓' : 'حفظ واعتماد التخطيط'}</span>
@@ -230,30 +422,78 @@ export const DynamicLayoutManager: React.FC<DynamicLayoutManagerProps> = ({
         </div>
       </div>
 
-      {/* Tabs: Driver Screen vs Technician Screen */}
-      <div className="flex items-center gap-3 border-b border-slate-200 pb-2">
+      {/* Tabs: 6 Roles (العميل، الفني، المشرف، الشكاوى، خدمة العملاء، المالية) */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
         <button
           onClick={() => setActiveTab('driver')}
-          className={`flex items-center gap-2 px-5 py-3 rounded-2xl text-xs sm:text-sm font-black transition-all ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all cursor-pointer ${
             activeTab === 'driver'
               ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
-              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
           }`}
         >
           <Smartphone className="w-4 h-4" />
-          <span>تخطيط شاشة العميل (Driver Portal) — {driverSections.length} مساحات</span>
+          <span>العميل ({driverSections.length})</span>
         </button>
 
         <button
           onClick={() => setActiveTab('technician')}
-          className={`flex items-center gap-2 px-5 py-3 rounded-2xl text-xs sm:text-sm font-black transition-all ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all cursor-pointer ${
             activeTab === 'technician'
               ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
           }`}
         >
           <Gauge className="w-4 h-4" />
-          <span>تخطيط شاشة الفني (Technician Portal) — {techSections.length} مساحات</span>
+          <span>الفني ({techSections.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('supervisor')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all cursor-pointer ${
+            activeTab === 'supervisor'
+              ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
+              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span>المشرف ({supervisorSections.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('complaints')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all cursor-pointer ${
+            activeTab === 'complaints'
+              ? 'bg-rose-600 text-white shadow-md shadow-rose-600/20'
+              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
+          }`}
+        >
+          <MessageSquare className="w-4 h-4" />
+          <span>الشكاوى ({complaintsSections.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('customer_service')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all cursor-pointer ${
+            activeTab === 'customer_service'
+              ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
+              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
+          }`}
+        >
+          <Headphones className="w-4 h-4" />
+          <span>خدمة العملاء ({customerServiceSections.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('finance')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all cursor-pointer ${
+            activeTab === 'finance'
+              ? 'bg-emerald-700 text-white shadow-md shadow-emerald-700/20'
+              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
+          }`}
+        >
+          <DollarSign className="w-4 h-4" />
+          <span>الإدارة المالية ({financeSections.length})</span>
         </button>
       </div>
 

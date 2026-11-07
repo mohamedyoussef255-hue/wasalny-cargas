@@ -45,8 +45,18 @@ import {
   CustomerChatChannel,
   CustomerDirectMessage,
   TechnicianIncentiveConfig,
+  CustomerDataUpdateRequest,
+  DriverQuickIconsVisibility,
 } from '../types';
 import { REWARDS_100_CATALOG } from '../data/rewardsCatalog';
+import {
+  COMMITTED_CUSTOM_CONFIG,
+  COMMITTED_CUSTOM_STATIONS_LOCATIONS,
+  COMMITTED_MASTER_LOGO,
+  COMMITTED_REWARDS,
+  COMMITTED_CREW,
+  COMMITTED_MAP_FILTERS,
+} from './customInitialData';
 
 const CONFIG_KEY = 'cargas_app_config';
 const DRIVER_KEY = 'cargas_driver_profile';
@@ -63,6 +73,45 @@ const SALES_RECORDS_KEY = 'cargas_sales_records';
 const RAW_SALES_SHEET_KEY = 'cargas_raw_sales_sheet';
 const BACKUP_V1_KEY = 'cargas_backup_v1_classic';
 const SESSIONS_KEY = 'cargas_fueling_sessions';
+const DRIVER_QUICK_ICONS_KEY = 'cargas_driver_quick_icons_vis';
+export const DRIVER_QUICK_ICONS_EVENT = 'cargas_driver_quick_icons_updated';
+
+// الإعداد الافتراضي لظهور أيقونات صفحة العميل (كارت الولاء الذهبي مخفي افتراضياً بناء على طلب المستخدم الصريح)
+export const DEFAULT_DRIVER_QUICK_ICONS_VISIBILITY: DriverQuickIconsVisibility = {
+  qr_code: true,
+  navigation: true,
+  golden_card: false, // مخفي افتراضياً بناءً على طلب المستخدم "واريد ان اخفى كارت الولاء الذهبي"
+  rewards: true,
+  maintenance: true,
+  history: true,
+  rating: true,
+  complaints: true,
+  chat: true,
+  update_profile: true,
+};
+
+export const getDriverQuickIconsVisibility = (): DriverQuickIconsVisibility => {
+  try {
+    const raw = localStorage.getItem(DRIVER_QUICK_ICONS_KEY);
+    if (!raw) return { ...DEFAULT_DRIVER_QUICK_ICONS_VISIBILITY };
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_DRIVER_QUICK_ICONS_VISIBILITY,
+      ...parsed,
+    };
+  } catch {
+    return { ...DEFAULT_DRIVER_QUICK_ICONS_VISIBILITY };
+  }
+};
+
+export const saveDriverQuickIconsVisibility = (vis: DriverQuickIconsVisibility) => {
+  try {
+    localStorage.setItem(DRIVER_QUICK_ICONS_KEY, JSON.stringify(vis));
+    window.dispatchEvent(new CustomEvent(DRIVER_QUICK_ICONS_EVENT, { detail: vis }));
+  } catch (err) {
+    console.error('Failed to save driver quick icons visibility', err);
+  }
+};
 
 export const DEFAULT_VISIBILITY: VisibilitySettings = {
   driver: {
@@ -150,11 +199,11 @@ export const DEFAULT_PROMOTIONAL_CAMPAIGNS: PromotionalCampaign[] = [
     category: 'مسابقة',
     badge: 'مسابقة نشطة 🏆',
     pointsReward: 100,
-    financialEquivalentEgp: 35,
+    financialEquivalentEgp: 15,
     allocatedBudgetItemEgp: 15000,
     targetDriversCount: 400,
     rawIdea: 'مسابقة أسبوعية للسائقين لتشجيع التموين الكامل للغاز بالسيارة',
-    aiGeneratedCopy: 'يا بطل الطريق! فول عربيتك غاز طبيعي بـ 50 متر أو أكتر خلال الأسبوع ده وادخل السحب على 100 نقطة هدية بتنزل في محفظتك فوراً تعادل 35 جنيه رصيد مجاني!',
+    aiGeneratedCopy: 'يا بطل الطريق! فول عربيتك غاز طبيعي بـ 50 متر أو أكتر خلال الأسبوع ده وادخل السحب على 100 نقطة هدية بتنزل في محفظتك فوراً تعادل 15 جنيه رصيد مجاني معتمد من الإدارة المالية!',
     explanationOfLoyalty: 'برنامج ولاء كارجاس بيقدر تعبك وشغلك: كل متر بتمونه بتاخد عليه نقطة، والنقاط دي تقدر تبدلها بأمتار غاز أو غسيل عربية أو خصومات زيوت معتمدة.',
     buttonText: 'فول واكسب الآن ⛽',
     buttonAction: 'navigate_map',
@@ -171,7 +220,7 @@ export const DEFAULT_PROMOTIONAL_CAMPAIGNS: PromotionalCampaign[] = [
     category: 'مضاعفة نقاط',
     badge: 'نقاط مضاعفة 2X ⭐',
     pointsReward: 150,
-    financialEquivalentEgp: 52.5,
+    financialEquivalentEgp: 22.5,
     allocatedBudgetItemEgp: 25000,
     targetDriversCount: 500,
     rawIdea: 'تنشيط مبيعات محطة الدقي وسموحة بمضاعفة نقاط الولاء للرواد',
@@ -192,7 +241,7 @@ export const DEFAULT_PROMOTIONAL_CAMPAIGNS: PromotionalCampaign[] = [
     category: 'عرض ترويجي',
     badge: 'وفر 60% من تكلفة البنزين 🚗',
     pointsReward: 300,
-    financialEquivalentEgp: 105,
+    financialEquivalentEgp: 45,
     allocatedBudgetItemEgp: 30000,
     targetDriversCount: 300,
     rawIdea: 'تشجيع تحويل السيارات للغاز الطبيعي بمنح بونص نقاط ترحيبي عالي',
@@ -238,7 +287,7 @@ export const DEFAULT_IDEAS_BANK: IdeaBankItem[] = [
     id: 'IDEA-USER-03',
     title: 'لائحة ومنظومة كارت الولاء الذهبي ونظام احتساب النقاط',
     category: 'عرض ترويجي',
-    description: 'الميثاق المالي لتحويل كل متر غاز ممون لنقاط معتمدة (1 متر = 1 نقطة)، ودراسة تكلفة النقطة 0.35 ج، ومعايير الاستبدال الفوري بالزيوت والصيانة والكوبونات.',
+    description: 'الميثاق المالي لتحويل كل متر غاز ممون لنقاط معتمدة (1 متر = 1 نقطة)، ودراسة تكلفة النقطة 0.15 ج، ومعايير الاستبدال الفوري بالزيوت والصيانة والكوبونات.',
     referenceUrl: 'file:///C:/Users/M.Rahman/Desktop/all%20desktop/%D9%86%D8%B8%D8%A7%D9%85%20%D8%A7%D9%84%D9%86%D9%82%D8%A7%D8%B7.html',
     estimatedEgpValue: 260,
     targetParticipants: 600,
@@ -441,7 +490,7 @@ export const DEFAULT_WASALNY_CONFIG: WasalnyConfig = {
   appSlogan: 'مشوارك أسرع مع غاز كارجاس وأنظف للبيئة',
   appStatus: 'active',
   appVersion: 'v3.5 Enterprise',
-  wasalnyLogoUrl: '',
+  wasalnyLogoUrl: '/cargas-logo.svg',
   wasalnyLogoShape: 'rounded',
   wasalnyThemeColor: '#059669',
   wasalnyAccentColor: '#0284c7',
@@ -463,7 +512,7 @@ export const DEFAULT_WASALNY_CONFIG: WasalnyConfig = {
   maxDiscountPerTripEgp: 50,
   // التحكم في لوجوهات المحطات على الخريطة
   stationMarkerLogoMode: 'unified_cargas',
-  stationUnifiedLogoUrl: '',
+  stationUnifiedLogoUrl: '/cargas-logo.svg',
   stationMarkerStyle: 'cargas_badge',
   stationCustomLogos: {},
   stationMarkerGlowColor: '#059669',
@@ -512,7 +561,7 @@ export const DEFAULT_POINTS_FORMULA: PointsFormulaConfig = {
   volumeBonusThresholdM3: 30,
   volumeBonusPoints: 10,
   technicianWelcomePointsPerShift: 350,
-  pointsToEgpRedemptionRatio: 0.35,
+  pointsToEgpRedemptionRatio: 0.15,
 };
 
 // احتساب النقاط وتكلفتها اعتماداً على ما تقره وتعتمد الإدارة المالية وبمرونة كاملة في النسب
@@ -542,7 +591,7 @@ export function calculateStationLoyaltyPoints(
 
   const isProgramActive = matched ? matched.isLoyaltyProgramActive !== false : true;
   const ratePerMeter = matched?.pointsAwardRatePerMeter ?? (config?.pointsPerMeter || 1.0);
-  const costPerPointEgp = matched?.costPerPointEgp ?? 0.35;
+  const costPerPointEgp = matched?.costPerPointEgp ?? config?.loyaltyCostModel?.costPerPointEgp ?? 0.15;
 
   let points = 0;
   if (isProgramActive && meters > 0) {
@@ -621,14 +670,44 @@ export function calculatePointsFromFormula(
 // تعريفات المساحات الافتراضية لشاشتي العميل والفني (نظام التخطيط الديناميكي المرن)
 export const DEFAULT_DRIVER_SECTIONS: SectionLayoutItem[] = [
   {
+    id: 'wasalny_hero',
+    title: 'خريطة وملاحة كارجاس طريقنا واحد (الخريطة المكبرة والمباشرة)',
+    description: 'الخريطة التفاعلية الحية والملاحة الذكية والتوجيه المباشر لأقرب محطة غاز كارجاس',
+    colSpan: 12,
+    heightMode: 'normal',
+    visible: true,
+    order: 1,
+    icon: 'Navigation',
+  },
+  {
     id: 'driver_welcome_banner',
     title: 'المساحة الخضراء (بانر الترحيب الرئيسي وبيانات السائق)',
     description: 'ترحيب السائق الأخضر، رقم اللوحة، سعر المتر، زر وصّلني، وأيقونات التقييم والشكاوى',
     colSpan: 12,
     heightMode: 'normal',
     visible: true,
-    order: 1,
+    order: 2,
     icon: 'Sparkles',
+  },
+  {
+    id: 'qr_vehicle_card',
+    title: 'كود الـ QR للتموين السريع وبيانات السيارة',
+    description: 'باركود السائق السريع لمسحه بواسطة فني المحطة وبيانات اللوحة والسعة',
+    colSpan: 6,
+    heightMode: 'normal',
+    visible: true,
+    order: 3,
+    icon: 'QrCode',
+  },
+  {
+    id: 'golden_card',
+    title: 'كارت كارجاس الذهبي وبنك النقاط',
+    description: 'بطاقة العضوية VIP، رصيد النقاط المتاحة، والتوفير بالجنيه',
+    colSpan: 6,
+    heightMode: 'normal',
+    visible: true,
+    order: 4,
+    icon: 'CreditCard',
   },
   {
     id: 'nearest_station_repeat_bar',
@@ -637,7 +716,7 @@ export const DEFAULT_DRIVER_SECTIONS: SectionLayoutItem[] = [
     colSpan: 12,
     heightMode: 'compact',
     visible: true,
-    order: 2,
+    order: 5,
     icon: 'Fuel',
   },
   {
@@ -647,38 +726,8 @@ export const DEFAULT_DRIVER_SECTIONS: SectionLayoutItem[] = [
     colSpan: 12,
     heightMode: 'normal',
     visible: true,
-    order: 3,
-    icon: 'Award',
-  },
-  {
-    id: 'wasalny_hero',
-    title: 'خريطة ومحدد أقرب محطة كارجاس (وصّلني)',
-    description: 'توجيه الملاحة الحية ورصد أقرب محطة مع رادار ومحيط الـ GPS',
-    colSpan: 7,
-    heightMode: 'normal',
-    visible: true,
-    order: 4,
-    icon: 'MapPin',
-  },
-  {
-    id: 'qr_vehicle_card',
-    title: 'كود الـ QR للتموين السريع وبيانات السيارة',
-    description: 'باركود السائق السريع لمسحه بواسطة فني المحطة وبيانات اللوحة والسعة',
-    colSpan: 5,
-    heightMode: 'normal',
-    visible: true,
-    order: 5,
-    icon: 'QrCode',
-  },
-  {
-    id: 'golden_card',
-    title: 'كارت كارجاس الذهبي وبنك النقاط',
-    description: 'بطاقة العضوية VIP، رصيد النقاط المتاحة، والتوفير بالجنيه',
-    colSpan: 12,
-    heightMode: 'normal',
-    visible: true,
     order: 6,
-    icon: 'CreditCard',
+    icon: 'Award',
   },
   {
     id: 'fueling_count_stats',
@@ -825,14 +874,238 @@ export const DEFAULT_TECHNICIAN_SECTIONS: SectionLayoutItem[] = [
   },
 ];
 
+export const DEFAULT_SUPERVISOR_SECTIONS: SectionLayoutItem[] = [
+  {
+    id: 'supervisor_stats_kpi',
+    title: 'مؤشرات الأداء ومراقبة الورديات والإنتاجية',
+    description: 'متابعة حية لمبيعات المحطة وإجمالي استهلاك الغاز وعدد السيارات الممونة',
+    colSpan: 12,
+    heightMode: 'compact',
+    visible: true,
+    order: 1,
+    icon: 'TrendingUp',
+  },
+  {
+    id: 'supervisor_technicians_crew',
+    title: 'طاقم فنيي المحطة وحالة الحضور والورديات',
+    description: 'إدارة أطقم الفنيين والورديات النشطة وحوافز كل فني وتقييمات العملاء',
+    colSpan: 7,
+    heightMode: 'normal',
+    visible: true,
+    order: 2,
+    icon: 'ShieldCheck',
+  },
+  {
+    id: 'supervisor_scada_monitor',
+    title: 'مراقبة ضغوط الغاز وأجهزة السكادا بالمحطة',
+    description: 'متابعة ضغط الشبكة (220 بار) وحالة الطلمبات والمضخات ومسدسات التموين',
+    colSpan: 5,
+    heightMode: 'normal',
+    visible: true,
+    order: 3,
+    icon: 'Gauge',
+  },
+  {
+    id: 'supervisor_daily_target',
+    title: 'المستهدف اليومي والشهري لمحطة كارجاس',
+    description: 'نسبة تحقيق مبيعات الأمتار المكعبة ومقارنة المستهدف بالمحقق الفعلي',
+    colSpan: 6,
+    heightMode: 'normal',
+    visible: true,
+    order: 4,
+    icon: 'Award',
+  },
+  {
+    id: 'supervisor_quality_safety',
+    title: 'معايير الأمان والسلامة وفحص الأسطوانات',
+    description: 'متابعة صلاحية أسطوانات السيارات وسجلات الطوارئ وتأمين المحطة',
+    colSpan: 6,
+    heightMode: 'normal',
+    visible: true,
+    order: 5,
+    icon: 'ShieldCheck',
+  },
+  {
+    id: 'supervisor_shift_handoff',
+    title: 'تسليم الوردية ومحضر الجرد اليومي والإيراد',
+    description: 'إغلاق وردية المحطة والمطابقة النقدية مع قراءات العدادات الميكانيكية والسكادا',
+    colSpan: 12,
+    heightMode: 'normal',
+    visible: true,
+    order: 6,
+    icon: 'Clock',
+  },
+];
+
+export const DEFAULT_COMPLAINTS_SECTIONS: SectionLayoutItem[] = [
+  {
+    id: 'complaints_stats',
+    title: 'إحصائيات الشكاوى ومعدل الحل والرضا',
+    description: 'مؤشرات سرعة الاستجابة ونسبة الشكاوى المحلولة ومتوسط وقت الحل',
+    colSpan: 12,
+    heightMode: 'compact',
+    visible: true,
+    order: 1,
+    icon: 'TrendingUp',
+  },
+  {
+    id: 'complaints_inbox',
+    title: 'صندوق الوارد للشكاوى والمقترحات والطلبات',
+    description: 'عرض تفاصيل شكاوى العملاء والمقترحات وتصنيفها والتواصل المباشر',
+    colSpan: 12,
+    heightMode: 'normal',
+    visible: true,
+    order: 2,
+    icon: 'MessageSquare',
+  },
+  {
+    id: 'complaints_filter_actions',
+    title: 'أدوات الفرز والتصنيف السريع والمتابعة',
+    description: 'فلترة حسب المحطة، نوع الشكوى، ومستوى الأهمية وإرسال تحديثات واتساب للعميل',
+    colSpan: 6,
+    heightMode: 'normal',
+    visible: true,
+    order: 3,
+    icon: 'Star',
+  },
+  {
+    id: 'complaints_reports',
+    title: 'تقارير أداء المحطات والأسباب المتكررة',
+    description: 'تحليل الأسباب الجذرية للشكاوى ورفع تقارير دورية للإدارة العليا',
+    colSpan: 6,
+    heightMode: 'normal',
+    visible: true,
+    order: 4,
+    icon: 'Award',
+  },
+];
+
+export const DEFAULT_CUSTOMER_SERVICE_SECTIONS: SectionLayoutItem[] = [
+  {
+    id: 'cs_chat_channels',
+    title: 'قنوات المحادثة المباشرة مع العملاء والواتساب',
+    description: 'استقبال استفسارات العملاء والرد الفوري والمحادثات المباشرة',
+    colSpan: 12,
+    heightMode: 'normal',
+    visible: true,
+    order: 1,
+    icon: 'MessageSquare',
+  },
+  {
+    id: 'cs_booking_management',
+    title: 'إدارة ومتابعة حجوزات الصيانة والتحويل والفحص',
+    description: 'تأكيد مواعيد السائقين بمراكز الصيانة والتحويل المعتمدة',
+    colSpan: 7,
+    heightMode: 'normal',
+    visible: true,
+    order: 2,
+    icon: 'Calendar',
+  },
+  {
+    id: 'cs_station_directory',
+    title: 'دليل المحطات والأنشطة وتوجيه العملاء',
+    description: 'معلومات مراكز الزيوت، الفحص، والتحويل، وساعات العمل لمساعدة السائقين',
+    colSpan: 5,
+    heightMode: 'normal',
+    visible: true,
+    order: 3,
+    icon: 'MapPin',
+  },
+  {
+    id: 'cs_quick_responses',
+    title: 'قوالب الردود السريعة والأسئلة الشائعة',
+    description: 'أجوبة معتمدة حول أسعار الغاز، برامج الولاء، وتوفير التحويل',
+    colSpan: 12,
+    heightMode: 'compact',
+    visible: true,
+    order: 4,
+    icon: 'Sparkles',
+  },
+];
+
+export const DEFAULT_FINANCE_SECTIONS: SectionLayoutItem[] = [
+  {
+    id: 'finance_sales_summary',
+    title: 'ملخص المبيعات النقدية والإلكترونية والأمتار',
+    description: 'إجمالي إيراد الغاز الطبيعي، المبيعات المحققة، والتوزيع الجغرافي',
+    colSpan: 12,
+    heightMode: 'compact',
+    visible: true,
+    order: 1,
+    icon: 'TrendingUp',
+  },
+  {
+    id: 'finance_points_budget',
+    title: 'موازنة نقاط الولاء وتكلفة النقطة بالجنيه',
+    description: 'حساب التزام نقاط الولاء وتكلفة استبدال النقاط بالزيوت والخدمات',
+    colSpan: 6,
+    heightMode: 'normal',
+    visible: true,
+    order: 2,
+    icon: 'CreditCard',
+  },
+  {
+    id: 'finance_promotions_allocation',
+    title: 'المخصصات المالية للحملات والمسابقات',
+    description: 'توزيع موازنة المسابقات والباقات الترويجية على المحطات المستهدفة',
+    colSpan: 6,
+    heightMode: 'normal',
+    visible: true,
+    order: 3,
+    icon: 'Award',
+  },
+  {
+    id: 'finance_scada_reconciliation',
+    title: 'مطابقة مبيعات السكادا مع التوريدات النقدية',
+    description: 'المطابقة اليومية الدقيقة بين قراءات عدادات السكادا والنقدية الموردة',
+    colSpan: 7,
+    heightMode: 'normal',
+    visible: true,
+    order: 4,
+    icon: 'Gauge',
+  },
+  {
+    id: 'finance_incentives_payout',
+    title: 'كشوف حوافز ومكافآت الفنيين المعتمدة',
+    description: 'احتساب وصرف حوافز التميز للفنيين بناء على تقييمات العملاء والأمتار',
+    colSpan: 5,
+    heightMode: 'normal',
+    visible: true,
+    order: 5,
+    icon: 'Coins',
+  },
+  {
+    id: 'finance_export_reports',
+    title: 'تصدير التقارير المالية والإكسيل الرسمية',
+    description: 'تصدير شيتات المبيعات الشهرية وسجلات الحسابات المعتمدة',
+    colSpan: 12,
+    heightMode: 'compact',
+    visible: true,
+    order: 6,
+    icon: 'Gift',
+  },
+];
+
 export const DEFAULT_DRIVER_SECTIONS_ORDER = DEFAULT_DRIVER_SECTIONS.map((s) => s.id);
 export const DEFAULT_TECHNICIAN_SECTIONS_ORDER = DEFAULT_TECHNICIAN_SECTIONS.map((s) => s.id);
+export const DEFAULT_SUPERVISOR_SECTIONS_ORDER = DEFAULT_SUPERVISOR_SECTIONS.map((s) => s.id);
+export const DEFAULT_COMPLAINTS_SECTIONS_ORDER = DEFAULT_COMPLAINTS_SECTIONS.map((s) => s.id);
+export const DEFAULT_CUSTOMER_SERVICE_SECTIONS_ORDER = DEFAULT_CUSTOMER_SERVICE_SECTIONS.map((s) => s.id);
+export const DEFAULT_FINANCE_SECTIONS_ORDER = DEFAULT_FINANCE_SECTIONS.map((s) => s.id);
 
 export const DEFAULT_LAYOUT_SETTINGS: PageLayoutSettings = {
   driverSectionsOrder: DEFAULT_DRIVER_SECTIONS_ORDER,
   technicianSectionsOrder: DEFAULT_TECHNICIAN_SECTIONS_ORDER,
   driverSections: DEFAULT_DRIVER_SECTIONS,
   technicianSections: DEFAULT_TECHNICIAN_SECTIONS,
+  supervisorSectionsOrder: DEFAULT_SUPERVISOR_SECTIONS_ORDER,
+  supervisorSections: DEFAULT_SUPERVISOR_SECTIONS,
+  complaintsSectionsOrder: DEFAULT_COMPLAINTS_SECTIONS_ORDER,
+  complaintsSections: DEFAULT_COMPLAINTS_SECTIONS,
+  customerServiceSectionsOrder: DEFAULT_CUSTOMER_SERVICE_SECTIONS_ORDER,
+  customerServiceSections: DEFAULT_CUSTOMER_SERVICE_SECTIONS,
+  financeSectionsOrder: DEFAULT_FINANCE_SECTIONS_ORDER,
+  financeSections: DEFAULT_FINANCE_SECTIONS,
 };
 
 export const DEFAULT_SCADA_CONFIG: ScadaConfig = {
@@ -874,6 +1147,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   themeColor: '#059669', // Emerald
   isDarkMode: false,
   language: 'ar',
+  appLogoUrl: '/cargas-logo.svg',
+  customAppLogoUrl: '/cargas-logo.svg',
+  stationLogoUrl: '/cargas-logo.svg',
   assistantEnabled: true,
   assistantOnlyAdmin: false,
   assistantAutoSpeak: true,
@@ -902,12 +1178,12 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   loyaltyCostModel: {
     activeModelName: 'ترويجي للمحطات المنخفضة',
-    costPerPointEgp: 0.35,
+    costPerPointEgp: 0.15,
     expectedMarginGainPct: 28,
     totalPromotionalBudgetEgp: 150000,
     allocatedBudgetSumEgp: 95000,
     officialGasPrice: 13,
-    officialCostPerPoint: 0.35,
+    officialCostPerPoint: 0.15,
     officialGasolineSavingsPerMeter: 10.5,
     officialMarginGainPct: 28,
     centennialMeters: 108,
@@ -930,6 +1206,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   showCompanyName: true,
   showAppName: true,
   technicianIncentiveConfig: DEFAULT_TECHNICIAN_INCENTIVE_CONFIG,
+  hideAiAuditFromCustomers: true,
+  ...(COMMITTED_CUSTOM_CONFIG || {}),
 };
 
 
@@ -1042,12 +1320,12 @@ export const DEFAULT_STATIONS_LOCATIONS: CargasStationLocation[] = [
     workingHours: '24 ساعة',
     pumpCount: 6,
     servicesAvailable: ['تموين غاز CNG', 'زيوت أسفل المظلة', 'غسيل سريع'],
-    activities: ['تموين', 'زيوت'],
+    activities: ['تموين', 'زيوت أسفل المظلة'],
     salesVolumeStatus: 'medium',
     promotionalPointsMultiplier: 1.2,
     promotionalBudgetEgp: 15000,
     region: 'القاهرة الكبرى',
-    costPerPointEgp: 0.35,
+    costPerPointEgp: 0.15,
     pointsAwardRatePerMeter: 1.2,
     isLoyaltyProgramActive: true,
     financialApprovedByAdmin: true,
@@ -1093,7 +1371,7 @@ export const DEFAULT_STATIONS_LOCATIONS: CargasStationLocation[] = [
     workingHours: '24 ساعة',
     pumpCount: 4,
     servicesAvailable: ['تغيير زيوت معتمدة', 'صيانة فلاتر وبوجيهات', 'فحص سوائل المحرك', 'زيوت أسفل المظلة'],
-    activities: ['تموين', 'زيوت', 'صيانة'],
+    activities: ['تموين', 'زيوت', 'زيوت أسفل المظلة', 'صيانة'],
     salesVolumeStatus: 'low',
     promotionalPointsMultiplier: 2.0,
     promotionalBudgetEgp: 30000,
@@ -1123,7 +1401,7 @@ export const DEFAULT_STATIONS_LOCATIONS: CargasStationLocation[] = [
     promotionalPointsMultiplier: 1.5,
     promotionalBudgetEgp: 10000,
     region: 'القليوبية والدلتا',
-    costPerPointEgp: 0.35,
+    costPerPointEgp: 0.15,
     pointsAwardRatePerMeter: 1.5,
     isLoyaltyProgramActive: true,
     financialApprovedByAdmin: true,
@@ -1169,12 +1447,12 @@ export const DEFAULT_STATIONS_LOCATIONS: CargasStationLocation[] = [
     phone: '0237612345',
     workingHours: '24 ساعة',
     servicesAvailable: ['تغيير زيت سريع دون انتظار', 'تزويد مياه الردياتير', 'فحص فلاتر الهواء والغاز'],
-    activities: ['زيوت'],
+    activities: ['زيوت أسفل المظلة', 'زيوت'],
     salesVolumeStatus: 'medium',
     promotionalPointsMultiplier: 1.5,
     promotionalBudgetEgp: 10000,
     region: 'الجيزة والقاهرة الكبرى',
-    costPerPointEgp: 0.35,
+    costPerPointEgp: 0.15,
     pointsAwardRatePerMeter: 1.5,
     isLoyaltyProgramActive: true,
     financialApprovedByAdmin: true,
@@ -1199,7 +1477,7 @@ export const DEFAULT_STATIONS_LOCATIONS: CargasStationLocation[] = [
     promotionalPointsMultiplier: 1.5,
     promotionalBudgetEgp: 20000,
     region: 'القاهرة الكبرى',
-    costPerPointEgp: 0.35,
+    costPerPointEgp: 0.15,
     pointsAwardRatePerMeter: 1.5,
     isLoyaltyProgramActive: true,
     financialApprovedByAdmin: true,
@@ -1221,7 +1499,7 @@ export const DEFAULT_STATIONS_LOCATIONS: CargasStationLocation[] = [
     promotionalPointsMultiplier: 1.2,
     promotionalBudgetEgp: 15000,
     region: 'القاهرة الكبرى',
-    costPerPointEgp: 0.35,
+    costPerPointEgp: 0.15,
     pointsAwardRatePerMeter: 1.2,
     isLoyaltyProgramActive: true,
     financialApprovedByAdmin: true,
@@ -1265,7 +1543,7 @@ export const DEFAULT_STATIONS_LOCATIONS: CargasStationLocation[] = [
     promotionalPointsMultiplier: 1.5,
     promotionalBudgetEgp: 15000,
     region: 'الإسكندرية والساحل',
-    costPerPointEgp: 0.35,
+    costPerPointEgp: 0.15,
     pointsAwardRatePerMeter: 1.5,
     isLoyaltyProgramActive: true,
     financialApprovedByAdmin: true,
@@ -1283,12 +1561,12 @@ export const DEFAULT_STATIONS_LOCATIONS: CargasStationLocation[] = [
     workingHours: 'تاريخ الافتتاح المستهدف: 2027',
     pumpCount: 12,
     servicesAvailable: ['محطة عملاقة قريباً 2027', 'تموين غاز فائق السرعة', 'مركز زيوت متكامل', 'محطة شحن كهربائي'],
-    activities: ['تموين', 'زيوت', 'صيانة'],
+    activities: ['تموين', 'زيوت', 'صيانة', 'قريباً 2027'],
     salesVolumeStatus: 'medium',
     promotionalPointsMultiplier: 2.0,
     promotionalBudgetEgp: 50000,
     region: 'القاهرة الكبرى',
-    costPerPointEgp: 0.35,
+    costPerPointEgp: 0.15,
     pointsAwardRatePerMeter: 2.0,
     isLoyaltyProgramActive: false,
     financialApprovedByAdmin: true,
@@ -1306,7 +1584,7 @@ export const DEFAULT_STATIONS_LOCATIONS: CargasStationLocation[] = [
     workingHours: 'تاريخ الافتتاح المستهدف: 2027',
     pumpCount: 10,
     servicesAvailable: ['خطة التوسع القومي قريباً 2027', 'تموين غاز طبيعي CNG', 'مركز زيوت أسفل المظلة'],
-    activities: ['تموين', 'زيوت'],
+    activities: ['تموين', 'زيوت أسفل المظلة', 'قريباً 2027'],
     salesVolumeStatus: 'medium',
     promotionalPointsMultiplier: 2.0,
     promotionalBudgetEgp: 30000,
@@ -1822,13 +2100,27 @@ export const DEFAULT_SALES_RECORDS: StationSalesRecord[] = [
 
 // Helper Functions
 export function getAppConfig(): AppConfig {
+  const effectiveDefault: AppConfig = {
+    ...DEFAULT_CONFIG,
+    ...(COMMITTED_CUSTOM_CONFIG || {}),
+  };
   const data = localStorage.getItem(CONFIG_KEY);
-  if (!data) return DEFAULT_CONFIG;
+  if (!data) return effectiveDefault;
   try {
     const parsed = JSON.parse(data);
+    const resolvedMasterLogo = COMMITTED_MASTER_LOGO || COMMITTED_CUSTOM_CONFIG?.stationLogoUrl;
     return {
-      ...DEFAULT_CONFIG,
+      ...effectiveDefault,
       ...parsed,
+      appLogoUrl: (parsed.appLogoUrl && parsed.appLogoUrl !== '/cargas-logo.svg' && parsed.appLogoUrl.trim().length > 0)
+        ? parsed.appLogoUrl
+        : (resolvedMasterLogo || effectiveDefault.appLogoUrl || '/cargas-logo.svg'),
+      customAppLogoUrl: (parsed.customAppLogoUrl && parsed.customAppLogoUrl !== '/cargas-logo.svg' && parsed.customAppLogoUrl.trim().length > 0)
+        ? parsed.customAppLogoUrl
+        : (resolvedMasterLogo || effectiveDefault.customAppLogoUrl || '/cargas-logo.svg'),
+      stationLogoUrl: (parsed.stationLogoUrl && parsed.stationLogoUrl !== '/cargas-logo.svg' && parsed.stationLogoUrl.trim().length > 0)
+        ? parsed.stationLogoUrl
+        : (resolvedMasterLogo || effectiveDefault.stationLogoUrl || '/cargas-logo.svg'),
       visibility: {
         ...DEFAULT_VISIBILITY,
         ...(parsed.visibility || {}),
@@ -1869,6 +2161,7 @@ export function getAppConfig(): AppConfig {
         ...(parsed.scadaConfig || {}),
       },
       customerViewMode: parsed.customerViewMode || getCustomerViewMode(),
+      hideAiAuditFromCustomers: parsed.hideAiAuditFromCustomers !== undefined ? parsed.hideAiAuditFromCustomers : true,
     };
   } catch {
     return DEFAULT_CONFIG;
@@ -1970,19 +2263,118 @@ export function getDriverProfile(): DriverProfile {
 
 export function saveDriverProfile(driver: DriverProfile): void {
   localStorage.setItem(DRIVER_KEY, JSON.stringify(driver));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('cargas_driver_profile_updated', { detail: driver }));
+  }
+}
+
+// ==========================================
+// طلبات تعديل بيانات العملاء المرسلة لخدمة العملاء ومدير النظام
+// ==========================================
+const CUSTOMER_UPDATE_REQUESTS_KEY = 'cargas_customer_update_requests';
+
+export function getCustomerDataUpdateRequests(): CustomerDataUpdateRequest[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const data = localStorage.getItem(CUSTOMER_UPDATE_REQUESTS_KEY);
+    if (!data) return [];
+    return JSON.parse(data);
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomerDataUpdateRequests(requests: CustomerDataUpdateRequest[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(CUSTOMER_UPDATE_REQUESTS_KEY, JSON.stringify(requests));
+    window.dispatchEvent(new CustomEvent('cargas_customer_requests_updated', { detail: requests }));
+  } catch (e) {
+    console.error('Failed to save customer update requests:', e);
+  }
+}
+
+export function submitCustomerDataUpdateRequest(
+  request: Omit<CustomerDataUpdateRequest, 'id' | 'status' | 'submittedAt'>
+): CustomerDataUpdateRequest {
+  const all = getCustomerDataUpdateRequests();
+  const newReq: CustomerDataUpdateRequest = {
+    ...request,
+    id: `REQ-${Date.now()}`,
+    status: 'pending',
+    submittedAt: new Date().toISOString(),
+  };
+  all.unshift(newReq);
+  saveCustomerDataUpdateRequests(all);
+  return newReq;
+}
+
+export function approveCustomerDataUpdateRequest(
+  requestId: string,
+  approvedData: {
+    name?: string;
+    phone?: string;
+    carPlate?: string;
+    carModel?: string;
+    cngCylinderCapacity?: number;
+    odometerKm?: number;
+  },
+  reviewedBy: string = 'مدير النظام / خدمة العملاء',
+  adminNotes?: string
+): DriverProfile | null {
+  const all = getCustomerDataUpdateRequests();
+  const idx = all.findIndex((r) => r.id === requestId);
+  if (idx === -1) return null;
+
+  const req = all[idx];
+  req.status = 'approved';
+  req.reviewedAt = new Date().toISOString();
+  req.reviewedBy = reviewedBy;
+  if (adminNotes) req.adminNotes = adminNotes;
+  saveCustomerDataUpdateRequests(all);
+
+  // Apply to driver profile
+  const currentDriver = getDriverProfile();
+  const updatedDriver: DriverProfile = {
+    ...currentDriver,
+    name: approvedData.name ?? req.requestedName ?? currentDriver.name,
+    phone: approvedData.phone ?? req.requestedPhone ?? currentDriver.phone,
+    carPlate: approvedData.carPlate ?? req.requestedCarPlate ?? currentDriver.carPlate,
+    carModel: approvedData.carModel ?? req.requestedCarModel ?? currentDriver.carModel,
+    cngCylinderCapacity: approvedData.cngCylinderCapacity ?? req.requestedCngCylinderCapacity ?? currentDriver.cngCylinderCapacity,
+    odometerKm: approvedData.odometerKm ?? req.requestedOdometerKm ?? currentDriver.odometerKm,
+  };
+  saveDriverProfile(updatedDriver);
+  return updatedDriver;
+}
+
+export function rejectCustomerDataUpdateRequest(
+  requestId: string,
+  reason: string,
+  reviewedBy: string = 'مدير النظام / خدمة العملاء'
+): void {
+  const all = getCustomerDataUpdateRequests();
+  const idx = all.findIndex((r) => r.id === requestId);
+  if (idx === -1) return;
+  all[idx].status = 'rejected';
+  all[idx].reviewedAt = new Date().toISOString();
+  all[idx].reviewedBy = reviewedBy;
+  all[idx].adminNotes = reason;
+  saveCustomerDataUpdateRequests(all);
 }
 
 export function getStationCrew(): TechnicianCrewMember[] {
+  const fallbackCrew = (COMMITTED_CREW && COMMITTED_CREW.length > 0) ? COMMITTED_CREW : DEFAULT_CREW;
   const data = localStorage.getItem(CREW_KEY);
-  if (!data) return DEFAULT_CREW;
+  if (!data) return fallbackCrew;
   try {
     const list: TechnicianCrewMember[] = JSON.parse(data);
     return list.map((c, i) => ({
-      ...DEFAULT_CREW[i % DEFAULT_CREW.length],
+      ...fallbackCrew[i % fallbackCrew.length],
       ...c,
     }));
   } catch {
-    return DEFAULT_CREW;
+    return fallbackCrew;
   }
 }
 
@@ -2004,24 +2396,164 @@ export function saveTransactions(txs: FuelingTransaction[]): void {
   localStorage.setItem(TRANSACTIONS_KEY, JSON.stringify(txs));
 }
 
-export function getRewards(): RewardItem[] {
-  const data = localStorage.getItem(REWARDS_KEY);
-  if (!data) return DEFAULT_REWARDS;
+// استخراج تكلفة نقطة الولاء الرسمية المعتمدة حالياً من الإدارة المالية
+export function getActiveFinancialCostPerPoint(): number {
   try {
-    const parsed = JSON.parse(data);
-    // إذا كان الكتالوج القديم به أقل من 20 مكافأة، يتم الترقية فوراً لكتالوج الـ 100 هدية الجديد
-    if (!Array.isArray(parsed) || parsed.length < 20) {
-      localStorage.setItem(REWARDS_KEY, JSON.stringify(DEFAULT_REWARDS));
-      return DEFAULT_REWARDS;
-    }
-    return parsed;
+    const config = getAppConfig();
+    const cost = config.loyaltyCostModel?.costPerPointEgp ?? config.loyaltyCostModel?.officialCostPerPoint;
+    if (typeof cost === 'number' && cost > 0) return cost;
   } catch {
-    return DEFAULT_REWARDS;
+    // fallback
   }
+  return 0.15;
+}
+
+// مزامنة كافة عناصر بنك الهدايا والمكافآت مع تكلفة النقطة المقررة من الإدارة المالية وفصل التحليل الاستشاري الداخلي
+export function syncRewardsWithFinancialCost(rewardsList: RewardItem[], costPerPoint?: number): RewardItem[] {
+  const cost = typeof costPerPoint === 'number' && costPerPoint > 0 ? costPerPoint : getActiveFinancialCostPerPoint();
+  const config = getAppConfig();
+  const shouldHideAuditFromCustomers = config.hideAiAuditFromCustomers !== false;
+
+  return rewardsList.map((rew) => {
+    // تحديد القيمة المالية العينية الفعلية للهدية بالجنيه
+    const egpValue =
+      typeof rew.estimatedEgpValue === 'number' && rew.estimatedEgpValue > 0
+        ? rew.estimatedEgpValue
+        : Math.round(rew.pointsCost * 0.15);
+
+    // حساب النقاط المطلوبة ديناميكياً بناءً على تسعير الإدارة المالية (القيمة بالجنيه ÷ تكلفة النقطة)
+    const pointsCost = Math.max(10, Math.round(egpValue / cost));
+
+    let cleanDesc = rew.description || '';
+    let auditNotes = rew.aiAuditNotes;
+
+    // فحص إن كان الوصف يحتوي على تقرير "مُعِين" الاستشاري لنقله إلى الملاحظات الإدارية ووضع وصف تسويقي نظيف للعميل
+    const isMoeenAudit =
+      cleanDesc.includes('تحليل استشاري') ||
+      cleanDesc.includes('مُعِين') ||
+      cleanDesc.includes('تقييم التسعير السوقي') ||
+      cleanDesc.includes('توصية لوكا ووضاح');
+
+    if (isMoeenAudit) {
+      if (!auditNotes) {
+        auditNotes = cleanDesc;
+      }
+      if (shouldHideAuditFromCustomers) {
+        cleanDesc =
+          rew.marketingDescription ||
+          `استبدل ${pointsCost} نقطة ولاء مجمعة في كارتك الذهبي واحصل فوراً على ${rew.title} بقيمة ${egpValue} جنيه صالحة لدى كارجاس والشركاء المعتمدين.`;
+      }
+    }
+
+    return {
+      ...rew,
+      description: cleanDesc,
+      marketingDescription: rew.marketingDescription || (isMoeenAudit ? cleanDesc : rew.description),
+      aiAuditNotes: auditNotes,
+      estimatedEgpValue: egpValue,
+      pointsCost,
+      valueText: `قيمة ${egpValue} جنيه (معتمد مالياً: ${cost.toFixed(2)} ج/نقطة)`,
+    };
+  });
+}
+
+export function getRewards(): RewardItem[] {
+  const fallbackRewards = COMMITTED_REWARDS && COMMITTED_REWARDS.length > 0 ? COMMITTED_REWARDS : DEFAULT_REWARDS;
+  const data = localStorage.getItem(REWARDS_KEY);
+  let parsed: RewardItem[];
+  if (!data) {
+    parsed = fallbackRewards;
+  } else {
+    try {
+      const res = JSON.parse(data);
+      parsed = Array.isArray(res) && res.length > 0 ? res : fallbackRewards;
+    } catch {
+      parsed = fallbackRewards;
+    }
+  }
+  // مزامنة فورية دائمة لنقاط الهدايا مع أحدث تكلفة حددتها الإدارة المالية
+  return syncRewardsWithFinancialCost(parsed);
 }
 
 export function saveRewards(rewards: RewardItem[]): void {
   localStorage.setItem(REWARDS_KEY, JSON.stringify(rewards));
+}
+
+// دالة اعتماد وتعميم تكلفة نقطة الولاء التي حددتها الإدارة المالية على كامل أركان المنظومة
+export function recalculateSystemForFinancialPointCost(costPerPoint: number): {
+  config: AppConfig;
+  rewards: RewardItem[];
+} {
+  const cleanCost = Math.max(0.01, Number(costPerPoint) || 0.15);
+  const config = getAppConfig();
+
+  // 1. إعادة احتساب جميع العروض والمسابقات الترويجية بناءً على التكلفة الجديدة
+  const currentCampaigns = config.promotionalCampaigns
+    ? [...config.promotionalCampaigns]
+    : [...DEFAULT_PROMOTIONAL_CAMPAIGNS];
+
+  const updatedCampaigns = currentCampaigns.map((camp) => {
+    const budgetPerDriver =
+      camp.allocatedBudgetItemEgp && camp.targetDriversCount && camp.targetDriversCount > 0
+        ? camp.allocatedBudgetItemEgp / camp.targetDriversCount
+        : camp.financialEquivalentEgp || camp.pointsReward * 0.15;
+    const pointsReward = Math.max(25, Math.round(budgetPerDriver / cleanCost));
+    const financialEquivalentEgp = Number((pointsReward * cleanCost).toFixed(1));
+    return {
+      ...camp,
+      pointsReward,
+      financialEquivalentEgp,
+    };
+  });
+
+  // 2. تحديث الإعدادات الشاملة للمنظومة ونموذج التكلفة ومعادلة الحاسبة
+  const updatedConfig: AppConfig = {
+    ...config,
+    promotionalCampaigns: updatedCampaigns,
+    loyaltyCostModel: {
+      ...config.loyaltyCostModel,
+      costPerPointEgp: cleanCost,
+      officialCostPerPoint: cleanCost,
+    },
+    pointsFormula: {
+      ...(config.pointsFormula || DEFAULT_POINTS_FORMULA),
+      pointsToEgpRedemptionRatio: cleanCost,
+    },
+  };
+  saveAppConfig(updatedConfig);
+
+  // 3. إعادة احتساب وتحديث كافة هدايا بنك المكافآت بالكامل (100+ هدية) وحفظها
+  const currentRewards = getRewards();
+  const updatedRewards = syncRewardsWithFinancialCost(currentRewards, cleanCost);
+  saveRewards(updatedRewards);
+
+  // 4. تحديث تكلفة النقطة لكافة المحطات واعتمادها كقرار مالي
+  try {
+    const stations = getStationLocations();
+    const updatedStations = stations.map((st) => ({
+      ...st,
+      costPerPointEgp: cleanCost,
+      financialApprovedByAdmin: true,
+    }));
+    saveStationLocations(updatedStations);
+  } catch (err) {
+    console.warn('Stations update error during financial sync:', err);
+  }
+
+  // 5. إطلاق إشعار حي للواجهات الفعالة للتحديث اللحظي بدون الحاجة لإعادة تحميل الصفحة
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('cargas_financial_rate_updated', {
+        detail: {
+          costPerPointEgp: cleanCost,
+          rewards: updatedRewards,
+          config: updatedConfig,
+        },
+      })
+    );
+  }
+
+  return { config: updatedConfig, rewards: updatedRewards };
 }
 
 // ==================== Service Appointments & Smart Reallocation Store ====================
@@ -2501,26 +3033,63 @@ export function saveRedemptions(redemptions: RewardRedemption[]): void {
 }
 
 export function getStationLocations(): CargasStationLocation[] {
-  if (typeof window === 'undefined') return DEFAULT_STATIONS_LOCATIONS;
+  const fallbackList = (COMMITTED_CUSTOM_STATIONS_LOCATIONS && COMMITTED_CUSTOM_STATIONS_LOCATIONS.length > 0)
+    ? COMMITTED_CUSTOM_STATIONS_LOCATIONS
+    : DEFAULT_STATIONS_LOCATIONS;
+
+  if (typeof window === 'undefined') return fallbackList;
   const data = localStorage.getItem(STATIONS_LOCATIONS_KEY);
-  if (!data) return DEFAULT_STATIONS_LOCATIONS;
+  if (!data) return fallbackList;
   try {
     const parsed = JSON.parse(data);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_STATIONS_LOCATIONS;
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : fallbackList;
   } catch {
-    return DEFAULT_STATIONS_LOCATIONS;
+    return fallbackList;
   }
 }
 
 export function saveStationLocations(stations: CargasStationLocation[]): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(STATIONS_LOCATIONS_KEY, JSON.stringify(stations));
+    // إزالة أي لوجوهات base64 مكررة وضخمة من المحطات الفردية لحماية مساحة المتصفح
+    const safeStations = stations.map((s) => ({
+      ...s,
+      customLogoUrl: (s.customLogoUrl && s.customLogoUrl.length > 500 && s.customLogoUrl.startsWith('data:'))
+        ? undefined
+        : s.customLogoUrl,
+    }));
+
+    localStorage.setItem(STATIONS_LOCATIONS_KEY, JSON.stringify(safeStations));
     // إرسال إشعار فوري وتحديث كافة الخرائط والشاشات في كامل التطبيق
-    window.dispatchEvent(new CustomEvent('cargas_stations_updated', { detail: stations }));
+    window.dispatchEvent(new CustomEvent('cargas_stations_updated', { detail: safeStations }));
     window.dispatchEvent(new Event('storage'));
   } catch (err) {
-    console.error('Failed to save stations locations:', err);
+    // حماية ضد تجاوز سعة التخزين (QuotaExceededError) بحفظ الحقول الأساسية فقط
+    try {
+      const lean = stations.map((s) => ({
+        id: s.id,
+        name: s.name,
+        code: s.code,
+        city: s.city,
+        address: s.address,
+        facilityType: s.facilityType,
+        latitude: s.latitude,
+        longitude: s.longitude,
+        phone: s.phone,
+        workingHours: s.workingHours,
+        servicesAvailable: s.servicesAvailable,
+        activities: s.activities,
+        salesVolumeStatus: s.salesVolumeStatus,
+        promotionalPointsMultiplier: s.promotionalPointsMultiplier,
+        promotionalBudgetEgp: s.promotionalBudgetEgp,
+        governorate: s.governorate,
+      }));
+      localStorage.setItem(STATIONS_LOCATIONS_KEY, JSON.stringify(lean));
+      window.dispatchEvent(new CustomEvent('cargas_stations_updated', { detail: lean }));
+      window.dispatchEvent(new Event('storage'));
+    } catch (fallbackErr) {
+      console.warn('LocalStorage quota limit reached for stations cache:', fallbackErr);
+    }
   }
 }
 
@@ -4130,11 +4699,12 @@ export async function aiFormulateCampaignCopy(params: {
   targetDriversCount: number;
   costPerPointEgp: number;
 }): Promise<Partial<PromotionalCampaign>> {
-  // حساب معايير النقاط والمكافأة بدقة مالية متوافقة مع موازنة الشركة
-  const costPerPoint = params.costPerPointEgp > 0 ? params.costPerPointEgp : 0.35;
+  // حساب معايير النقاط والمكافأة بدقة مالية متوافقة مع موازنة الشركة وتكلفة النقطة المعتمدة
+  const activeCost = getActiveFinancialCostPerPoint();
+  const costPerPoint = params.costPerPointEgp > 0 ? params.costPerPointEgp : activeCost;
   const targetCount = params.targetDriversCount > 0 ? params.targetDriversCount : 500;
   const budgetPerDriver = params.allocatedBudgetItemEgp / targetCount;
-  // عدد النقاط = نصيب العميل من الموازنة ÷ تكلفة النقطة بالجنية
+  // عدد النقاط = نصيب العميل من الموازنة ÷ تكلفة النقطة المعتمدة مالياً
   const pointsReward = Math.max(25, Math.round(budgetPerDriver / costPerPoint));
   const financialEquivalentEgp = Number((pointsReward * costPerPoint).toFixed(1));
 
@@ -4278,7 +4848,8 @@ export async function aiAuditAndGenerateReward(
 
   const rawName = params.giftName.trim();
   const inputPrice = Math.max(10, Number(params.estimatedEgpValue) || 100);
-  const costPerPoint = Math.max(0.1, params.costPerPointEgp || 0.35);
+  const activeFinancialCost = getActiveFinancialCostPerPoint();
+  const costPerPoint = Math.max(0.01, params.costPerPointEgp || activeFinancialCost);
   const gasPrice = Math.max(5, params.gasPricePerMeter || 13);
   const targetCount = Math.max(1, params.targetParticipantsCount || 100);
 
@@ -4742,7 +5313,12 @@ export function getMasterStationMapLogo(stationId?: string, stationCustomLogo?: 
     console.warn('Error reading master station map logo:', err);
   }
 
-  // 7. اللوجو الرسمي الفيكتور الافتراضي لكارجاس (لا ينكسر ولا يختفي)
+  // 7. اللوجو المعتمد المحفوظ في كود المشروع لمدير النظام
+  if (COMMITTED_MASTER_LOGO && COMMITTED_MASTER_LOGO.trim().length > 0) {
+    return COMMITTED_MASTER_LOGO.trim();
+  }
+
+  // 8. اللوجو الرسمي الفيكتور الافتراضي لكارجاس (لا ينكسر ولا يختفي)
   return OFFICIAL_CARGAS_VECTOR_LOGO;
 }
 
@@ -4875,7 +5451,11 @@ export const DEFAULT_MAP_FACILITY_FILTERS: MapFacilityFilterItem[] = [
 ];
 
 export function getMapFacilityFilters(): MapFacilityFilterItem[] {
-  if (typeof window === 'undefined') return DEFAULT_MAP_FACILITY_FILTERS;
+  const fallbackFilters = (COMMITTED_MAP_FILTERS && COMMITTED_MAP_FILTERS.length > 0)
+    ? COMMITTED_MAP_FILTERS
+    : DEFAULT_MAP_FACILITY_FILTERS;
+
+  if (typeof window === 'undefined') return fallbackFilters;
   try {
     const raw = localStorage.getItem(MAP_FACILITY_FILTERS_KEY);
     if (raw) {
@@ -4889,7 +5469,7 @@ export function getMapFacilityFilters(): MapFacilityFilterItem[] {
   } catch (err) {
     console.warn('Failed to parse facility filters:', err);
   }
-  return DEFAULT_MAP_FACILITY_FILTERS;
+  return fallbackFilters;
 }
 
 export function saveMapFacilityFilters(filters: MapFacilityFilterItem[]): void {

@@ -66,6 +66,13 @@ import {
   EyeOff,
   Search,
 } from 'lucide-react';
+import {
+  playNavigationVoice,
+  generateVoiceGuidanceSpeech,
+  stopNavigationVoice,
+  NAVIGATION_VOICES,
+  NavigationVoiceId,
+} from '../services/voiceNavigationService';
 
 interface WasalnyAdminDashboardProps {
   config: AppConfig;
@@ -525,20 +532,24 @@ export const WasalnyAdminDashboard: React.FC<WasalnyAdminDashboardProps> = ({
     alert('✅ تم استعادة الأيقونات الخمسة الافتراضية المعتمدة لكارجاس بنجاح!');
   };
 
-  // Test Egyptian Voice Guidance
+  // Test Egyptian & Arabic Human Voice Guidance
   const handleTestWadahVoice = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(
-        'يا مساء الورد والياسمين يا صاحب صاحبي! مرحب بيك في تطبيق وصّلني التابع لكارجاس وعزوتي.. رحلتك معانا أمان وتوفير حقيقي، ومعاك وضاح خطوة بخطوة لحد ما نوصل بالسلامة!'
-      );
-      utterance.lang = 'ar-EG';
-      utterance.rate = 0.95;
-      utterance.pitch = 1.05;
-      window.speechSynthesis.speak(utterance);
-    } else {
-      alert('نظام التوجيه الصوتي يعمل عبر المتصفح تلقائياً.');
+    const activeVoice = (wasalny.voiceGuidance as NavigationVoiceId) || 'shakir_egyptian';
+    if (activeVoice === 'silent') {
+      alert('الصوت المرشد معطل حالياً (وضع صامت).');
+      return;
     }
+    const sampleStation = stations[0] || {
+      id: 'st_cargas_demo',
+      name: 'كارجاس شبرا',
+      address: 'شارع شبرا الرئيسي، القاهرة',
+      latitude: 30.08,
+      longitude: 31.24,
+      distanceFromUserKm: 1.2,
+      crowdLevel: 'منخفض',
+    };
+    const sampleText = generateVoiceGuidanceSpeech(sampleStation as any, activeVoice);
+    playNavigationVoice(sampleText, activeVoice);
   };
 
   // Calculate Simulator Estimated Fare
@@ -2191,28 +2202,34 @@ export const WasalnyAdminDashboard: React.FC<WasalnyAdminDashboardProps> = ({
 
               <div className="space-y-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">اختيار نبرة الصوت المرشد:</label>
+                  <label className="block font-bold text-slate-700 mb-1">اختيار نبرة الصوت المرشد للملاحة:</label>
                   <select
                     value={wasalny.voiceGuidance}
                     onChange={(e) => setWasalny({ ...wasalny, voiceGuidance: e.target.value as any })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold"
                   >
-                    <option value="wadah_egyptian">🔊 صوت وضاح المصري (ودود، ابن بلد، مجاني) [موصى به]</option>
-                    <option value="moen_advisor">🎙️ صوت مُعِين الاستشاري الذكي</option>
-                    <option value="standard_arabic">📢 لغة عربية رسمية</option>
-                    <option value="silent">🔇 بدون إرشاد صوتي</option>
+                    <option value="shakir_egyptian">🎙️ صوت شاكر المصري (بشري طبيعي، هادئ ومحترم) [موصى به لجمهورية مصر العربية]</option>
+                    <option value="hamed_arabic">🔊 صوت حامد العربي (رجالي فصيح، وقور ومتقن)</option>
+                    <option value="wadah_egyptian">📢 صوت وضاح المصري (ابن بلد، حماسي وشعبي)</option>
+                    <option value="moen_advisor">🤖 صوت مُعِين الاستشاري الذكي</option>
+                    <option value="standard_arabic">🗣️ صوت لغة عربية فصحى معيارية</option>
+                    <option value="silent">🔇 بدون إرشاد صوتي (صامت)</option>
                   </select>
                 </div>
 
                 <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200 flex items-center justify-between">
                   <div>
-                    <span className="font-bold text-emerald-950 block">تجربة نبرة صوت وضاح المصري</span>
-                    <span className="text-[10px] text-emerald-800">صوت محلي مصري ودود يرحب بالعميل</span>
+                    <span className="font-bold text-emerald-950 block">
+                      تجربة نبرة {NAVIGATION_VOICES[wasalny.voiceGuidance as NavigationVoiceId]?.shortName || 'الصوت المختار'}
+                    </span>
+                    <span className="text-[10px] text-emerald-800">
+                      {NAVIGATION_VOICES[wasalny.voiceGuidance as NavigationVoiceId]?.description || 'صوت بشري طبيعي للتوجيه والملاحة'}
+                    </span>
                   </div>
                   <button
                     type="button"
                     onClick={handleTestWadahVoice}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-xl transition text-xs"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-xl transition text-xs cursor-pointer active:scale-95"
                   >
                     تجربة الصوت 🔊
                   </button>

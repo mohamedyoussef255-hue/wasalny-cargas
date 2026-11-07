@@ -16,12 +16,13 @@ export interface Station {
   petrol: boolean; // بنزين
   conversionCenter: boolean; // مركز تحويل وصيانة غاز
   oilCenter: boolean; // مركز زيوت كارجاس / BP معتمد
+  canopyOil?: boolean; // زيوت أسفل المظلة
+  comingSoon2027?: boolean; // خطة التوسع القومي قريباً 2027
   cylinderInspection: boolean; // مركز فحص واختبار أسطوانات
   cngNozzles: number; // عدد مسدسات الغاز
   pressureBar?: number; // ضغط الغاز (مثال: 200 - 220 bar)
   congestionLevel: CongestionLevel; // أخضر، أصفر، أحمر
   waitTimeMinutes: number; // وقت الانتظار المتوقع بالدقائق
-  verified: boolean; // موثقة 100%
   workingHours: string; // 24 ساعة أو مواعيد المركز
   services: string[]; // قائمة الخدمات
   phone?: string;
@@ -29,6 +30,8 @@ export interface Station {
   voiceGuideText?: string; // إرشاد صوتي مخصص
   isHidden?: boolean; // إخفاء المحطة من الخريطة وعن المستخدمين
   updatedAt?: string;
+  distanceKm?: number;
+  verified?: boolean;
 }
 
 export interface RouteStep {

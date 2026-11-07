@@ -3,6 +3,7 @@ import { Station, NavigationState, AppConfig, CargasFacilityType, CongestionLeve
 import { INITIAL_CARGAS_STATIONS } from './data/initialStations';
 import { calculateRoute, getDistanceMeters } from './services/routingService';
 import { speechService } from './services/speechService';
+import { mergeAndDistributeActivities } from './utils/stationActivityMerger';
 import { MapComponent, MapStyleType } from './components/MapComponent';
 import { HeaderBar } from './components/HeaderBar';
 import { NavigationOverlay } from './components/NavigationOverlay';
@@ -13,10 +14,12 @@ import { KmzUploaderModal } from './components/KmzUploaderModal';
 import { VoiceNavigatorModal } from './components/VoiceNavigatorModal';
 import { StationsListDrawer } from './components/StationsListDrawer';
 import { CargasNationwideModal } from './components/CargasNationwideModal';
+import { NearestStationsPickerModal } from './components/NearestStationsPickerModal';
 import { DragDropMapTool } from './components/DragDropMapTool';
 import { CARGAS_LOGO_SVG } from './utils/cargasLogo';
 import { getStoredCustomLogo, saveStoredCustomLogo } from './utils/imageCompressor';
 import { Locate, Building2, Move, Mic, MicOff, X, ArrowRight } from 'lucide-react';
+import { voiceManager } from '../utils/VoiceQueueManager';
 
 const DEFAULT_CONFIG: AppConfig = {
   adminPassword: '0000',
@@ -29,22 +32,22 @@ const DEFAULT_CONFIG: AppConfig = {
   brandAccentColor: '#008844',
   theme: 'dark',
   language: 'ar',
-  appTitle: 'كارجاس - الغاز الطبيعي للسيارات',
-  appSubtitle: 'محطات الغاز • مراكز التحويل • مراكز الزيوت المعتمدة',
+  appTitle: 'كارجاس طريقنا واحد',
+  appSubtitle: 'الملاحة والتوجيه المباشر لأقرب محطة',
   ezoutiBadgeVisible: true,
   trafficCrowdAlertsEnabled: true,
   simpleDriverMode: true,
 
   showNearestStationBtn: true,
   nearestStationBtnText: 'أقرب محطة كارجاس',
-  showVoiceMicBtn: true,
+  showVoiceMicBtn: false,
   voiceMicBtnText: 'أوامر صوتية',
   showNationwideBtn: true,
   nationwideBtnText: 'محطات كار جاس',
   showStopSafetyBtn: true,
-  showAudioMuteBtn: true,
+  showAudioMuteBtn: false,
   showLocateMeBtn: true,
-  showBottomDrawer: true,
+  showBottomDrawer: false,
   showCrowdBadges: true,
   showFacilityFilters: true,
   headerNoticeText: '',
@@ -78,17 +81,31 @@ export interface CargasNavAppProps {
   onBack?: () => void;
   initialTargetStationId?: string;
   autoStartNearest?: boolean;
+  startNavigationDirectly?: boolean;
+  isPermanentMuted?: boolean;
+  openNearestPickerTrigger?: number;
 }
 
-export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest }: CargasNavAppProps = {}) {
+export function CargasNavApp({
+  onBack,
+  initialTargetStationId,
+  autoStartNearest = false,
+  startNavigationDirectly = false,
+  isPermanentMuted = true,
+  openNearestPickerTrigger = 0
+}: CargasNavAppProps = {}) {
   // Load stations from localStorage or initial Cargas stations (Strictly Cargas only)
   const [stations, setStations] = useState<Station[]>(() => {
     try {
-      const saved = localStorage.getItem('cargas_stations_v2');
+      const saved = localStorage.getItem('cargas_stations_v2') || localStorage.getItem('cargas_stations_v2_backup');
       if (saved) {
         const parsed = JSON.parse(saved);
-        const cargasOnly = parsed.filter((s: any) => s.company === 'كارجاس');
-        if (cargasOnly.length > 0) return cargasOnly;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((s: any) => ({
+            ...s,
+            company: s.company || 'كارجاس'
+          }));
+        }
       }
     } catch {}
     return INITIAL_CARGAS_STATIONS;
@@ -179,20 +196,24 @@ export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest 
   const [isNationwideModalOpen, setIsNationwideModalOpen] = useState<boolean>(false);
   const [isKmzModalOpen, setIsKmzModalOpen] = useState<boolean>(false);
   const [isVoiceNavigatorOpen, setIsVoiceNavigatorOpen] = useState<boolean>(false);
+  const [isNearestPickerOpen, setIsNearestPickerOpen] = useState<boolean>(false);
+  const [nearestPickerFacility, setNearestPickerFacility] = useState<CargasFacilityType | 'all'>('station');
 
-  // Handle importing stations from KMZ / KML
+  // Handle importing stations from KMZ / KML / Excel
   const handleImportKmzStations = (imported: Station[], mode: 'append' | 'replace') => {
     if (mode === 'replace') {
       setStations(imported);
+      setToastMessage(`✅ تم استبدال جميع المحطات وإدراج ${imported.length} محطة بنجاح!`);
     } else {
-      const existingIds = new Set(stations.map(s => s.id));
-      const fresh = imported.filter(s => !existingIds.has(s.id));
-      setStations(prev => [...fresh, ...prev]);
+      const result = mergeAndDistributeActivities(stations, imported);
+      setStations(result.mergedStations);
+      setToastMessage(
+        `✅ تم بنجاح توزيع وتحديث الأنشطة على ${result.updatedCount} محطة قائمة بدون تكرار، وإضافة ${result.addedCount} محطة جديدة!`
+      );
     }
     if (imported.length > 0) {
       setSelectedStation(imported[0]);
     }
-    setToastMessage(`✅ تم استيراد وإضافة ${imported.length} محطة من ملف KMZ بنجاح!`);
   };
 
   // Admin Drag & Drop Positioning and Custom Logo Tool States
@@ -278,7 +299,7 @@ export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest 
     isActive: false,
     targetStation: null,
     currentStepIndex: 0,
-    isMuted: false,
+    isMuted: isPermanentMuted ? true : speechService.getMuted(),
     voiceSpeed: 0.95,
     remainingDistanceKm: 0,
     remainingDurationMin: 0,
@@ -287,12 +308,24 @@ export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest 
     isSimulating: false,
   });
 
+  // Sync mute with speechService
+  useEffect(() => {
+    if (isPermanentMuted) {
+      speechService.setMuted(true);
+      speechService.stop();
+    } else {
+      setNavigation(prev => ({ ...prev, isMuted: speechService.getMuted() }));
+    }
+  }, [isPermanentMuted]);
+
   const simulationIntervalRef = useRef<any>(null);
 
   // Save to localStorage safely (protect against quota errors)
   useEffect(() => {
     try {
       localStorage.setItem('cargas_stations_v2', JSON.stringify(stations));
+      localStorage.setItem('cargas_stations_v2_backup', JSON.stringify(stations));
+      window.dispatchEvent(new CustomEvent('cargas_stations_updated', { detail: stations }));
     } catch (err) {
       console.warn('LocalStorage quota limit reached, saving optimized station data:', err);
       try {
@@ -302,6 +335,8 @@ export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest 
           customLogoUrl: (s.customLogoUrl && s.customLogoUrl === currentGlobalLogo) ? undefined : s.customLogoUrl
         }));
         localStorage.setItem('cargas_stations_v2', JSON.stringify(optimized));
+        localStorage.setItem('cargas_stations_v2_backup', JSON.stringify(optimized));
+        window.dispatchEvent(new CustomEvent('cargas_stations_updated', { detail: optimized }));
       } catch {}
     }
   }, [stations, config.globalStationLogoUrl, config.customAppLogoUrl]);
@@ -377,60 +412,92 @@ export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest 
     showToast(`✅ تم حفظ وتعديل اسم المحطة: "${trimmed}"`);
   };
 
-  const handleFindNearest = () => {
-    speechService.playChime('turn');
-    const sorted = [...stations].sort((a, b) => {
-      return getDistanceMeters(userLocation[0], userLocation[1], a.lat, a.lng) -
-             getDistanceMeters(userLocation[0], userLocation[1], b.lat, b.lng);
-    });
-
-    if (sorted.length > 0) {
-      const nearest = sorted[0];
-      const distKm = (getDistanceMeters(userLocation[0], userLocation[1], nearest.lat, nearest.lng) / 1000).toFixed(1);
-      
-      // Close blocking sheet and start turn-by-turn navigation directly
-      setSelectedStation(null);
-      handleStartNavigation(nearest);
-      
-      const reply = `بدأنا الملاحة فوراً لأقرب محطة ليك: ${nearest.name}، على بعد ${distKm} كيلو، ووقت الانتظار ${nearest.waitTimeMinutes} دقيقة. تفاصيل المحطة متاحة ليك في الشاشة بدون تعطيل الملاحة!`;
-      speechService.speak(reply, { priority: true });
-      showToast(`🚀 جاري الملاحة لأقرب محطة: ${nearest.name} (${distKm} كم)`);
-    }
+  const handleFindNearest = (targetFacility: CargasFacilityType | 'all' = 'station') => {
+    setNearestPickerFacility(targetFacility);
+    setIsNearestPickerOpen(true);
   };
 
-  // Start Navigation
+  // Top Nearest Stations/Centers for the active picker category
+  const nearestPickerStations = useMemo(() => {
+    const candidates = stations.filter((station) => {
+      if (station.isHidden && !isAdminEditMode) return false;
+      if (config.cargasOnlyMode && station.company !== 'كارجاس') return false;
+
+      if (nearestPickerFacility === 'station') return station.cng;
+      if (nearestPickerFacility === 'conversion_center') return station.conversionCenter;
+      if (nearestPickerFacility === 'oil_center') return station.oilCenter;
+      if (nearestPickerFacility === 'cylinder_testing') return station.cylinderInspection;
+      return true;
+    });
+
+    return candidates
+      .map((station) => {
+        const distM = getDistanceMeters(userLocation[0], userLocation[1], station.lat, station.lng);
+        return {
+          ...station,
+          distanceKm: distM / 1000,
+        };
+      })
+      .sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0));
+  }, [stations, nearestPickerFacility, userLocation, config.cargasOnlyMode, isAdminEditMode]);
+
+  const nearestPickerFacilityTitle = useMemo(() => {
+    switch (nearestPickerFacility) {
+      case 'conversion_center':
+        return 'مراكز تحويل وصيانة';
+      case 'oil_center':
+        return 'مراكز زيوت معتمدة (BP)';
+      case 'cylinder_testing':
+        return 'مراكز فحص واختبار أسطوانات';
+      default:
+        return 'محطات تموين غاز طبيعي كارجاس';
+    }
+  }, [nearestPickerFacility]);
+
+  // Start Navigation -> توجيه مباشر وفوري إلى نظام الملاحة في خرائط جوجل مع إجبار جوجل على أدق إحداثيات GPS للعميل والمحطة
   const handleStartNavigation = async (station: Station) => {
-    // Check crowd alert if enabled
-    if (config.trafficCrowdAlertsEnabled && station.congestionLevel === 'high' && !navigation.isMuted) {
-      speechService.playChime('alert');
-      speechService.speak(`تنبيه: محطة ${station.name} بها زحام حالياً ووقت الانتظار حوالي ${station.waitTimeMinutes} دقيقة. جاري التوجيه.`, { priority: true });
-    }
+    const userLat = userLocation[0];
+    const userLng = userLocation[1];
+    const originParam = userLat && userLng ? `&origin=${userLat},${userLng}` : '';
+    const destinationParam = `destination=${station.lat},${station.lng}`;
+    const googleUrl = `https://www.google.com/maps/dir/?api=1${originParam}&${destinationParam}&travelmode=driving&dir_action=navigate`;
 
-    const route = await calculateRoute(userLocation, [station.lat, station.lng], station.name);
+    const link = document.createElement('a');
+    link.href = googleUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 
-    setNavigation({
-      isActive: true,
-      targetStation: station,
-      currentStepIndex: 0,
-      isMuted: navigation.isMuted,
-      voiceSpeed: 0.95,
-      remainingDistanceKm: route.distanceKm,
-      remainingDurationMin: route.durationMin,
-      routeCoordinates: route.coordinates,
-      steps: route.steps,
-      isSimulating: false,
-    });
-
-    // Close detail drawer
+    showToast(`🚀 جاري الملاحة عبر خرائط جوجل لأقرب محطة: ${station.name}`);
     setSelectedStation(null);
-
-    // Initial voice instruction
-    if (!navigation.isMuted) {
-      speechService.playChime('turn');
-      const startText = `بدأت الملاحة نحو محطة ${station.name}. ${route.steps[0]?.instruction || 'اتجه نحو المسار المحدد'}`;
-      speechService.speak(startText, { priority: true });
-    }
   };
+
+  // Start Navigation ONLY when explicitly triggered by user click (not automatically on load)
+  const autoStartHandledRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!stations || stations.length === 0) return;
+
+    if (startNavigationDirectly) {
+      handleFindNearest();
+      return;
+    }
+
+    if (autoStartNearest) {
+      if (autoStartHandledRef.current) return;
+      autoStartHandledRef.current = true;
+      handleFindNearest();
+    }
+  }, [stations, startNavigationDirectly, autoStartNearest]);
+
+  // Open Nearest Stations / Centers picker whenever trigger increments
+  useEffect(() => {
+    if (openNearestPickerTrigger > 0) {
+      handleFindNearest('station');
+    }
+  }, [openNearestPickerTrigger]);
 
   // Stop Navigation
   const handleStopNavigation = () => {
@@ -1060,12 +1127,12 @@ export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest 
 
   return (
     <div 
-      className="relative w-full h-screen min-h-[100dvh] max-h-[100dvh] overflow-hidden font-['Cairo'] select-none flex flex-col items-center justify-center transition-colors duration-300"
+      className="relative w-full h-full min-h-full max-h-full overflow-hidden font-['Cairo'] select-none flex flex-col items-center justify-center transition-colors duration-300"
       style={{ backgroundColor: appOuterBg }}
     >
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[1300] bg-slate-900/95 text-white border border-emerald-500/60 px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-xl text-xs md:text-sm font-bold animate-in fade-in slide-in-from-top-4 flex items-center gap-2">
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1300] bg-slate-900/95 text-white border border-emerald-500/60 px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-xl text-xs md:text-sm font-bold animate-in fade-in slide-in-from-top-4 flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
           <span>{toastMessage}</span>
         </div>
@@ -1132,7 +1199,7 @@ export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest 
 
       {/* Direct Voice Assistant Live Status Floating Banner & Quick Commands (Non-blocking / No modal) */}
       {(isListeningVoice || voiceExecutionStatus || showQuickVoiceBar) && (
-        <div className="fixed top-28 md:top-24 left-1/2 -translate-x-1/2 z-[1400] max-w-lg w-[94%] sm:w-auto px-4 py-3 rounded-2xl bg-slate-900/98 border-2 border-emerald-400 text-white shadow-2xl backdrop-blur-xl flex flex-col gap-2.5 animate-in fade-in slide-in-from-top-4">
+        <div className="absolute top-28 md:top-24 left-1/2 -translate-x-1/2 z-[1400] max-w-lg w-[94%] sm:w-auto px-4 py-3 rounded-2xl bg-slate-900/98 border-2 border-emerald-400 text-white shadow-2xl backdrop-blur-xl flex flex-col gap-2.5 animate-in fade-in slide-in-from-top-4">
           <div className="flex items-center gap-3">
             <div className="relative flex items-center justify-center shrink-0">
               <span className={`w-3.5 h-3.5 rounded-full absolute ${isListeningVoice ? 'bg-rose-500 animate-ping' : 'bg-emerald-500'}`}></span>
@@ -1276,14 +1343,15 @@ export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest 
           onOpenSafetyModal={() => setIsSafetyModalOpen(true)}
           onOpenNationwideModal={() => setIsNationwideModalOpen(true)}
           onSecretAdminTrigger={() => setIsAdminModalOpen(true)}
-          onVoiceQuery={processDirectVoiceCommand}
-          onFindNearest={handleFindNearest}
+          onFindNearest={() => handleFindNearest('station')}
+          onFindNearestFacility={(facility) => handleFindNearest(facility)}
           onLocateMe={handleLocateMe}
           config={config}
           isGpsActive={gpsActive || isGpsContinuous}
           onToggleGpsTracking={() => handleToggleContinuousGps()}
           isListeningVoice={isListeningVoice}
           onToggleDirectVoice={handleToggleDirectVoice}
+          onBack={onBack}
         />
       )}
 
@@ -1291,7 +1359,7 @@ export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest 
       {isGpsContinuous && !navigation.isActive && (
         <button
           onClick={() => handleToggleContinuousGps(false)}
-          className="fixed top-24 left-4 z-[550] bg-slate-900/95 border-2 border-emerald-400 text-emerald-300 px-3.5 py-1.5 rounded-2xl text-[11px] font-black shadow-2xl backdrop-blur-md flex items-center gap-2 cursor-pointer transition active:scale-95 animate-in fade-in"
+          className="absolute top-24 left-4 z-[550] bg-slate-900/95 border-2 border-emerald-400 text-emerald-300 px-3.5 py-1.5 rounded-2xl text-[11px] font-black shadow-2xl backdrop-blur-md flex items-center gap-2 cursor-pointer transition active:scale-95 animate-in fade-in"
           title="نظام تتبع GPS التلقائي نشط - انقر للإيقاف"
         >
           <span className="relative flex h-2.5 w-2.5">
@@ -1302,25 +1370,9 @@ export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest 
         </button>
       )}
 
-      {/* Floating Buttons: Locate Me, Voice Navigator & Admin Drag Tools (KMZ button hidden from normal UI) */}
+      {/* Floating Buttons: Locate Me & Admin Drag Tools */}
       {!navigation.isActive && (
-        <div className="fixed top-40 right-4 z-[500] flex flex-col gap-2">
-          {/* Direct Hands-Free Voice Assistant Floating Button (دون فتح نافذة) */}
-          <button
-            onClick={handleToggleDirectVoice}
-            className={`w-12 h-12 rounded-2xl border-2 shadow-2xl backdrop-blur-md flex items-center justify-center cursor-pointer transition active:scale-95 group ${
-              isListeningVoice
-                ? 'bg-rose-600 text-white border-rose-300 ring-4 ring-rose-400/60 shadow-rose-500/50 animate-pulse'
-                : 'bg-gradient-to-tr from-emerald-600 via-teal-600 to-emerald-500 text-white border-emerald-400/80 shadow-emerald-500/30'
-            }`}
-            title={isListeningVoice ? "جارٍ الاستماع... انقر للإيقاف" : "أوامر صوتية فورية (انقر وتحدث دون نوافذ)"}
-          >
-            {isListeningVoice ? (
-              <MicOff className="w-5 h-5 text-white animate-bounce" />
-            ) : (
-              <Mic className="w-5 h-5 text-white animate-pulse" />
-            )}
-          </button>
+        <div className="absolute top-40 right-4 z-[500] flex flex-col gap-2">
 
           {/* Locate Me / Continuous GPS Tracking Toggle */}
           {config.showLocateMeBtn && (
@@ -1373,6 +1425,7 @@ export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest 
       {selectedStation && !navigation.isActive && (
         <StationDetailSheet
           station={selectedStation}
+          userLocation={userLocation}
           distanceKm={getDistanceMeters(userLocation[0], userLocation[1], selectedStation.lat, selectedStation.lng) / 1000}
           durationMin={Math.max(2, Math.round(((getDistanceMeters(userLocation[0], userLocation[1], selectedStation.lat, selectedStation.lng) / 1000) / 30) * 60))}
           onClose={() => setSelectedStation(null)}
@@ -1397,19 +1450,7 @@ export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest 
         />
       )}
 
-      {/* Smart Voice Navigator Modal */}
-      <VoiceNavigatorModal
-        isOpen={isVoiceNavigatorOpen}
-        onClose={() => setIsVoiceNavigatorOpen(false)}
-        stations={filteredStations}
-        userLocation={userLocation}
-        onSelectStation={(s) => setSelectedStation(s)}
-        onStartNavigation={(s) => handleStartNavigation(s)}
-        onStopNavigation={handleStopNavigation}
-        isNavigatingActive={navigation.isActive}
-        onToggleContinuousGps={handleToggleContinuousGps}
-        isGpsContinuous={isGpsContinuous}
-      />
+
 
       {/* KMZ / KML Uploader Modal */}
       <KmzUploaderModal
@@ -1437,6 +1478,23 @@ export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest 
         onStartNavigation={(st) => handleStartNavigation(st)}
       />
 
+      {/* Top 3 Nearest Stations/Centers Modal Picker */}
+      <NearestStationsPickerModal
+        isOpen={isNearestPickerOpen}
+        onClose={() => setIsNearestPickerOpen(false)}
+        stations={nearestPickerStations}
+        facilityType={nearestPickerFacility}
+        facilityTitle={nearestPickerFacilityTitle}
+        userLocation={userLocation}
+        onSelectStationOnMap={(st) => {
+          setSelectedStation(st);
+          // Auto center and zoom map onto this selected station
+          setUserLocation([st.lat, st.lng]);
+        }}
+        onNavigateToGoogleMaps={(st) => handleStartNavigation(st)}
+        customAppLogoUrl={config.customAppLogoUrl || config.globalStationLogoUrl || uploadedLogoUrl || getStoredCustomLogo()}
+      />
+
       {/* Secret Admin Dashboard Modal */}
       <AdminModal
         isOpen={isAdminModalOpen}
@@ -1453,14 +1511,6 @@ export function CargasNavApp({ onBack, initialTargetStationId, autoStartNearest 
           setToastMessage('📍 تم فتح أداة السحب والإفلات على الخريطة!');
         }}
       />
-
-      {/* Branding & Copyright Footer */}
-      {config.ezoutiBadgeVisible && !navigation.isActive && (
-        <div className="fixed bottom-2 right-4 z-[400] hidden md:flex items-center gap-1.5 px-3 py-1 bg-slate-950/80 border border-slate-800 rounded-full text-[10px] text-slate-400 backdrop-blur-sm pointer-events-none">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-          <span>ابتكار وتطوير: <strong className="text-slate-300">محمد عبد الرحمن يوسف</strong></span>
-        </div>
-      )}
     </div>
   );
 }

@@ -43,6 +43,11 @@ import {
   LayoutGrid,
   Compass,
   Volume2,
+  Info,
+  Send,
+  Eye,
+  EyeOff,
+  Settings,
 } from 'lucide-react';
 import {
   AppConfig,
@@ -54,6 +59,8 @@ import {
   CargasStationLocation,
   TechnicianCrewMember,
   CustomerViewMode,
+  CustomerDataUpdateRequest,
+  DriverQuickIconsVisibility,
 } from '../types';
 import { generateQrDataUrl, encodeDriverQrData, encodeRewardRedemptionQrData } from '../services/qrService';
 import {
@@ -67,10 +74,24 @@ import {
   getCustomerViewMode,
   saveCustomerViewMode,
   CUSTOMER_VIEW_MODE_EVENT,
+  getCustomerDataUpdateRequests,
+  submitCustomerDataUpdateRequest,
+  getDriverQuickIconsVisibility,
+  saveDriverQuickIconsVisibility,
+  DRIVER_QUICK_ICONS_EVENT,
+  DEFAULT_DRIVER_QUICK_ICONS_VISIBILITY,
 } from '../services/storageService';
+import {
+  playNavigationVoice,
+  generateVoiceGuidanceSpeech,
+  stopNavigationVoice,
+  NAVIGATION_VOICES,
+  NavigationVoiceId,
+} from '../services/voiceNavigationService';
 import { CargasStationsMap } from './CargasStationsMap';
 import { InlineNearestStationMap } from './InlineNearestStationMap';
 import { CargasNavApp } from '../navigation/CargasNavApp';
+import { speechService } from '../navigation/services/speechService';
 import { CustomerFeedbackModal } from './CustomerFeedbackModal';
 import { AppointmentBookingModal } from './AppointmentBookingModal';
 import { CustomerMessagingModal } from './CustomerMessagingModal';
@@ -93,6 +114,7 @@ interface DriverPortalProps {
   onUpdateDriver: (driver: DriverProfile) => void;
   onRefreshData: () => void;
   onUpdateConfig?: (config: AppConfig) => void;
+  isAdminPreview?: boolean;
 }
 
 export type DriverPageView = 'home' | 'map' | 'loyalty' | 'maintenance' | 'history' | 'feedback' | 'complaints';
@@ -107,6 +129,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
   onUpdateDriver,
   onRefreshData,
   onUpdateConfig,
+  isAdminPreview = false,
 }) => {
   const [activePage, setActivePage] = useState<DriverPageView>('home');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
@@ -124,15 +147,105 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
 
   // Station Navigation Modal State (Wasalny Hero Popup)
   const [isStationNavModalOpen, setIsStationNavModalOpen] = useState(false);
+  const [targetNavigationStationId, setTargetNavigationStationId] = useState<string | null>(null);
+  const [navKey, setNavKey] = useState<number>(0);
+  const [isNavActiveRequested, setIsNavActiveRequested] = useState<boolean>(false);
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+
+  // Cancel any hanging speech on initial mount
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try { window.speechSynthesis.cancel(); } catch {}
+    }
+  }, []);
+
   const [isMessagingModalOpen, setIsMessagingModalOpen] = useState(false);
   const [messagingInitialChannel, setMessagingInitialChannel] = useState<CustomerChatChannel>('customer_service');
+
+  // Customer Data Update Request State (طلب تعديل بيانات العميل والسيارة المرسل لخدمة العملاء ومدير النظام)
+  const [isUpdateRequestModalOpen, setIsUpdateRequestModalOpen] = useState(false);
+  const [customerRequests, setCustomerRequests] = useState<CustomerDataUpdateRequest[]>(() =>
+    getCustomerDataUpdateRequests().filter((r) => r.driverId === driver.id)
+  );
+  const [reqName, setReqName] = useState(driver.name);
+  const [reqPhone, setReqPhone] = useState(driver.phone);
+  const [reqPlate, setReqPlate] = useState(driver.carPlate);
+  const [reqModel, setReqModel] = useState(driver.carModel);
+  const [reqCapacity, setReqCapacity] = useState(driver.cngCylinderCapacity || 70);
+  const [reqOdo, setReqOdo] = useState(driver.odometerKm || 0);
+  const [reqNotes, setReqNotes] = useState('');
+  const [isSubmittingReq, setIsSubmittingReq] = useState(false);
+  const [reqSuccessMsg, setReqSuccessMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleRequestsUpdate = () => {
+      setCustomerRequests(getCustomerDataUpdateRequests().filter((r) => r.driverId === driver.id));
+    };
+    window.addEventListener('cargas_customer_requests_updated', handleRequestsUpdate);
+    return () => {
+      window.removeEventListener('cargas_customer_requests_updated', handleRequestsUpdate);
+    };
+  }, [driver.id]);
+
+  useEffect(() => {
+    setReqName(driver.name);
+    setReqPhone(driver.phone);
+    setReqPlate(driver.carPlate);
+    setReqModel(driver.carModel);
+    setReqCapacity(driver.cngCylinderCapacity || 70);
+    setReqOdo(driver.odometerKm || 0);
+  }, [driver]);
+
+  const latestDriverRequest = customerRequests[0] || null;
+
+  const handleSubmitCustomerRequest = (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmittingReq(true);
+    try {
+      submitCustomerDataUpdateRequest({
+        driverId: driver.id,
+        driverName: driver.name,
+        driverPhone: driver.phone,
+        currentCarPlate: driver.carPlate,
+        currentCarModel: driver.carModel,
+        currentCngCylinderCapacity: driver.cngCylinderCapacity || 70,
+        currentOdometerKm: driver.odometerKm || 0,
+        requestedName: reqName.trim(),
+        requestedPhone: reqPhone.trim(),
+        requestedCarPlate: reqPlate.trim(),
+        requestedCarModel: reqModel.trim(),
+        requestedCngCylinderCapacity: Number(reqCapacity),
+        requestedOdometerKm: Number(reqOdo),
+        requestNotes: reqNotes.trim(),
+      });
+      setCustomerRequests(getCustomerDataUpdateRequests().filter((r) => r.driverId === driver.id));
+      setReqSuccessMsg('✅ تم إرسال طلب تعديل البيانات لخدمة العملاء ومدير النظام بنجاح!');
+      setTimeout(() => {
+        setReqSuccessMsg(null);
+        setIsUpdateRequestModalOpen(false);
+      }, 2500);
+    } catch (err) {
+      console.error(err);
+      alert('حدث خطأ أثناء إرسال الطلب');
+    } finally {
+      setIsSubmittingReq(false);
+    }
+  };
 
   // Dynamic In-Page Layout Customization State (5-Clicks Gesture by Admin)
   const [isLayoutEditMode, setIsLayoutEditMode] = useState(false);
   const [isAdminPinModalOpen, setIsAdminPinModalOpen] = useState(false);
   const [clickCount, setClickCount] = useState(0);
-  const [lastClickTime, setLastClickTime] = useState(0);
+  // Top Navigation Bar Controls (حل مشكلة اختفاء الأيقونات في شريط العميل)
+  const navTabsRef = React.useRef<HTMLDivElement>(null);
+  const [isNavTabsExpanded, setIsNavTabsExpanded] = useState(false);
+
+  const scrollNavTabs = (direction: 'left' | 'right') => {
+    if (navTabsRef.current) {
+      const amount = direction === 'left' ? -220 : 220;
+      navTabsRef.current.scrollBy({ left: amount, behavior: 'smooth' });
+    }
+  };
 
   // User View Mode: 'all_integrated' | 'navigation_only' | 'loyalty_only'
   // تحكم حصري لمدير النظام: عندما يخفي نظاماً تختفي كافة أيقوناته من صفحة العميل بدون أن يعلم
@@ -161,11 +274,51 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
     };
   }, []);
 
+  // إخفاء التحليل الاستشاري الذكي لمُعِين عن العميل وعرض الوصف التسويقي النظيف
+  const getCustomerRewardDescription = (rew: RewardItem): string => {
+    const shouldHide = config.hideAiAuditFromCustomers !== false;
+    if (shouldHide) {
+      if (
+        rew.description?.includes('تحليل استشاري') ||
+        rew.description?.includes('مُعِين') ||
+        rew.description?.includes('تقييم التسعير السوقي') ||
+        rew.description?.includes('توصية لوكا ووضاح')
+      ) {
+        return (
+          rew.marketingDescription ||
+          `استبدل ${rew.pointsCost} نقطة ولاء مجمعة في كارتك الذهبي واحصل فوراً على ${rew.title} بقيمة ${
+            rew.estimatedEgpValue || Math.round(rew.pointsCost * 0.15)
+          } جنيه صالحة لدى كارجاس والشركاء المعتمدين.`
+        );
+      }
+    }
+    return rew.marketingDescription || rew.description;
+  };
+
+  // Quick Service Icons Visibility State (مضبوطة حصرياً من قبل مدير النظام)
+  const [quickIconsVis, setQuickIconsVis] = useState<DriverQuickIconsVisibility>(() =>
+    getDriverQuickIconsVisibility()
+  );
+
+  // Sync when changed from storage or admin portal
+  useEffect(() => {
+    const handleQuickIconsUpdate = (e: any) => {
+      if (e?.detail) {
+        setQuickIconsVis(e.detail);
+      } else {
+        setQuickIconsVis(getDriverQuickIconsVisibility());
+      }
+    };
+    window.addEventListener(DRIVER_QUICK_ICONS_EVENT, handleQuickIconsUpdate);
+    window.addEventListener('storage', handleQuickIconsUpdate);
+    return () => {
+      window.removeEventListener(DRIVER_QUICK_ICONS_EVENT, handleQuickIconsUpdate);
+      window.removeEventListener('storage', handleQuickIconsUpdate);
+    };
+  }, []);
+
   // Auto-redirect if admin hides the currently opened page
   useEffect(() => {
-    if (customerViewMode === 'navigation_only' && activePage === 'loyalty') {
-      setActivePage('home');
-    }
     if (customerViewMode === 'loyalty_only' && activePage === 'map') {
       setActivePage('home');
     }
@@ -177,10 +330,10 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
     if (saved && saved.length > 0) {
       const existingIds = new Set(saved.map((s) => s.id));
       const missing = DEFAULT_DRIVER_SECTIONS.filter((s) => !existingIds.has(s.id));
-      if (missing.length > 0) {
-        return [...saved, ...missing].sort((a, b) => a.order - b.order);
-      }
-      return saved;
+      const merged = missing.length > 0 ? [...saved, ...missing] : saved;
+      return merged
+        .map((s) => (s.id === 'wasalny_hero' ? { ...s, colSpan: 12 as SectionColSpan } : s))
+        .sort((a, b) => a.order - b.order);
     }
     return DEFAULT_DRIVER_SECTIONS;
   });
@@ -199,9 +352,11 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
   }, [config.layoutSettings?.driverSections]);
 
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
+  const [lastClickTime, setLastClickTime] = useState<number>(0);
 
-  // 10-Clicks Handler on Any Page Space (بالنقر داخل الصفحة 10 مرات لتظهر كلمة سر مدير النظام)
+  // 10-Clicks Handler on Any Page Space (مخصص حصرياً لمدير النظام أثناء المعاينة، ملغي تماماً للعملاء العاديين)
   const handlePageTapGesture = (e: React.MouseEvent) => {
+    if (!isAdminPreview) return;
     const target = e.target as HTMLElement;
     if (target.closest('button, input, textarea, select, a, [draggable]')) return;
 
@@ -326,24 +481,86 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
     transactions[0]?.pumpNumber || 1
   );
 
-  // Egyptian Wadah Voice Guidance Helper
-  const speakWadahVoice = (text: string) => {
-    if (!('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'ar-EG';
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
-    window.speechSynthesis.speak(utterance);
+  // Navigation Voice Guidance (ملغى تماماً بناء على طلب العميل)
+  const currentVoiceId: NavigationVoiceId = 'silent';
+  const isDriverSpeaking = false;
+
+  const speakWadahVoice = (_text?: string) => {
+    return;
   };
 
   const handlePlayWadahGuidance = () => {
-    const target = activeDetectedStation || stations[0];
-    if (!target) return;
-    const dist = gpsDistanceKm !== null ? `على بُعد ${gpsDistanceKm} كيلو منك، ` : '';
-    const crowd = target.crowdLevel ? `وحالة الزحام دلوقتي ${target.crowdLevel}، ` : 'والمحطة رايقة، ';
-    const speech = `يا هلا بيك يا باشا! أنا وضاح، معاك على الطريق... أقرب محطة كارجاس ليك هي محطة ${target.name}، ${dist}${crowd}اضغط على تكبير الخريطة ووصّلني ويلا بينا نتحرك سوا على الملاحة!`;
-    speakWadahVoice(speech);
+    return;
+  };
+
+  // Direct 1-Click Navigation to Nearest Cargas Station (وصلني — كارجاس طريقنا واحد)
+  // توجيه مباشر وفوري إلى نظام الملاحة في خرائط جوجل مع إجبار جوجل على إحداثيات GPS الدقيقة للعميل والمحطة
+  const handleWasalnyDirectNavigate = (targetStation?: CargasStationLocation) => {
+    let station = targetStation || gpsNearestStation || activeDetectedStation || stations[0];
+
+    const launchGoogleMaps = (userCoords?: { lat: number; lng: number } | null) => {
+      // إذا توفر موقع العميل ولم يتم تحديد محطة بعينها، نحسب أدق وأقرب محطة فورياً
+      if (userCoords && stations && stations.length > 0 && !targetStation) {
+        let closest = stations[0];
+        let minD = calculateDistanceKm(userCoords.lat, userCoords.lng, closest.latitude, closest.longitude);
+        for (let i = 1; i < stations.length; i++) {
+          const d = calculateDistanceKm(userCoords.lat, userCoords.lng, stations[i].latitude, stations[i].longitude);
+          if (d < minD) {
+            minD = d;
+            closest = stations[i];
+          }
+        }
+        station = closest;
+        setGpsNearestStation(closest);
+        setGpsDistanceKm(Number(minD.toFixed(1)));
+      }
+
+      if (!station) return;
+
+      const originParam = userCoords && userCoords.lat && userCoords.lng
+        ? `&origin=${userCoords.lat},${userCoords.lng}`
+        : '';
+      const destinationParam = `destination=${station.latitude},${station.longitude}`;
+      const url = `https://www.google.com/maps/dir/?api=1${originParam}&${destinationParam}&travelmode=driving&dir_action=navigate`;
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    };
+
+    // 1. إذا كانت إحداثيات الـ GPS مسجلة مسبقاً، نطلق الملاحة فوراً
+    if (driverGpsLocation && driverGpsLocation.lat && driverGpsLocation.lng) {
+      launchGoogleMaps(driverGpsLocation);
+      return;
+    }
+
+    // 2. التحقق السريع من الـ GPS بدقة عالية
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setDriverGpsLocation(coords);
+          launchGoogleMaps(coords);
+        },
+        () => {
+          // في حال عدم توفر إذن الـ GPS نوجه لموقع المحطة مباشرة
+          launchGoogleMaps(null);
+        },
+        { enableHighAccuracy: true, timeout: 4000, maximumAge: 5000 }
+      );
+    } else {
+      launchGoogleMaps(null);
+    }
+  };
+
+  const handleCancelNavigation = () => {
+    setIsNavActiveRequested(false);
+    setTargetNavigationStationId(null);
+    setNavKey((k) => k + 1);
   };
 
   // Active promotional campaigns for carousel banner
@@ -522,18 +739,18 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
     },
     {
       id: 'map' as DriverPageView,
-      label: 'أقرب محطة وخريطة كارجاس',
-      sub: 'توجيه الملاحة "وصّلني"',
-      icon: <MapPin className="w-4 h-4" />,
+      label: 'وصّلني (كارجاس طريقنا واحد)',
+      sub: 'الملاحة الفورية لأقرب محطة كارجاس لموقعك',
+      icon: <Navigation className="w-4 h-4 text-emerald-400" />,
       visible: customerViewMode !== 'loyalty_only' && v.showNearestStationMap,
-      badge: 'مباشر',
+      badge: 'طريقنا واحد',
     },
     {
       id: 'loyalty' as DriverPageView,
       label: 'كارت الولاء وبنك الهدايا',
       sub: `${driver.points} نقطة متاحة`,
       icon: <CreditCard className="w-4 h-4" />,
-      visible: customerViewMode !== 'navigation_only' && (v.showGoldenCard || v.showRewardsBank),
+      visible: customerViewMode !== 'navigation_only' && ((v.showGoldenCard && quickIconsVis.golden_card) || v.showRewardsBank),
     },
     {
       id: 'maintenance' as DriverPageView,
@@ -565,160 +782,257 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
     },
   ];
 
+  // تعريف الأيقونات والخدمات السريعة الـ 10 لصفحة العميل (دون أي تكرار مع التحكم الكامل في إظهارها وإخفائها)
+  const quickIconsList = [
+    {
+      key: 'qr_code' as const,
+      label: 'كود التموين QR 📱',
+      description: 'كود الـ QR للتموين السريع لمسحه عبر جهاز الفني بالمحطة',
+      badgeClass: 'bg-slate-900 hover:bg-slate-800 text-white',
+      borderClass: 'border-slate-800',
+      icon: <QrCode className="w-3.5 h-3.5 text-emerald-400 shrink-0" />,
+      action: () => setIsQrModalOpen(true),
+    },
+    {
+      key: 'navigation' as const,
+      label: 'أقرب محطة كارجاس 🧭',
+      description: 'الملاحة الفورية لأقرب محطة كارجاس عبر خرائط جوجل بأدق إحداثيات GPS',
+      badgeClass: 'bg-emerald-600 hover:bg-emerald-700 text-white font-bold',
+      borderClass: 'border-emerald-600',
+      icon: <Navigation className="w-3.5 h-3.5 text-emerald-200 shrink-0" />,
+      action: () => handleWasalnyDirectNavigate(),
+    },
+    {
+      key: 'golden_card' as const,
+      label: 'كارت الولاء الذهبي 💳',
+      description: 'كارت الولاء الذهبي ورصيد النقاط والخصومات',
+      badgeClass: 'bg-amber-500 hover:bg-amber-600 text-slate-950 font-black',
+      borderClass: 'border-amber-500',
+      icon: <CreditCard className="w-3.5 h-3.5 text-slate-950 shrink-0" />,
+      action: () => setActivePage('loyalty'),
+    },
+    {
+      key: 'rewards' as const,
+      label: 'استبدال النقاط 🎁',
+      description: 'استبدال نقاط الولاء بهدايا وباقات مجانية',
+      badgeClass: 'bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-800',
+      borderClass: 'border-slate-200',
+      icon: <Gift className="w-3.5 h-3.5 text-amber-500 shrink-0" />,
+      action: () => setActivePage('loyalty'),
+    },
+    {
+      key: 'maintenance' as const,
+      label: 'جدول الصيانة 🔧',
+      description: 'جدول الصيانة الدورية وفحص أسطوانة الغاز',
+      badgeClass: 'bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-800',
+      borderClass: 'border-slate-200',
+      icon: <Calendar className="w-3.5 h-3.5 text-teal-600 shrink-0" />,
+      action: () => setActivePage('maintenance'),
+    },
+    {
+      key: 'history' as const,
+      label: 'سجل التموينات 📋',
+      description: 'سجل التموينات السابقة والوفر المالي',
+      badgeClass: 'bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-800',
+      borderClass: 'border-slate-200',
+      icon: <Clock className="w-3.5 h-3.5 text-sky-600 shrink-0" />,
+      action: () => setActivePage('history'),
+    },
+    {
+      key: 'rating' as const,
+      label: 'تقييم الفني ⭐',
+      description: 'تقييم الفني وجودة الخدمة بالمحطة',
+      badgeClass: 'bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900',
+      borderClass: 'border-amber-200',
+      icon: <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" />,
+      action: () => {
+        setFeedbackInitialTab('rating');
+        setIsFeedbackModalOpen(true);
+      },
+    },
+    {
+      key: 'complaints' as const,
+      label: 'خدمة العملاء 19058 📨',
+      description: 'صندوق الشكاوى والمقترحات والخط الساخن 19058',
+      badgeClass: 'bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-900',
+      borderClass: 'border-rose-200',
+      icon: <MessageSquare className="w-3.5 h-3.5 text-rose-500 shrink-0" />,
+      action: () => {
+        setFeedbackInitialTab('complaint');
+        setIsFeedbackModalOpen(true);
+      },
+    },
+    {
+      key: 'chat' as const,
+      label: 'شات الدعم 💬',
+      description: 'مراسلة خدمة العملاء والدعم الفني المباشر',
+      badgeClass: 'bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-900',
+      borderClass: 'border-blue-200',
+      icon: <Headphones className="w-3.5 h-3.5 text-blue-600 shrink-0" />,
+      action: () => {
+        setMessagingInitialChannel('customer_service');
+        setIsMessagingModalOpen(true);
+      },
+    },
+    {
+      key: 'update_profile' as const,
+      label: 'طلب تعديل بياناتي ✏️',
+      description: 'إرسال طلب تعديل بيانات العميل أو السيارة لخدمة العملاء ومدير النظام',
+      badgeClass: 'bg-emerald-50 hover:bg-emerald-100 border-2 border-emerald-500/50 text-emerald-950 font-black',
+      borderClass: 'border-emerald-500',
+      icon: <Edit3 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />,
+      action: () => setIsUpdateRequestModalOpen(true),
+    },
+  ];
+
   return (
     <div className="space-y-6" onClick={handlePageTapGesture}>
-      {/* In-Page Dynamic Layout Editor Toolbar (نشط بالضغط 5 مرات متتالية لمدير النظام) */}
-      <DynamicInPageLayoutEditor
-        pageType="driver"
-        config={config}
-        onUpdateConfig={onUpdateConfig}
-        onSectionsChange={(updated) => setDriverSections(updated)}
-        currentSections={driverSections}
-        isEditMode={isLayoutEditMode}
-        onToggleEditMode={(enabled) => setIsLayoutEditMode(enabled)}
-      />
+      {/* In-Page Dynamic Layout Editor Toolbar (مخصص حصرياً لمدير النظام أثناء المعاينة) */}
+      {isAdminPreview && (
+        <DynamicInPageLayoutEditor
+          pageType="driver"
+          config={config}
+          onUpdateConfig={onUpdateConfig}
+          onSectionsChange={(updated) => setDriverSections(updated)}
+          currentSections={driverSections}
+          isEditMode={isLayoutEditMode}
+          onToggleEditMode={(enabled) => setIsLayoutEditMode(enabled)}
+        />
+      )}
 
-      {/* Floating Click Progress Counter for Admin Tap Gesture (10 نقرات متتالية لفتح كلمة سر مدير النظام) */}
-      {clickCount >= 3 && clickCount < 10 && (
+      {/* Floating Click Progress Counter for Admin Tap Gesture (10 نقرات متتالية لفتح كلمة سر مدير النظام - للمدير فقط) */}
+      {isAdminPreview && clickCount >= 3 && clickCount < 10 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-amber-300 border-2 border-amber-400 px-5 py-2.5 rounded-full shadow-2xl backdrop-blur-md flex items-center gap-3 animate-bounce text-xs font-black">
           <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping shrink-0"></span>
           <span>🔐 نقرات وضع التحرير لمدير النظام: {clickCount} من 10 (اضغط {10 - clickCount} مرات إضافية)</span>
         </div>
       )}
-      {/* Standalone Map Page View ("وصّلني") with One-Click Back to Dashboard */}
-      {activePage === 'map' && v.showNearestStationMap ? (
-        <div className="space-y-4 animate-in fade-in">
-          {/* Prominent Back Button to Return to Main Customer Dashboard */}
-          <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 text-white rounded-3xl p-4 sm:p-5 shadow-2xl border-2 border-emerald-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-emerald-950 flex items-center justify-center text-2xl shadow-lg font-black shrink-0">
-                🚗
-              </div>
-              <div>
-                <h2 className="text-base sm:text-lg font-black text-white">
-                  {config.wasalnyConfig?.buttonLabel || 'تطبيق الملاحة والمسارات المباشرة "وصّلني"'}
-                </h2>
-                <p className="text-xs text-emerald-100 font-light">
-                  شبكة محطات ومراكز كارجاس الوطنية CNG — الملاحة الحية وتوجيه المسار لأقرب محطة
-                </p>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setActivePage('home')}
-              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs sm:text-sm px-5 py-2.5 rounded-2xl transition shadow-lg flex items-center gap-2 active:scale-95"
-            >
-              <ArrowRight className="w-4 h-4" />
-              <span>الرجوع للنافذة الرئيسية للعميل ↩️</span>
-            </button>
-          </div>
-
-          <div className="rounded-3xl overflow-hidden border-2 border-emerald-500/30 shadow-2xl bg-slate-950 min-h-[680px]">
-            <CargasNavApp onBack={() => setActivePage('home')} autoStartNearest={true} />
-          </div>
-        </div>
-      ) : (
-        /* Main Layout with Customer Menu Icon and Full-Width Viewport */
-        <div className="space-y-6">
+      {/* Main Layout with Unified Viewport and Direct Maximized Map */}
+      <div className="space-y-6">
           
-          {/* Top Customer Navigation Bar with Direct Section Tabs */}
-          <div className="bg-white rounded-3xl p-3 sm:p-4 shadow-sm border border-slate-200/90 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
-            
-            {/* Direct Horizontal Tabs for Switching Between Pages in Normal Clean Colors */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0 scrollbar-none">
-              {navMenuItems
-                .filter((item) => item.visible)
-                .map((item) => {
-                  const isActive = activePage === item.id;
-                  return (
-                    <React.Fragment key={item.id}>
-                      <button
-                        onClick={() => {
-                          if (item.id === 'feedback') {
-                            setFeedbackInitialTab('rating');
-                            setIsFeedbackModalOpen(true);
-                          } else if (item.id === 'complaints') {
-                            setFeedbackInitialTab('complaint');
-                            setIsFeedbackModalOpen(true);
-                          } else {
-                            setActivePage(item.id);
-                          }
-                        }}
-                        className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all shrink-0 active:scale-95 ${
-                          isActive
-                            ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md shadow-emerald-600/25 border border-emerald-500'
-                            : 'bg-slate-50 hover:bg-emerald-50/60 text-slate-700 border border-slate-200/90 hover:border-emerald-300'
-                        }`}
-                        title={item.sub}
-                      >
-                        <span className="text-sm">{item.icon}</span>
-                        <span>{item.label}</span>
-                        {item.badge && (
-                          <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-2xs">
-                            {item.badge}
-                          </span>
-                        )}
-                      </button>
+          {/* Prominent Return Bar whenever viewing any subpage */}
+          {activePage !== 'home' && (
+            <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 text-white p-4 rounded-3xl shadow-xl border-2 border-emerald-400/60 flex flex-wrap items-center justify-between gap-3 sticky top-4 z-40 backdrop-blur-md animate-in slide-in-from-top-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setActivePage('home');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm px-6 py-3 rounded-2xl transition shadow-lg flex items-center gap-2 cursor-pointer active:scale-95 group"
+                title="الرجوع إلى الخريطة والصفحة الرئيسية"
+              >
+                <ArrowRight className="w-5 h-5 group-hover:-translate-x-1 transition" />
+                <span>العودة للرئيسية (الخريطة والخدمات) ↩</span>
+              </button>
 
-                      {/* Dedicated Standalone Fueling QR Button in Normal Colors */}
-                      {item.id === 'home' && (
-                        <button
-                          type="button"
-                          onClick={() => setIsQrModalOpen(true)}
-                          className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all shrink-0 active:scale-95 bg-slate-900 hover:bg-slate-800 text-white shadow-sm border border-slate-700"
-                          title="إظهار كود التموين السريع QR في نافذة مستقلة"
-                        >
-                          <QrCode className="w-4 h-4 text-emerald-400" />
-                          <span>كود الـ QR للتموين 📱</span>
-                        </button>
-                      )}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-emerald-200">أنت الآن في:</span>
+                <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-xs font-black px-3.5 py-1.5 rounded-xl">
+                  {activePage === 'loyalty' && '🎁 استبدال النقاط وبنك الهدايا'}
+                  {activePage === 'maintenance' && '🔧 جدول الصيانة الذكي'}
+                  {activePage === 'history' && '⛽ سجل التموينات'}
+                  {activePage === 'map' && '🧭 كارجاس طريقنا واحد'}
+                </span>
+              </div>
+            </div>
+          )}
 
-                      {/* Direct 2-Way Messaging Button with Support and Inspection in Normal Colors */}
-                      {item.id === 'home' && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setMessagingInitialChannel('customer_service');
-                            setIsMessagingModalOpen(true);
-                          }}
-                          className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all shrink-0 active:scale-95 bg-slate-100 hover:bg-slate-200 text-slate-700 shadow-sm border border-slate-300"
-                          title="مراسلة خدمة العملاء ومركز فحص الأسطوانات"
-                        >
-                          <MessageSquare className="w-4 h-4 text-slate-600" />
-                          <span>مراسلة الدعم والفحص 💬</span>
-                        </button>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
+          {/* المساحة البيضاء الترحيبية: أهلاً بك صديق كارجاس وتستوعب كافة الأيقونات على صفين بحجم صغير */}
+          <div className="bg-white rounded-3xl p-4 sm:p-5 shadow-xs border border-slate-200/90 flex flex-col gap-4">
+            {/* Top Bar: Greeting, Car Info, Points & Request Status */}
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-700 text-white flex items-center justify-center font-black text-xl shadow-md shadow-emerald-600/20 shrink-0">
+                  🚗
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-base sm:text-lg font-black text-slate-900">
+                      أهلاً بك صديق كارجاس، {driver.name}
+                    </h2>
+                    <span className="bg-emerald-50 text-emerald-800 text-xs px-2.5 py-0.5 rounded-full font-bold border border-emerald-200 font-mono">
+                      لوحة: {driver.carPlate}
+                    </span>
+                    <span className="bg-slate-100 text-slate-700 text-xs px-2.5 py-0.5 rounded-full font-medium">
+                      {driver.carModel}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    سعة الأسطوانة: {driver.cngCylinderCapacity || 70} لتر • العداد: {driver.odometerKm?.toLocaleString()} كم
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end">
+                {/* Status of customer update request if pending or recent */}
+                {latestDriverRequest && (
+                  <div
+                    onClick={() => setIsUpdateRequestModalOpen(true)}
+                    className={`cursor-pointer px-3 py-1.5 rounded-xl border text-xs flex items-center gap-1.5 transition hover:scale-102 ${
+                      latestDriverRequest.status === 'pending'
+                        ? 'bg-amber-50 border-amber-300 text-amber-900 shadow-2xs'
+                        : latestDriverRequest.status === 'approved'
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                        : 'bg-rose-50 border-rose-300 text-rose-900'
+                    }`}
+                    title="انقر لعرض تفاصيل طلب تعديل البيانات"
+                  >
+                    <span>{latestDriverRequest.status === 'pending' ? '⏳' : latestDriverRequest.status === 'approved' ? '✓' : '✖'}</span>
+                    <span className="font-bold">
+                      {latestDriverRequest.status === 'pending'
+                        ? 'طلب تعديل بياناتك قيد مراجعة خدمة العملاء'
+                        : latestDriverRequest.status === 'approved'
+                        ? 'تم اعتماد وتحديث بياناتك بنجاح'
+                        : 'تم الرد على طلب التعديل'}
+                    </span>
+                  </div>
+                )}
+
+                {/* Points Badge (يظهر فقط إذا كان برنامج الولاء أو المكافآت مفعلاً من قبل مدير النظام) */}
+                {(quickIconsVis.golden_card || quickIconsVis.rewards) && (
+                  <div
+                    onClick={() => setActivePage('loyalty')}
+                    className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3.5 py-1.5 rounded-xl text-xs font-black text-emerald-800 flex items-center gap-1.5 shadow-2xs cursor-pointer transition"
+                    title="عرض كارت الولاء واستبدال النقاط"
+                  >
+                    <span className="text-sm">🪙</span>
+                    <span>{driver.points} نقطة ولاء</span>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Quick Stats & Profile Edit Button */}
-            <div className="flex items-center justify-between lg:justify-end gap-2.5 shrink-0 border-t lg:border-t-0 pt-2 lg:pt-0 border-slate-100">
-              {customerViewMode !== 'navigation_only' && (
-                <div className="bg-emerald-50 border border-emerald-200 px-3.5 py-2 rounded-2xl text-xs font-black text-emerald-800 flex items-center gap-1.5">
-                  <span className="text-sm">🪙</span>
-                  <span>{driver.points} نقطة ولاء</span>
-                </div>
-              )}
+            {/* شبكة الأيقونات والخدمات المتاحة للمستخدم كما حددها مدير النظام (بدون أي تكرار وبدون أدوات تحكم) */}
+            <div className="pt-3 border-t border-slate-100 w-full">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] text-slate-700 font-bold flex items-center gap-1.5">
+                  <LayoutGrid className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>خدمات وتطبيقات كارجاس:</span>
+                </span>
+              </div>
 
-              {v.showEditProfile && (
-                <button
-                  onClick={() => {
-                    setEditName(driver.name);
-                    setEditPhone(driver.phone);
-                    setEditPlate(driver.carPlate);
-                    setEditModel(driver.carModel);
-                    setEditOdo(driver.odometerKm);
-                    setEditCapacity(driver.cngCylinderCapacity);
-                    setIsEditProfileOpen(true);
-                  }}
-                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/90 text-xs font-bold px-3 py-2 rounded-2xl transition flex items-center gap-1.5 active:scale-95"
-                  title="تعديل بيانات الملف والسيارة"
-                >
-                  <Edit3 className="w-3.5 h-3.5 text-slate-600" />
-                  <span className="hidden sm:inline">تعديل السيارة</span>
-                </button>
+              {quickIconsList.filter((item) => quickIconsVis[item.key] !== false).length === 0 ? (
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-center text-xs text-slate-400">
+                  <span>كافة الخدمات تحت الصيانة الدورية حالياً.</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 w-full">
+                  {quickIconsList
+                    .filter((item) => quickIconsVis[item.key] !== false)
+                    .map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={item.action}
+                        className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold transition active:scale-95 shadow-xs text-right cursor-pointer ${item.badgeClass}`}
+                        title={item.description}
+                      >
+                        {item.icon}
+                        <span className="truncate">{item.label}</span>
+                      </button>
+                    ))}
+                </div>
               )}
             </div>
           </div>
@@ -741,6 +1055,10 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                     if (customerViewMode === 'loyalty_only') {
                       if (sec.id === 'wasalny_hero' || sec.id === 'nearest_station_repeat_bar') return false;
                     }
+                    // إخفاء كارت كارجاس الذهبي من الرئيسية إذا اختار العميل إخفاءه
+                    if (!quickIconsVis.golden_card && (sec.id === 'golden_loyalty_card' || sec.id === 'golden_card')) {
+                      return false;
+                    }
                     return true;
                   })
                   .map((section) => {
@@ -760,7 +1078,8 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                     return (
                       <div
                         key={section.id}
-                        className={`${colClass} transition-all duration-200 ${
+                        id={`section-${section.id}`}
+                        className={`${colClass} scroll-mt-24 transition-all duration-200 ${
                           isLayoutEditMode
                             ? 'p-3 rounded-3xl border-2 border-dashed border-amber-400/90 bg-amber-50/15 shadow-md relative'
                             : ''
@@ -801,107 +1120,78 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                             }`}
                           >
                             <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 rounded-full bg-emerald-500/10 blur-2xl pointer-events-none"></div>
-                            <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 h-full">
-                              {/* Driver greeting info */}
-                              <div className="space-y-2 max-w-md">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="bg-emerald-500/30 text-emerald-300 border border-emerald-400/30 text-xs px-3 py-0.5 rounded-full font-bold">
-                                    برنامج ولاء عملاء كارجاس CNG
-                                  </span>
-                                  <span className="text-xs text-emerald-200">
-                                    سعر المتر: {config.gasPricePerMeter} ج
-                                  </span>
-                                  <span className="bg-white/10 text-white text-xs px-2.5 py-0.5 rounded-full font-mono">
-                                    لوحة: {driver.carPlate}
-                                  </span>
-                                </div>
-
-                                <h2 className="text-2xl sm:text-3xl font-black text-white">
-                                  أهلاً بك، {driver.name} 🚗
-                                </h2>
-                                <p className="text-xs sm:text-sm text-emerald-100 font-light leading-relaxed">
-                                  {config.customTexts.welcomeDriver}
-                                </p>
-                              </div>
-
-                              {/* أيقونة برنامج وصلني */}
-                              {v.showNearestStationMap && config.wasalnyConfig?.enabled !== false && (
-                                <div
-                                  onClick={() => setIsStationNavModalOpen(true)}
-                                  className="flex items-center gap-3.5 bg-white/15 hover:bg-white/25 border-2 border-emerald-400/50 backdrop-blur-md px-4 sm:px-5 py-3 rounded-3xl cursor-pointer transition transform hover:scale-[1.03] active:scale-95 group shadow-xl shrink-0"
-                                  title="اضغط هنا لتفاصيل أقرب محطة كارجاس وبدء الملاحة"
-                                >
-                                  <div className="relative w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-400 to-teal-300 text-slate-950 flex items-center justify-center text-2xl shadow-md shrink-0 group-hover:rotate-12 transition">
-                                    <span>🚗</span>
-                                    <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                                      <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-400"></span>
+                            <div className="relative z-10 flex flex-col gap-3.5 h-full">
+                              {/* Driver greeting & status bar */}
+                              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+                                <div className="space-y-1.5">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="bg-emerald-500/30 text-emerald-300 border border-emerald-400/30 text-xs px-3 py-0.5 rounded-full font-bold">
+                                      برنامج ولاء عملاء كارجاس CNG
+                                    </span>
+                                    <span className="text-xs text-emerald-200">
+                                      سعر المتر: {config.gasPricePerMeter} ج
+                                    </span>
+                                    <span className="bg-white/10 text-white text-xs px-2.5 py-0.5 rounded-full font-mono">
+                                      لوحة: {driver.carPlate}
+                                    </span>
+                                    <span className="bg-amber-400/20 text-amber-200 border border-amber-300/30 text-xs px-2.5 py-0.5 rounded-full font-bold">
+                                      🪙 {driver.points} نقطة
                                     </span>
                                   </div>
-                                  <div className="text-right">
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-xs sm:text-sm font-black text-white">
-                                        {config.wasalnyConfig?.buttonLabel || 'وصلني لأقرب محطة'}
-                                      </span>
-                                      <span className="bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-md">
-                                        GPS 🛰️
+
+                                  <h2 className="text-xl sm:text-2xl lg:text-3xl font-black text-white">
+                                    أهلاً بك، {driver.name} 🚗
+                                  </h2>
+                                  <p className="text-xs sm:text-sm text-emerald-100 font-light leading-relaxed">
+                                    {config.customTexts.welcomeDriver}
+                                  </p>
+                                </div>
+
+                                {/* Status of customer update request if pending or recent */}
+                                {latestDriverRequest && (
+                                  <div
+                                    onClick={() => setIsUpdateRequestModalOpen(true)}
+                                    className={`cursor-pointer p-2.5 rounded-2xl border text-xs flex items-center gap-2 transition hover:scale-102 ${
+                                      latestDriverRequest.status === 'pending'
+                                        ? 'bg-amber-500/20 border-amber-400/40 text-amber-200 shadow-sm'
+                                        : latestDriverRequest.status === 'approved'
+                                        ? 'bg-emerald-500/25 border-emerald-400/40 text-emerald-200'
+                                        : 'bg-rose-500/20 border-rose-400/40 text-rose-200'
+                                    }`}
+                                    title="انقر لعرض تفاصيل طلب تعديل البيانات"
+                                  >
+                                    <span className="text-base shrink-0">
+                                      {latestDriverRequest.status === 'pending' ? '⏳' : latestDriverRequest.status === 'approved' ? '✓' : '✖'}
+                                    </span>
+                                    <div className="text-right">
+                                      <div className="font-bold flex items-center gap-1.5">
+                                        <span>
+                                          {latestDriverRequest.status === 'pending'
+                                            ? 'طلب تعديل بياناتك قيد مراجعة خدمة العملاء'
+                                            : latestDriverRequest.status === 'approved'
+                                            ? 'تم اعتماد وتحديث بياناتك بنجاح'
+                                            : 'تم الرد على طلب التعديل'}
+                                        </span>
+                                      </div>
+                                      <span className="text-[10px] opacity-80 block">
+                                        انقر لعرض التفاصيل وتتبع حالة طلبك 🔍
                                       </span>
                                     </div>
-                                    <span className="text-[11px] text-emerald-200 block font-medium mt-0.5">
-                                      {activeStationName} {gpsDistanceKm !== null ? `(${gpsDistanceKm} كم)` : ''}
-                                    </span>
-                                    <span className="text-[10px] text-amber-300 font-bold block mt-0.5">
-                                      اضغط لتفاصيل المحطة وبدء الملاحة 🗺️
-                                    </span>
                                   </div>
+                                )}
+                              </div>
+
+                              {/* شريط معلوماتي مختصر دون تكرار الأيقونات */}
+                              <div className="pt-2 border-t border-emerald-700/40 flex flex-wrap items-center justify-between gap-2 text-xs text-emerald-200/90 font-medium">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                  <span>كافة الخدمات والتطبيقات متاحة بشريط التحكم الأبيض المدمج بالأعلى ☝️</span>
                                 </div>
-                              )}
-
-                              {/* Action buttons stacked */}
-                              <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 w-full lg:w-auto shrink-0">
-                                {v.showServiceRating && (
-                                  <button
-                                    onClick={() => {
-                                      setFeedbackInitialTab('rating');
-                                      setIsFeedbackModalOpen(true);
-                                    }}
-                                    className="w-full flex items-center justify-center gap-2 bg-amber-400 hover:bg-amber-500 text-slate-950 text-xs font-black px-4 py-2.5 rounded-2xl transition shadow-md active:scale-95"
-                                  >
-                                    <Star className="w-4 h-4 fill-slate-950" />
-                                    <span>تقييم الفني والخدمة ⭐</span>
-                                  </button>
-                                )}
-
-                                {v.showComplaintsBox && (
-                                  <button
-                                    onClick={() => {
-                                      setFeedbackInitialTab('complaint');
-                                      setIsFeedbackModalOpen(true);
-                                    }}
-                                    className="w-full flex items-center justify-center gap-2 bg-white/15 hover:bg-white/25 text-white text-xs font-bold px-4 py-2.5 rounded-2xl border border-white/20 backdrop-blur-md transition shadow-xs active:scale-95"
-                                  >
-                                    <MessageSquare className="w-4 h-4 text-rose-300" />
-                                    <span>صندوق الشكاوى والمقترحات 📨</span>
-                                  </button>
-                                )}
-
-                                {v.showEditProfile && (
-                                  <button
-                                    onClick={() => {
-                                      setEditName(driver.name);
-                                      setEditPhone(driver.phone);
-                                      setEditPlate(driver.carPlate);
-                                      setEditModel(driver.carModel);
-                                      setEditOdo(driver.odometerKm);
-                                      setEditCapacity(driver.cngCylinderCapacity);
-                                      setIsEditProfileOpen(true);
-                                    }}
-                                    className="w-full flex items-center justify-center gap-2 bg-emerald-700/60 hover:bg-emerald-700 text-emerald-100 text-xs font-bold px-4 py-2 rounded-2xl border border-emerald-500/30 transition shadow-xs active:scale-95"
-                                  >
-                                    <Edit3 className="w-3.5 h-3.5" />
-                                    <span>تعديل بيانات السيارة ✏️</span>
-                                  </button>
-                                )}
+                                <div className="flex items-center gap-2 text-[11px] text-emerald-300/80">
+                                  <span>الخط الساخن: 19058</span>
+                                  <span>•</span>
+                                  <span>كارجاس رائدة الغاز الطبيعي للمركبات</span>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -944,7 +1234,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                               </div>
                             </div>
 
-                            <div className="flex flex-wrap items-center gap-4 text-xs font-bold w-full md:w-auto justify-between md:justify-end pt-2 md:pt-0 border-t md:border-t-0 border-slate-700">
+                            <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs font-bold w-full md:w-auto justify-between md:justify-end pt-2 md:pt-0 border-t md:border-t-0 border-slate-700">
                               <div className="text-right">
                                 <span className="text-[10px] text-emerald-400 block font-normal">مرات تموينك من هذه المحطة:</span>
                                 <span className="text-sm sm:text-base font-black font-mono text-white">
@@ -952,55 +1242,88 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                                 </span>
                               </div>
 
-                              <div className="text-right border-r border-slate-700 pr-4">
+                              <div className="text-right border-r border-slate-700 pr-3 sm:pr-4">
                                 <span className="text-[10px] text-amber-400 block font-normal">مرات تموينك من نفس الطلمبة:</span>
                                 <span className="text-sm sm:text-base font-black font-mono text-white">
                                   {currentStationCounts.pumpCount} مرات
                                 </span>
                               </div>
+
+                              {/* زر الملاحة المباشر لأقرب محطة */}
+                              <button
+                                type="button"
+                                onClick={() => handleWasalnyDirectNavigate(activeDetectedStation || undefined)}
+                                className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs px-3.5 py-2 rounded-2xl shadow-lg shadow-emerald-600/30 flex items-center gap-1.5 transition active:scale-95 border border-emerald-400/40 shrink-0 cursor-pointer"
+                                title="الملاحة الفورية لأقرب محطة"
+                              >
+                                <Navigation className="w-3.5 h-3.5 text-amber-300" />
+                                <span>الملاحة للمحطة 📍</span>
+                              </button>
                             </div>
                           </div>
                         )}
 
-                        {/* 1. Wasalny Live Nearest Station Map */}
+                        {/* 1. Wasalny Live Direct Application (كارجاس طريقنا واحد — خريطة مكبرة وملاحة حية مدمجة) */}
                         {section.id === 'wasalny_hero' && v.showNearestStationMap && (
-                          <InlineNearestStationMap
-                            station={activeDetectedStation || stations[0]}
-                            allStations={stations}
-                            userLocation={driverGpsLocation}
-                            distanceKm={gpsDistanceKm}
-                            config={config}
-                            carPlate={driver.carPlate}
-                            onNavigateToMapPage={() => setActivePage('map')}
-                            onPlayVoiceGuidance={handlePlayWadahGuidance}
-                            onLocateUser={() => {
-                              if (!navigator.geolocation) {
-                                alert('متصفحك لا يدعم تحديد الموقع الجغرافي GPS.');
-                                return;
-                              }
-                              navigator.geolocation.getCurrentPosition(
-                                (pos) => {
-                                  const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                                  setDriverGpsLocation(coords);
-                                  if (stations && stations.length > 0) {
-                                    let closest = stations[0];
-                                    let minD = calculateDistanceKm(coords.lat, coords.lng, closest.latitude, closest.longitude);
-                                    for (let i = 1; i < stations.length; i++) {
-                                      const d = calculateDistanceKm(coords.lat, coords.lng, stations[i].latitude, stations[i].longitude);
-                                      if (d < minD) {
-                                        minD = d;
-                                        closest = stations[i];
-                                      }
-                                    }
-                                    setGpsNearestStation(closest);
-                                    setGpsDistanceKm(Number(minD.toFixed(1)));
-                                  }
-                                },
-                                (err) => console.warn('Locate error:', err),
-                                { timeout: 8000, enableHighAccuracy: true }
-                              );
-                            }}
-                          />
+                          <div id="cargas-maximized-map" className="bg-slate-950 rounded-3xl overflow-hidden border-2 border-emerald-500/40 shadow-2xl relative flex flex-col scroll-mt-24">
+                            {/* Prominent Header Card for Maximized Map */}
+                            <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 text-white p-4 sm:p-5 border-b border-emerald-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 flex items-center justify-center text-2xl font-black shrink-0 shadow-lg">
+                                  🧭
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h3 className="text-base sm:text-xl font-black text-white">
+                                      كارجاس طريقنا واحد
+                                    </h3>
+                                    <span className="bg-emerald-500/30 text-emerald-300 border border-emerald-400/30 text-[10px] sm:text-xs px-2.5 py-0.5 rounded-full font-bold">
+                                      خريطة مكبرة وملاحة حية مباشرة
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-emerald-100 font-light mt-0.5">
+                                    الملاحة الذكية والتوجيه المباشر لأقرب محطة غاز كارجاس لموقعك الحالي 🚗
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end">
+                                {/* The Single Primary Action: أقرب محطة كارجاس */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleWasalnyDirectNavigate()}
+                                  className="bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs sm:text-sm px-5 py-2.5 rounded-2xl transition shadow-xl shadow-emerald-500/20 flex items-center gap-2 active:scale-95 cursor-pointer ring-2 ring-emerald-300/40"
+                                  title="بدء الملاحة المباشرة لأقرب محطة كارجاس عبر خرائط جوجل"
+                                >
+                                  <Navigation className="w-4 h-4 text-slate-950 fill-slate-950" />
+                                  <span>أقرب محطة كارجاس 📍</span>
+                                </button>
+
+                                {/* Reset button when navigation is active */}
+                                {isNavActiveRequested && (
+                                  <button
+                                    type="button"
+                                    onClick={handleCancelNavigation}
+                                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-bold px-3.5 py-2.5 rounded-2xl transition flex items-center gap-1.5 active:scale-95"
+                                    title="العودة لنظرة عامة على الخريطة"
+                                  >
+                                    <X className="w-4 h-4 text-slate-400" />
+                                    <span>إلغاء الملاحة</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                              <div className="h-[580px] sm:h-[680px] w-full relative">
+                               <CargasNavApp
+                                 key={navKey}
+                                 autoStartNearest={false}
+                                 startNavigationDirectly={isNavActiveRequested}
+                                 initialTargetStationId={targetNavigationStationId || undefined}
+                                 isPermanentMuted={true}
+                               />
+                             </div>
+                          </div>
                         )}
 
                         {/* 2. QR Vehicle Card */}
@@ -1068,7 +1391,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                         )}
 
                         {/* 3. Golden Loyalty Card */}
-                        {section.id === 'golden_card' && v.showGoldenCard && (
+                        {section.id === 'golden_card' && v.showGoldenCard && quickIconsVis.golden_card && (
                           <div className="bg-gradient-to-tr from-amber-600 via-amber-500 to-yellow-400 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden border border-amber-300">
                             <div className="flex items-start justify-between relative z-10">
                               <div>
@@ -1098,9 +1421,9 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                               </div>
 
                               <div className="bg-black/20 backdrop-blur-md rounded-2xl p-3 border border-white/20 text-right">
-                                <span className="text-[10px] text-amber-100 block">القيمة التقديرية:</span>
+                                <span className="text-[10px] text-amber-100 block">فئة العضوية:</span>
                                 <span className="text-base font-extrabold text-white">
-                                  تعادل {(driver.points * 1.3).toFixed(0)} جنيه
+                                  {driver.points >= 500 ? 'عضوية بلاتينية VIP ⭐' : driver.points >= 200 ? 'عضوية ذهبية 🌟' : 'عضوية فضية ✨'}
                                 </span>
                               </div>
                             </div>
@@ -1195,15 +1518,17 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                                 .slice(0, 3)
                                 .map((r) => {
                                   const canAfford = driver.points >= r.pointsCost;
-                                  const costPerPoint = config.loyaltyCostModel?.officialCostPerPoint ?? 0.35;
-                                  const finEgp = (r.pointsCost * costPerPoint).toFixed(0);
                                   return (
                                     <div key={r.id} className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/50 flex items-center justify-between gap-3">
                                       <div>
                                         <h4 className="font-black text-xs text-slate-900">{r.title}</h4>
                                         <div className="flex items-center gap-1.5 mt-0.5">
-                                          <span className="text-[10px] text-amber-700 font-bold">{r.pointsCost} نقطة</span>
-                                          <span className="text-[9.5px] text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded font-bold">~{finEgp} ج</span>
+                                          <span className="text-[11px] text-amber-700 font-black">{r.pointsCost} نقطة ولاء</span>
+                                          {r.valueText && (
+                                            <span className="text-[9px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                              {r.valueText}
+                                            </span>
+                                          )}
                                         </div>
                                       </div>
                                       <button
@@ -1358,7 +1683,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                                         </span>
                                         <span className="bg-white/15 backdrop-blur-md text-amber-200 border border-white/10 text-xs px-3 py-1 rounded-full font-bold flex items-center gap-1.5">
                                           <Coins className="w-3.5 h-3.5 text-amber-400" />
-                                          <span>مكافأة فورية: +{camp.pointsReward} نقطة ولاء (تعادل {camp.financialEquivalentEgp} ج)</span>
+                                          <span>مكافأة فورية: +{camp.pointsReward} نقطة ولاء 🪙</span>
                                         </span>
                                         <span className="text-[11px] text-slate-300 font-mono">
                                           عرض {currentCampaignIndex + 1} من {activeCampaigns.length}
@@ -1503,17 +1828,47 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
             {/* View 2: Loyalty & Rewards Bank */}
             {activePage === 'loyalty' && v.showRewardsBank && (
               <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6 animate-in fade-in">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
-                  <div>
-                    <h3 className="font-black text-base text-slate-900">
-                      استبدال نقاط الولاء بهدايا وكوبونات خصم ومنتجات زيوت وصيانة وفحص وخدمات لدى الغير 🎁
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      اختر المكافأة التي تناسبك واستبدلها فوراً بكود معتمد صالح في جميع محطات ومراكز كارجاس ولدى شبكة الشركاء التجاريين
-                    </p>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActivePage('home');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs sm:text-sm px-4 py-2.5 rounded-2xl shadow-md transition flex items-center gap-2 cursor-pointer active:scale-95 shrink-0"
+                      title="العودة للصفحة الرئيسية"
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                      <span>العودة للرئيسية ↩</span>
+                    </button>
+                    <div>
+                      <h3 className="font-black text-base text-slate-900">
+                        استبدال نقاط الولاء بهدايا ومكافآت كارجاس 🎁
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        اختر المكافأة التي تناسبك واستبدلها فوراً بكود معتمد صالح في جميع محطات ومراكز كارجاس
+                      </p>
+                    </div>
                   </div>
-                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200">
-                    رصيدك الحالي: {driver.points} نقطة
+                  <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-3.5 py-2 rounded-2xl border border-emerald-200 shrink-0">
+                    رصيدك الحالي: {driver.points} نقطة ولاء 🪙
+                  </span>
+                </div>
+
+                {/* Financial Endorsement Banner for Rewards Bank */}
+                <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-3 px-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">💼</span>
+                    <span className="font-black text-emerald-950">
+                      معتمد رسمياً من الإدارة المالية لكارجاس:
+                    </span>
+                    <span className="font-mono font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md border border-amber-300">
+                      تكلفة النقطة {config.loyaltyCostModel?.costPerPointEgp || 0.15} ج/نقطة
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-emerald-800 font-semibold">
+                    جميع نقاط الهدايا محسوبة بدقة وتتغير تلقائياً مع قرارات الإدارة المالية
                   </span>
                 </div>
 
@@ -1541,31 +1896,11 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                   </div>
                 )}
 
-                {/* Financial Administration Approval Header */}
-                <div className="bg-emerald-50/80 border border-emerald-300/80 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">⚖️</span>
-                    <div>
-                      <span className="font-black text-emerald-900 block">
-                        حسابات الإدارة المالية المعتمدة لنقاط الولاء وبنك الهدايا
-                      </span>
-                      <span className="text-[11px] text-emerald-700">
-                        تكلفة النقطة المقررة: {(config.loyaltyCostModel?.officialCostPerPoint ?? 0.35)} ج | معدل المنح: {config.pointsPerMeter || 1} نقطة/م³
-                      </span>
-                    </div>
-                  </div>
-                  <span className="bg-white border border-emerald-300 text-emerald-800 font-bold px-3 py-1 rounded-xl shadow-xs">
-                    هدايا معتمدة رسمياً ومحدثة حياً ✓
-                  </span>
-                </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {rewards
                     .filter((r) => r.isActive !== false)
                     .map((reward) => {
                       const canAfford = driver.points >= reward.pointsCost;
-                      const costPerPoint = config.loyaltyCostModel?.officialCostPerPoint ?? 0.35;
-                      const finEgp = (reward.estimatedEgpValue || reward.pointsCost * costPerPoint).toFixed(0);
                       return (
                         <div
                           key={reward.id}
@@ -1578,21 +1913,21 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                           <div className="space-y-2">
                             <div className="flex items-center justify-between">
                               <span className="text-2xl">🎁</span>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-black bg-amber-100 text-amber-900 px-2.5 py-1 rounded-full border border-amber-200">
-                                  {reward.pointsCost} نقطة
-                                </span>
-                                <span className="text-[10px] font-bold bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full border border-emerald-200">
-                                  ~{finEgp} ج
-                                </span>
-                              </div>
+                              <span className="text-xs font-black bg-amber-100 text-amber-900 px-3 py-1 rounded-full border border-amber-200">
+                                {reward.pointsCost} نقطة ولاء
+                              </span>
                             </div>
                             <h4 className="font-black text-sm text-slate-900">{reward.title}</h4>
-                            <p className="text-xs text-slate-500 leading-relaxed">{reward.description}</p>
+                            {reward.valueText && (
+                              <span className="inline-block text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                                {reward.valueText}
+                              </span>
+                            )}
+                            <p className="text-xs text-slate-500 leading-relaxed">{getCustomerRewardDescription(reward)}</p>
                           </div>
 
                           <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-                            <span className="text-xs font-bold text-slate-700">{reward.valueText || `${finEgp} جنيه`}</span>
+                            <span className="text-xs font-bold text-emerald-700">مكافأة معتمدة ✓</span>
                             <button
                               onClick={() => handleRedeemReward(reward)}
                               disabled={!canAfford}
@@ -1685,21 +2020,50 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                     </div>
                   )}
                 </div>
+
+                {/* Return Button at Bottom of Loyalty Page */}
+                <div className="pt-6 border-t border-slate-200 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActivePage('home');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm px-8 py-3 rounded-2xl shadow-lg transition flex items-center gap-2 active:scale-95 cursor-pointer"
+                  >
+                    <ArrowRight className="w-4 h-4" />
+                    <span>العودة للصفحة الرئيسية والخريطة ↩</span>
+                  </button>
+                </div>
               </div>
             )}
 
             {/* View 3: Maintenance Schedule */}
             {activePage === 'maintenance' && v.showMaintenanceSchedule && (
               <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6 animate-in fade-in">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
-                  <div>
-                    <h3 className="font-black text-base text-slate-900 flex items-center gap-2">
-                      <ShieldCheck className="w-5 h-5 text-emerald-600" />
-                      جدول الصيانة الذكي والتنبيهات المانعة للتلاعب
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {config.customTexts.maintenanceNotice}
-                    </p>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActivePage('home');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs sm:text-sm px-4 py-2.5 rounded-2xl shadow-md transition flex items-center gap-2 cursor-pointer active:scale-95 shrink-0"
+                      title="العودة للصفحة الرئيسية"
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                      <span>العودة للرئيسية ↩</span>
+                    </button>
+                    <div>
+                      <h3 className="font-black text-base text-slate-900 flex items-center gap-2">
+                        <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                        جدول الصيانة الذكي وتنبيهات الأمان
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {config.customTexts.maintenanceNotice}
+                      </p>
+                    </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2.5">
                     <button
@@ -1797,24 +2161,53 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                     );
                   })}
                 </div>
+
+                {/* Return Button at Bottom of Maintenance Page */}
+                <div className="pt-6 border-t border-slate-200 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActivePage('home');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm px-8 py-3 rounded-2xl shadow-lg transition flex items-center gap-2 active:scale-95 cursor-pointer"
+                  >
+                    <ArrowRight className="w-4 h-4" />
+                    <span>العودة للصفحة الرئيسية والخريطة ↩</span>
+                  </button>
+                </div>
               </div>
             )}
 
             {/* View 4: Fueling History */}
             {activePage === 'history' && v.showFuelingHistory && (
               <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-4 animate-in fade-in">
-                <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                  <div>
-                    <h3 className="font-black text-base text-slate-900">
-                      سجل تفويلات ومعاملات الغاز الطبيعي
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      تتبع كميات الغاز المستهلكة، رقم التموين من كل محطة وطلمبة، والنقاط المكتسبة
-                    </p>
+                <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActivePage('home');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs sm:text-sm px-4 py-2.5 rounded-2xl shadow-md transition flex items-center gap-2 cursor-pointer active:scale-95 shrink-0"
+                      title="العودة للصفحة الرئيسية"
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                      <span>العودة للرئيسية ↩</span>
+                    </button>
+                    <div>
+                      <h3 className="font-black text-base text-slate-900">
+                        سجل تفويلات ومعاملات الغاز الطبيعي
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        تتبع كميات الغاز المستهلكة، رقم التموين من كل محطة وطلمبة، والنقاط المكتسبة
+                      </p>
+                    </div>
                   </div>
                   <button
                     onClick={() => setIsFeedbackModalOpen(true)}
-                    className="bg-amber-50 text-amber-800 border border-amber-300 text-xs font-bold px-3 py-1.5 rounded-xl hover:bg-amber-100 transition"
+                    className="bg-amber-50 text-amber-800 border border-amber-300 text-xs font-bold px-3 py-1.5 rounded-xl hover:bg-amber-100 transition shrink-0"
                   >
                     ⭐ تقييم آخر تفويلة أو إرسال شكوى
                   </button>
@@ -1893,10 +2286,40 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                     </tbody>
                   </table>
                 </div>
+
+                {/* Return Button at Bottom of History Page */}
+                <div className="pt-6 border-t border-slate-200 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActivePage('home');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm px-8 py-3 rounded-2xl shadow-lg transition flex items-center gap-2 active:scale-95 cursor-pointer"
+                  >
+                    <ArrowRight className="w-4 h-4" />
+                    <span>العودة للصفحة الرئيسية والخريطة ↩</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </div>
+
+      {/* Floating Return Button at bottom of screen when on any subpage */}
+      {activePage !== 'home' && (
+        <button
+          type="button"
+          onClick={() => {
+            setActivePage('home');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className="fixed bottom-6 left-6 z-50 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-xs sm:text-sm px-6 py-3.5 rounded-full shadow-2xl border-2 border-white/50 flex items-center gap-2 active:scale-95 cursor-pointer animate-in fade-in"
+          title="الرجوع للرئيسية فوراً"
+        >
+          <ArrowRight className="w-5 h-5" />
+          <span>الرجوع للرئيسية ↩</span>
+        </button>
       )}
 
       {/* Fullscreen QR Modal */}
@@ -2110,6 +2533,8 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
                         } else if (item.id === 'complaints') {
                           setFeedbackInitialTab('complaint');
                           setIsFeedbackModalOpen(true);
+                        } else if (item.id === 'map') {
+                          handleWasalnyDirectNavigate();
                         } else {
                           setActivePage(item.id);
                         }
@@ -2359,7 +2784,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
               <button
                 onClick={() => {
                   setIsStationNavModalOpen(false);
-                  setActivePage('map');
+                  handleWasalnyDirectNavigate(activeDetectedStation || undefined);
                 }}
                 className="w-full flex items-center justify-between p-3.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-2xl font-black text-xs sm:text-sm shadow-md transition active:scale-98 group"
               >
@@ -2438,19 +2863,7 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
               )}
             </div>
 
-            {/* Wadah Voice & Dismiss */}
             <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-              {config.wasalnyConfig?.voiceGuidance !== 'silent' && (
-                <button
-                  type="button"
-                  onClick={handlePlayWadahGuidance}
-                  className="flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 px-3 py-1.5 rounded-xl transition"
-                >
-                  <Volume2 className="w-3.5 h-3.5 text-amber-600" />
-                  <span>استمع لإرشاد وضاح الصوتي 🗣️</span>
-                </button>
-              )}
-
               <button
                 onClick={() => setIsStationNavModalOpen(false)}
                 className="mr-auto px-4 py-2 text-xs text-slate-500 hover:text-slate-800 font-bold"
@@ -2491,16 +2904,18 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
         initialChannel={messagingInitialChannel}
       />
 
-      {/* 5-Clicks Admin Verification Modal (التحقق الأمني لتفعيل التحرير بالسحب والإفلات) */}
-      <AdminPinVerifyModal
-        isOpen={isAdminPinModalOpen}
-        onClose={() => setIsAdminPinModalOpen(false)}
-        correctPin={config.adminPin || '0000'}
-        onSuccess={() => {
-          setIsAdminPinModalOpen(false);
-          setIsLayoutEditMode(true);
-        }}
-      />
+      {/* 10-Clicks Admin Verification Modal (التحقق الأمني لتفعيل التحرير بالسحب والإفلات - خاص بمعاينة المدير فقط) */}
+      {isAdminPreview && (
+        <AdminPinVerifyModal
+          isOpen={isAdminPinModalOpen}
+          onClose={() => setIsAdminPinModalOpen(false)}
+          correctPin={config.adminPin || '0000'}
+          onSuccess={() => {
+            setIsAdminPinModalOpen(false);
+            setIsLayoutEditMode(true);
+          }}
+        />
+      )}
 
       {/* Standalone Fueling QR Modal (نافذة مستقلة لإظهار كود الـ QR للتموين وإغلاقها فور الانتهاء) */}
       {isQrModalOpen && (
@@ -2556,6 +2971,238 @@ export const DriverPortal: React.FC<DriverPortalProps> = ({
             >
               إغلاق النافذة بعد الانتهاء من المسح ✕
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Customer Data Update Request Modal (طلب تعديل بيانات العميل لخدمة العملاء ومدير النظام) */}
+      {isUpdateRequestModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200 no-print">
+          <div className="bg-white rounded-3xl max-w-lg w-full max-h-[92vh] overflow-y-auto p-6 space-y-4 shadow-2xl relative border-2 border-emerald-500 animate-in zoom-in-95 text-right">
+            <button
+              onClick={() => setIsUpdateRequestModalOpen(false)}
+              className="absolute top-4 left-4 p-2 text-slate-400 hover:text-slate-700 rounded-full hover:bg-slate-100 transition"
+              title="إغلاق النافذة"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+              <div className="w-12 h-12 bg-gradient-to-tr from-emerald-600 to-teal-600 text-white rounded-2xl flex items-center justify-center text-xl font-black shadow-md shrink-0">
+                ✏️
+              </div>
+              <div>
+                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-0.5 rounded-full">
+                  خدمة العملاء ومدير النظام
+                </span>
+                <h3 className="text-base sm:text-lg font-black text-slate-900 mt-0.5">
+                  طلب تعديل بيانات العميل والسيارة
+                </h3>
+                <p className="text-xs text-slate-500">
+                  كود العميل: {driver.id} • لوحة: {driver.carPlate}
+                </p>
+              </div>
+            </div>
+
+            {reqSuccessMsg && (
+              <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-2xl text-xs font-bold animate-in fade-in flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{reqSuccessMsg}</span>
+              </div>
+            )}
+
+            <div className="p-3 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-2xl border border-emerald-200 text-xs text-emerald-900 leading-relaxed">
+              <p className="font-bold flex items-center gap-1.5 text-emerald-950 mb-1">
+                <Info className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span>كيف يعمل تعديل البيانات؟</span>
+              </p>
+              أدخل البيانات الجديدة التي تريد تحديثها في المنظومة. سيصل طلبك فوراً إلى مكتب خدمة العملاء ومدير النظام، وسيقومون بمراجعته واعتماده لتحديث بياناتك في الحال.
+            </div>
+
+            {/* Recent Requests History by Customer */}
+            {customerRequests.length > 0 && (
+              <div className="space-y-2 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-800 flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-slate-500" />
+                    طلباتك السابقة ({customerRequests.length}):
+                  </span>
+                  <span className="text-[10px] text-slate-500">تحديث تلقائي</span>
+                </div>
+                <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                  {customerRequests.map((req) => (
+                    <div
+                      key={req.id}
+                      className="p-2.5 bg-white rounded-xl border border-slate-200 text-xs space-y-1 shadow-2xs"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-900">
+                          طلب رقم #{req.id.slice(-6)}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                            req.status === 'pending'
+                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                              : req.status === 'approved'
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                              : 'bg-rose-100 text-rose-800 border border-rose-300'
+                          }`}
+                        >
+                          {req.status === 'pending'
+                            ? 'قيد المراجعة ⏳'
+                            : req.status === 'approved'
+                            ? 'تم الاعتماد والتحديث ✓'
+                            : 'مرفوض ✖'}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-600">
+                        {req.requestedCarPlate !== req.currentCarPlate && (
+                          <span className="ml-2 font-mono">اللوحة: {req.requestedCarPlate}</span>
+                        )}
+                        {req.requestedCarModel !== req.currentCarModel && (
+                          <span className="ml-2">السيارة: {req.requestedCarModel}</span>
+                        )}
+                        {req.requestedPhone !== req.driverPhone && (
+                          <span className="ml-2">الهاتف: {req.requestedPhone}</span>
+                        )}
+                      </div>
+                      {req.adminNotes && (
+                        <div className="text-[10px] bg-slate-50 p-1.5 rounded-lg border border-slate-200 text-slate-700">
+                          <span className="font-bold text-slate-900">رد خدمة العملاء:</span> {req.adminNotes}
+                        </div>
+                      )}
+                      <div className="text-[9px] text-slate-400">
+                        {new Date(req.submittedAt).toLocaleDateString('ar-EG', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Update Request Submission Form */}
+            <form onSubmit={handleSubmitCustomerRequest} className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    اسم العميل المطلوب:
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={reqName}
+                    onChange={(e) => setReqName(e.target.value)}
+                    className="w-full text-xs font-medium p-2.5 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    رقم الهاتف الجديد:
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={reqPhone}
+                    onChange={(e) => setReqPhone(e.target.value)}
+                    className="w-full text-xs font-medium p-2.5 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-hidden font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    رقم لوحة السيارة الجديد:
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={reqPlate}
+                    onChange={(e) => setReqPlate(e.target.value)}
+                    placeholder="مثال: س ر ع 1 2 3"
+                    className="w-full text-xs font-bold p-2.5 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-hidden font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    نوع / موديل السيارة:
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={reqModel}
+                    onChange={(e) => setReqModel(e.target.value)}
+                    placeholder="مثال: هيونداي فيرنا 2022"
+                    className="w-full text-xs font-medium p-2.5 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    سعة أسطوانة الغاز (لتر):
+                  </label>
+                  <input
+                    type="number"
+                    min="30"
+                    max="140"
+                    value={reqCapacity}
+                    onChange={(e) => setReqCapacity(Number(e.target.value))}
+                    className="w-full text-xs font-bold p-2.5 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-hidden font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    قراءة العداد الحالية (كم):
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={reqOdo}
+                    onChange={(e) => setReqOdo(Number(e.target.value))}
+                    className="w-full text-xs font-bold p-2.5 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-hidden font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  سبب التعديل أو ملاحظات لخدمة العملاء:
+                </label>
+                <textarea
+                  rows={2}
+                  value={reqNotes}
+                  onChange={(e) => setReqNotes(e.target.value)}
+                  placeholder="مثال: تم تجديد رخصة السيارة وتغيير اللوحات، أو تم تغيير أسطوانة الغاز لأخرى 80 لتر..."
+                  className="w-full text-xs font-medium p-2.5 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-hidden"
+                />
+              </div>
+
+              <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
+                <button
+                  type="submit"
+                  disabled={isSubmittingReq}
+                  className="flex-1 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs py-3 rounded-2xl transition shadow-md active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{isSubmittingReq ? 'جارٍ إرسال الطلب...' : 'إرسال طلب التعديل لخدمة العملاء 📤'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsUpdateRequestModalOpen(false)}
+                  className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-2xl transition"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

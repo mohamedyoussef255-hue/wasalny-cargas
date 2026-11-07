@@ -3,12 +3,10 @@ import { Station, CargasFacilityType, AppConfig } from '../types';
 import { CARGAS_FACILITY_META, getCongestionBadge } from '../utils/companyAssets';
 import { CARGAS_LOGO_SVG } from '../utils/cargasLogo';
 import { getDistanceMeters, formatDistance } from '../services/routingService';
-import { speechService } from '../services/speechService';
 import { 
   X, 
   MapPin, 
   Navigation, 
-  Volume2, 
   Wrench, 
   Droplets, 
   Search, 
@@ -96,13 +94,7 @@ export const CargasNationwideModal: React.FC<CargasNationwideModalProps> = ({
            getDistanceMeters(userLocation[0], userLocation[1], b.lat, b.lng);
   });
 
-  const handleSpeakStation = (station: Station) => {
-    speechService.playChime('turn');
-    const distM = getDistanceMeters(userLocation[0], userLocation[1], station.lat, station.lng);
-    const distKm = (distM / 1000).toFixed(1);
-    const text = `محطة ${station.name}. على بعد ${distKm} كيلو لموقعك. فيها تموين غاز وزيوت معتمدة ووقت الانتظار ${station.waitTimeMinutes} دقيقة.`;
-    speechService.speak(text, { priority: true });
-  };
+
 
   return (
     <div className="fixed inset-0 z-[1250] flex items-center justify-center p-2 md:p-6 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
@@ -277,15 +269,6 @@ export const CargasNationwideModal: React.FC<CargasNationwideModalProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1.5">
-                      {/* Read Voice Button (Shakir) */}
-                      <button
-                        onClick={() => handleSpeakStation(station)}
-                        className="p-2 bg-slate-700 hover:bg-slate-600 text-emerald-400 rounded-xl cursor-pointer"
-                        title="اسمع بالصوت بصوت شاكر"
-                      >
-                        <Volume2 className="w-4 h-4" />
-                      </button>
-
                       {/* View on Map */}
                       <button
                         onClick={() => {

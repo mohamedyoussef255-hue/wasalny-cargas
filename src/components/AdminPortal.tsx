@@ -56,9 +56,11 @@ import {
   Compass,
   Edit3,
   X,
+  LayoutGrid,
 } from 'lucide-react';
 import {
   AppConfig,
+  DriverProfile,
   PumpQrInfo,
   RewardItem,
   TechnicianCrewMember,
@@ -79,6 +81,8 @@ import {
   FuelingTransaction,
   LoyaltyCostModel,
   CustomerViewMode,
+  CustomerDataUpdateRequest,
+  DriverQuickIconsVisibility,
 } from '../types';
 import { generateQrDataUrl } from '../services/qrService';
 import {
@@ -139,6 +143,16 @@ import {
   saveCustomerServicePin,
   getComplaintsOfficerPin,
   saveComplaintsOfficerPin,
+  getDriverProfile,
+  saveDriverProfile,
+  getMapFacilityFilters,
+  getCustomerDataUpdateRequests,
+  saveCustomerDataUpdateRequests,
+  approveCustomerDataUpdateRequest,
+  rejectCustomerDataUpdateRequest,
+  getDriverQuickIconsVisibility,
+  saveDriverQuickIconsVisibility,
+  DRIVER_QUICK_ICONS_EVENT,
 } from '../services/storageService';
 import { REWARDS_100_CATALOG } from '../data/rewardsCatalog';
 import { RefuelingAdminDashboard } from './RefuelingAdminDashboard';
@@ -147,6 +161,19 @@ import { PointsCalculator } from './PointsCalculator';
 import { DynamicLayoutManager } from './DynamicLayoutManager';
 import { FinancialManagementPortal } from './FinancialManagementPortal';
 import { WasalnyAdminDashboard } from './WasalnyAdminDashboard';
+import { DriverPortal } from './DriverPortal';
+import { AdminModal as KmzMapAdminModal } from '../navigation/components/AdminModal';
+import {
+  playNavigationVoice,
+  generateVoiceGuidanceSpeech,
+  stopNavigationVoice,
+  NAVIGATION_VOICES,
+  NavigationVoiceId,
+} from '../services/voiceNavigationService';
+import { Station as NavStation, AppConfig as NavAppConfig } from '../navigation/types';
+import { INITIAL_CARGAS_STATIONS } from '../navigation/data/initialStations';
+import { getStoredCustomLogo, saveStoredCustomLogo } from '../navigation/utils/imageCompressor';
+import { syncCurrentStateToCodebase, downloadSystemDataBackup } from '../services/codebaseSyncService';
 
 interface AdminPortalProps {
   config: AppConfig;
@@ -186,10 +213,106 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     | 'promotions_studio'
     | 'ideas_bank'
     | 'complaints'
+    | 'customer_requests'
     | 'moen'
     | 'cms'
     | 'rollback'
   >('refueling_ops');
+
+  // Customer Data Update Requests State & Handlers (إدارة طلبات تعديل بيانات العملاء والسيارة)
+  const [customerRequests, setCustomerRequests] = useState<CustomerDataUpdateRequest[]>(() =>
+    getCustomerDataUpdateRequests()
+  );
+  const [selectedReqForReview, setSelectedReqForReview] = useState<CustomerDataUpdateRequest | null>(null);
+  const [reviewEditName, setReviewEditName] = useState('');
+  const [reviewEditPhone, setReviewEditPhone] = useState('');
+  const [reviewEditPlate, setReviewEditPlate] = useState('');
+  const [reviewEditModel, setReviewEditModel] = useState('');
+  const [reviewEditCapacity, setReviewEditCapacity] = useState<number>(70);
+  const [reviewEditOdo, setReviewEditOdo] = useState<number>(0);
+  const [reviewAdminNotes, setReviewAdminNotes] = useState('');
+  const [isDirectDriverEditOpen, setIsDirectDriverEditOpen] = useState(false);
+  const [directDriver, setDirectDriver] = useState<DriverProfile>(getDriverProfile);
+
+  useEffect(() => {
+    const handleRequestsUpdate = () => {
+      setCustomerRequests(getCustomerDataUpdateRequests());
+    };
+    window.addEventListener('cargas_customer_requests_updated', handleRequestsUpdate);
+    return () => {
+      window.removeEventListener('cargas_customer_requests_updated', handleRequestsUpdate);
+    };
+  }, []);
+
+  const pendingRequestsCount = customerRequests.filter((r) => r.status === 'pending').length;
+
+  const handleOpenReviewModal = (req: CustomerDataUpdateRequest) => {
+    setSelectedReqForReview(req);
+    setReviewEditName(req.requestedName);
+    setReviewEditPhone(req.requestedPhone);
+    setReviewEditPlate(req.requestedCarPlate);
+    setReviewEditModel(req.requestedCarModel);
+    setReviewEditCapacity(req.requestedCngCylinderCapacity);
+    setReviewEditOdo(req.requestedOdometerKm);
+    setReviewAdminNotes(req.adminNotes || '');
+  };
+
+  const handleApproveRequest = (reqId: string, customData?: any) => {
+    const dataToApply = customData || {
+      name: reviewEditName || undefined,
+      phone: reviewEditPhone || undefined,
+      carPlate: reviewEditPlate || undefined,
+      carModel: reviewEditModel || undefined,
+      cngCylinderCapacity: reviewEditCapacity || undefined,
+      odometerKm: reviewEditOdo || undefined,
+    };
+    const updated = approveCustomerDataUpdateRequest(
+      reqId,
+      dataToApply,
+      'مدير عام النظام (Super Admin)',
+      reviewAdminNotes || 'تم مراجعة الطلب واعتماده وتحديث بيانات السيارة فوراً'
+    );
+    if (updated) {
+      setDirectDriver(updated);
+    }
+    setCustomerRequests(getCustomerDataUpdateRequests());
+    setSelectedReqForReview(null);
+    alert('✅ تم اعتماد طلب التعديل وتحديث بيانات العميل والسيارة فوراً بنجاح!');
+  };
+
+  const handleDirectApprove = (req: CustomerDataUpdateRequest) => {
+    approveCustomerDataUpdateRequest(
+      req.id,
+      {
+        name: req.requestedName,
+        phone: req.requestedPhone,
+        carPlate: req.requestedCarPlate,
+        carModel: req.requestedCarModel,
+        cngCylinderCapacity: req.requestedCngCylinderCapacity,
+        odometerKm: req.requestedOdometerKm,
+      },
+      'مدير عام النظام (Super Admin)',
+      'تم الاعتماد الفوري المباشر'
+    );
+    setCustomerRequests(getCustomerDataUpdateRequests());
+    alert('✅ تم اعتماد الطلب وتحديث بيانات العميل بالمنظومة فوراً بنجاح!');
+  };
+
+  const handleRejectRequest = (reqId: string) => {
+    const reason = prompt('يرجى كتابة سبب رفض طلب التعديل لإعلام العميل به:', 'البيانات غير مطابقة لرخصة التسيير');
+    if (!reason) return;
+    rejectCustomerDataUpdateRequest(reqId, reason, 'مدير عام النظام (Super Admin)');
+    setCustomerRequests(getCustomerDataUpdateRequests());
+    setSelectedReqForReview(null);
+    alert('تم تسجيل رفض الطلب وتدوين السبب للعميل.');
+  };
+
+  const handleSaveDirectDriver = (e: React.FormEvent) => {
+    e.preventDefault();
+    saveDriverProfile(directDriver);
+    setIsDirectDriverEditOpen(false);
+    alert('✅ تم تعديل بيانات العميل وحفظها وتعميمها بنجاح!');
+  };
 
   // Pump & Store QR State
   const [stationCodeInput, setStationCodeInput] = useState(config.stationCode);
@@ -275,6 +398,213 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     };
     onUpdateConfig(updated);
     saveAppConfig(updated);
+  };
+
+  // لوحة تحكم مدير النظام الشاملة للخرائط و KMZ (المطور محمد عبد الرحمن يوسف)
+  const [isKmzMapAdminModalOpen, setIsKmzMapAdminModalOpen] = useState(false);
+  // معاينة صفحة العميل التفاعلية لمدير النظام (تحريك العناصر بالسحب والإفلات أو 10 نقرات)
+  const [isDriverPreviewOpen, setIsDriverPreviewOpen] = useState(false);
+
+  const [navStations, setNavStations] = useState<NavStation[]>(() => {
+    try {
+      const saved = localStorage.getItem('cargas_stations_v2') || localStorage.getItem('cargas_stations_v2_backup');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((s: any) => ({
+            ...s,
+            company: s.company || 'كارجاس',
+          }));
+        }
+      }
+    } catch (e) {
+      console.error('Error loading navStations', e);
+    }
+    return INITIAL_CARGAS_STATIONS;
+  });
+
+  const [navConfig, setNavConfig] = useState<NavAppConfig>(() => {
+    try {
+      const saved = localStorage.getItem('cargas_config_v2');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {
+      adminPassword: config.adminPin || '0000',
+      cargasOnlyMode: true,
+      moeinVoiceEnabled: true,
+      moeinVisibleToUsers: true,
+      moeinAllowedTopics: ['الملاحة', 'التموين', 'الزيوت', 'التحويل', 'فحص الأسطوانات'],
+    };
+  });
+
+  const handleSaveNavStationsFromAdmin = (updatedNavStations: NavStation[]) => {
+    // إزالة اللوجوهات الضخمة من المحطات الفردية لمنع استهلاك مساحة LocalStorage
+    const cleanNavStations = updatedNavStations.map((s) => ({
+      ...s,
+      customLogoUrl: (s.customLogoUrl && s.customLogoUrl.length > 500 && s.customLogoUrl.startsWith('data:'))
+        ? undefined
+        : s.customLogoUrl,
+    }));
+    setNavStations(cleanNavStations);
+
+    try {
+      const serialized = JSON.stringify(cleanNavStations);
+      localStorage.setItem('cargas_stations_v2', serialized);
+      localStorage.setItem('cargas_stations_v2_backup', serialized);
+      window.dispatchEvent(new CustomEvent('cargas_stations_updated', { detail: cleanNavStations }));
+    } catch (err) {
+      console.warn('LocalStorage save failed, trying lean payload', err);
+      try {
+        const lean = cleanNavStations.map((s) => ({
+          id: s.id,
+          name: s.name,
+          company: s.company,
+          facilityType: s.facilityType,
+          address: s.address,
+          lat: s.lat,
+          lng: s.lng,
+          cng: s.cng,
+          conversionCenter: s.conversionCenter,
+          oilCenter: s.oilCenter,
+          cylinderInspection: s.cylinderInspection,
+          canopyOil: s.canopyOil,
+          comingSoon2027: s.comingSoon2027,
+          isHidden: s.isHidden,
+        }));
+        localStorage.setItem('cargas_stations_v2', JSON.stringify(lean));
+        localStorage.setItem('cargas_stations_v2_backup', JSON.stringify(lean));
+      } catch (e2) {}
+    }
+
+    // مزامنة المحطات مع منظومة CargasStationLocation وحفظها دون أي فقد
+    const convertedLocations: CargasStationLocation[] = cleanNavStations.map((st) => {
+      const acts: StationActivity[] = [];
+      if (st.cng) acts.push('تموين');
+      if (st.oilCenter) acts.push('زيوت');
+      if (st.canopyOil || st.services?.includes('زيوت أسفل المظلة')) acts.push('زيوت أسفل المظلة');
+      if (st.comingSoon2027 || st.services?.includes('قريباً 2027') || st.services?.includes('قريباً')) acts.push('قريباً 2027');
+      if (st.conversionCenter) {
+        acts.push('تحويل');
+        acts.push('صيانة');
+      }
+      if (st.cylinderInspection) acts.push('فحص اسطوانات');
+
+      let facType: StationFacilityType = 'cng_station';
+      if (st.facilityType === 'conversion_center') facType = 'conversion_center';
+      else if (st.facilityType === 'oil_center') facType = 'oil_center';
+      else if (st.facilityType === 'cylinder_testing') facType = 'cylinder_inspection';
+
+      const existing = stations.find((s) => s.id === st.id);
+      return {
+        id: st.id,
+        name: st.name,
+        code: existing?.code || `CGS-${st.id.slice(-4)}`,
+        city: existing?.city || 'القاهرة والجيزة',
+        address: st.address,
+        facilityType: facType,
+        latitude: st.lat,
+        longitude: st.lng,
+        phone: st.phone || existing?.phone || '19058',
+        workingHours: st.workingHours || existing?.workingHours || '24 ساعة',
+        servicesAvailable: st.services || existing?.servicesAvailable || ['تموين غاز'],
+        activities: acts.length > 0 ? acts : (existing?.activities || ['تموين']),
+        salesVolumeStatus: existing?.salesVolumeStatus || 'medium',
+        promotionalPointsMultiplier: existing?.promotionalPointsMultiplier || 1,
+        promotionalBudgetEgp: existing?.promotionalBudgetEgp || 0,
+        customLogoUrl: (st.customLogoUrl && st.customLogoUrl.length < 500) ? st.customLogoUrl : undefined,
+        governorate: existing?.governorate || 'القاهرة',
+      };
+    });
+
+    onUpdateStations(convertedLocations);
+
+    // مزامنة تلقائية في الخلفية مع ملفات كود المشروع على القرص
+    const currentMasterLogo = getMasterStationMapLogo() || config.stationLogoUrl;
+    syncCurrentStateToCodebase({
+      navStations: cleanNavStations,
+      stationLocations: convertedLocations,
+      config,
+      rewards,
+      crew: stationCrew,
+      mapFilters: getMapFacilityFilters(),
+      logoUrl: currentMasterLogo,
+    }).catch((err) => console.warn('Background codebase sync notice:', err));
+  };
+
+  const [isSyncingCodebase, setIsSyncingCodebase] = useState(false);
+  const [codebaseSyncResult, setCodebaseSyncResult] = useState<{
+    success: boolean;
+    message: string;
+    timestamp?: string;
+    stationCount?: number;
+  } | null>(null);
+
+  const handleSyncAllToCodebase = async () => {
+    setIsSyncingCodebase(true);
+    setCodebaseSyncResult(null);
+
+    const currentMasterLogo = getMasterStationMapLogo() || config.stationLogoUrl || editStationLogoUrl;
+
+    const result = await syncCurrentStateToCodebase({
+      navStations,
+      stationLocations: stations,
+      config: {
+        ...config,
+        appName: editAppName,
+        appSubtitle: editAppSub,
+        appLogoUrl: editAppLogoUrl || currentMasterLogo,
+        customAppLogoUrl: editAppLogoUrl || currentMasterLogo,
+        stationLogoUrl: currentMasterLogo,
+        gasPricePerMeter: editGasPrice,
+        pointsPerMeter: editPointsRatio,
+        adminPin: editAdminPin,
+        financePin: editFinancePin,
+        cylinderInspectionPin: editCylinderPin,
+        customerServicePin: editCustomerServicePin,
+        complaintsOfficerPin: editComplaintsOfficerPin,
+        themeColor: editThemeColor,
+        showDeveloperName: editShowDeveloperName,
+        showCompanyName: editShowCompanyName,
+        showAppName: editShowAppName,
+        developerName: editDeveloperName,
+        companyName: editCompanyName,
+        fuelingModeDisplay: editFuelingModeDisplay,
+        customTexts: {
+          ...config.customTexts,
+          welcomeDriver: editWelcomeDriver,
+          welcomeTech: editWelcomeTech,
+          maintenanceNotice: editNotice,
+        },
+      },
+      rewards,
+      crew: stationCrew,
+      mapFilters: getMapFacilityFilters(),
+      logoUrl: currentMasterLogo,
+    });
+
+    setIsSyncingCodebase(false);
+    setCodebaseSyncResult(result);
+  };
+
+  const handleApplyNavLogoToAllStations = (logoUrl: string) => {
+    saveStoredCustomLogo(logoUrl);
+    setMasterStationMapLogo(logoUrl);
+    setEditStationLogoUrl(logoUrl);
+
+    // تثبيت اللوجو بشكل دائم في الإعدادات العامة للمنظومة ليبقى ثابتاً في كل الخرائط حتى عند التصدير
+    const updatedConfig: AppConfig = {
+      ...config,
+      stationLogoUrl: logoUrl,
+    };
+    onUpdateConfig(updatedConfig);
+    saveAppConfig(updatedConfig);
+
+    // المحطات ترث اللوجو الموحد مركزياً دون نسخ مصفوفة base64 في 300 محطة
+    const updated = navStations.map((s) => ({
+      ...s,
+      customLogoUrl: (logoUrl && !logoUrl.startsWith('data:')) ? logoUrl : undefined,
+    }));
+    handleSaveNavStationsFromAdmin(updated);
   };
 
   const compressImageFile = (file: File, maxDim = 160, quality = 0.85): Promise<string> => {
@@ -406,35 +736,152 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     };
     onUpdateConfig(updatedConfig);
     saveAppConfig(updatedConfig);
-    alert('✅ تم حفظ كافة إعدادات وتحكم تطبيق "وصّلني" وتحديث خيارات الملاحة والتوجيه الصوتي فوراً!');
+
+    // مزامنة تلقائية في الخلفية مع ملفات كود المشروع لتعميم التعديل على المشروع ككل
+    syncCurrentStateToCodebase({
+      navStations,
+      stationLocations: stations,
+      config: updatedConfig,
+      rewards,
+      crew: stationCrew,
+      mapFilters: getMapFacilityFilters(),
+      logoUrl: getMasterStationMapLogo() || config.stationLogoUrl,
+    }).catch((err) => console.warn('Background codebase sync notice:', err));
+
+    alert('✅ تم حفظ كافة إعدادات وتحكم تطبيق "وصّلني" وتثبيتها في ملفات المشروع فوراً!');
   };
 
   const handleTestWadahVoice = () => {
-    if (!('speechSynthesis' in window)) {
-      alert('متصفحك لا يدعم خاصية التحدث الصوتي.');
+    const activeVoice = (wasalnyVoice as NavigationVoiceId) || 'shakir_egyptian';
+    if (activeVoice === 'silent') {
+      alert('الصوت المرشد معطل حالياً (وضع صامت).');
       return;
     }
-    window.speechSynthesis.cancel();
     const testStation = stations.find((s) => s.id === wasalnyFeaturedStationId) || stations[0];
-    const text = `يا هلا بيك يا باشا! أنا وضاح، معاك في الطريق خطوة بخطوة... إحنا دلوقتي متوجهين لمحطة ${testStation?.name || 'كارجاس شبرا'}، الطريق سالك ومفيش زحام، ضغط الغاز ممتاز ومتوفر غسيل وزيوت، دوس على وصّلني ويلا بينا نتحرك سوا على خرائط جوجل!`;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'ar-EG';
-    const voices = window.speechSynthesis.getVoices();
-    const arVoice = voices.find((v) => v.lang.includes('ar-EG') || v.lang.startsWith('ar'));
-    if (arVoice) utterance.voice = arVoice;
-    utterance.rate = 1.0;
-    utterance.pitch = 0.95;
-    window.speechSynthesis.speak(utterance);
+    const text = generateVoiceGuidanceSpeech(testStation, activeVoice);
+    playNavigationVoice(text, activeVoice);
   };
 
   // Visibility Matrix State
   const [driverVis, setDriverVis] = useState(config.visibility.driver);
   const [techVis, setTechVis] = useState(config.visibility.technician);
+  const [quickIconsVis, setQuickIconsVis] = useState<DriverQuickIconsVisibility>(() =>
+    getDriverQuickIconsVisibility()
+  );
+
+  useEffect(() => {
+    const handleQuickIconsUpdate = (e: any) => {
+      if (e?.detail) setQuickIconsVis(e.detail);
+      else setQuickIconsVis(getDriverQuickIconsVisibility());
+    };
+    window.addEventListener(DRIVER_QUICK_ICONS_EVENT, handleQuickIconsUpdate);
+    window.addEventListener('storage', handleQuickIconsUpdate);
+    return () => {
+      window.removeEventListener(DRIVER_QUICK_ICONS_EVENT, handleQuickIconsUpdate);
+      window.removeEventListener('storage', handleQuickIconsUpdate);
+    };
+  }, []);
+
+  const handleAdminToggleQuickIcon = (key: keyof DriverQuickIconsVisibility) => {
+    const updated = {
+      ...quickIconsVis,
+      [key]: !quickIconsVis[key],
+    };
+    if (key === 'golden_card') {
+      const newCardVal = !quickIconsVis.golden_card;
+      setDriverVis((prev) => ({ ...prev, showGoldenCard: newCardVal }));
+    }
+    setQuickIconsVis(updated);
+    saveDriverQuickIconsVisibility(updated);
+  };
+
+  // تصفية التحكم في أيقونات ومحتويات الصفحات حسب الإدارة
+  const [visDeptFilter, setVisDeptFilter] = useState<'all' | 'driver' | 'technician' | 'supervisor' | 'finance' | 'customer_service' | 'cylinder_inspection'>('all');
+
+  // إعدادات ظهور أيقونات ومحتويات المشرف، المالية، خدمة العملاء، وفحص الأسطوانات
+  const [supervisorVis, setSupervisorVis] = useState(() => {
+    try {
+      const saved = localStorage.getItem('cargas_supervisor_vis');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return {
+      showDailySalesSheet: true,
+      showCrewRoster: true,
+      showCylinderAlerts: true,
+      showPumpPressure: true,
+      showComplaintsLog: true,
+    };
+  });
+
+  const [financeVis, setFinanceVis] = useState(() => {
+    try {
+      const saved = localStorage.getItem('cargas_finance_vis');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return {
+      showEconomicFormula: true,
+      showRewardsCost: true,
+      showSalesBudgets: true,
+      showRoiReports: true,
+      showFleetBilling: true,
+    };
+  });
+
+  const [customerServiceVis, setCustomerServiceVis] = useState(() => {
+    try {
+      const saved = localStorage.getItem('cargas_customer_service_vis');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return {
+      showComplaintsInbox: true,
+      showProfileUpdateRequests: true,
+      showTechnicianRatings: true,
+      showLiveChat: true,
+    };
+  });
+
+  const [cylinderVis, setCylinderVis] = useState(() => {
+    try {
+      const saved = localStorage.getItem('cargas_cylinder_vis');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return {
+      showInspectionRecords: true,
+      showExpiryAlerts: true,
+      showCertificates: true,
+    };
+  });
 
   // Loyalty Model & Budget State
   const [loyaltyModel, setLoyaltyModel] = useState(config.loyaltyCostModel);
   const [salesRecords, setSalesRecords] = useState<StationSalesRecord[]>(getSalesRecords);
   const [rawSheetData, setRawSheetData] = useState<RawSalesSheetData | null>(getRawSalesSheet);
+
+  // استماع لحظي لقرارات وتعديلات الإدارة المالية لتكلفة النقطة
+  useEffect(() => {
+    const handleSync = (e: any) => {
+      if (e.detail?.costPerPointEgp) {
+        const newCost = Number(e.detail.costPerPointEgp);
+        setLoyaltyModel((prev) => ({
+          ...prev,
+          costPerPointEgp: newCost,
+          officialCostPerPoint: newCost,
+        }));
+        setOfficialCostPerPoint(newCost);
+        setCalcCostPerPoint(newCost);
+      }
+    };
+    window.addEventListener('cargas_financial_rate_updated' as any, handleSync);
+    return () => window.removeEventListener('cargas_financial_rate_updated' as any, handleSync);
+  }, []);
 
   // Promotions Studio Sub-Tabs State (ورشة العروض، حاسبة النقاط والمعيار الاقتصادي، بنك الهدايا والأفكار)
   const [promoSubTab, setPromoSubTab] = useState<'campaigns' | 'calculator' | 'rewards' | 'ideas'>('campaigns');
@@ -448,7 +895,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     config.loyaltyCostModel?.officialGasPrice ?? config.gasPricePerMeter ?? 13.0
   );
   const [officialCostPerPoint, setOfficialCostPerPoint] = useState<number>(
-    config.loyaltyCostModel?.officialCostPerPoint ?? config.loyaltyCostModel?.costPerPointEgp ?? 0.35
+    config.loyaltyCostModel?.officialCostPerPoint ?? config.loyaltyCostModel?.costPerPointEgp ?? 0.15
   );
   const [officialGasolineSavingsPerMeter, setOfficialGasolineSavingsPerMeter] = useState<number>(
     config.loyaltyCostModel?.officialGasolineSavingsPerMeter ?? 10.5
@@ -473,7 +920,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [calcFuelMeters, setCalcFuelMeters] = useState<number>(1200);
   const [calcMultiplier, setCalcMultiplier] = useState<number>(1.0);
   const [calcGasPrice, setCalcGasPrice] = useState<number>(config.loyaltyCostModel?.officialGasPrice ?? config.gasPricePerMeter ?? 13.0);
-  const [calcCostPerPoint, setCalcCostPerPoint] = useState<number>(config.loyaltyCostModel?.officialCostPerPoint ?? config.loyaltyCostModel?.costPerPointEgp ?? 0.35);
+  const [calcCostPerPoint, setCalcCostPerPoint] = useState<number>(config.loyaltyCostModel?.officialCostPerPoint ?? config.loyaltyCostModel?.costPerPointEgp ?? 0.15);
   const [calcGasolineSavingsPerMeter, setCalcGasolineSavingsPerMeter] = useState<number>(config.loyaltyCostModel?.officialGasolineSavingsPerMeter ?? 10.5);
   const [calcPresetType, setCalcPresetType] = useState<'taxi' | 'microbus' | 'centennial' | 'fleet' | 'station' | 'custom'>('taxi');
 
@@ -723,7 +1170,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
     setIsGeneratingAi(true);
     try {
-      const costPerPoint = config.loyaltyCostModel?.costPerPointEgp || 0.35;
+      const costPerPoint = config.loyaltyCostModel?.costPerPointEgp || 0.15;
       const drafted = await aiFormulateCampaignCopy({
         rawIdea: rawIdeaInput,
         category: campaignCategory,
@@ -838,7 +1285,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         category: aiRewardCategory,
         targetParticipantsCount: Number(aiRewardTargetDrivers) || 200,
         gasPricePerMeter: config.gasPricePerMeter,
-        costPerPointEgp: config.loyaltyCostModel?.costPerPointEgp || 0.35,
+        costPerPointEgp: config.loyaltyCostModel?.costPerPointEgp || 0.15,
       });
       setAiRewardAuditResult(res);
     } catch (err) {
@@ -851,10 +1298,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const handleAdoptAiReward = () => {
     if (!aiRewardAuditResult) return;
+    const shouldHideAudit = config.hideAiAuditFromCustomers !== false;
+    const customerDesc =
+      aiRewardAuditResult.marketingDescription ||
+      `استبدل ${aiRewardAuditResult.pointsCost} نقطة ولاء مجمعة في كارتك الذهبي واحصل فوراً على ${aiRewardAuditResult.marketingTitle} بقيمة ${aiRewardAuditResult.verifiedFairPriceEgp} جنيه صالحة لدى كارجاس والشركاء المعتمدين.`;
+
     const item: RewardItem = {
       id: 'REW-' + Date.now(),
       title: aiRewardAuditResult.marketingTitle,
-      description: aiRewardAuditResult.aiAuditNotes,
+      description: shouldHideAudit ? customerDesc : aiRewardAuditResult.aiAuditNotes,
+      marketingDescription: customerDesc,
       pointsCost: aiRewardAuditResult.pointsCost,
       valueText: `${aiRewardAuditResult.verifiedFairPriceEgp} ج (${aiRewardAuditResult.freeMetersEquivalent} م³ غاز)`,
       category: aiRewardCategory,
@@ -867,7 +1320,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const updated = [item, ...rewards];
     onUpdateRewards(updated);
     saveRewards(updated);
-    alert(`✅ تم اعتماد وإضافة "${item.title}" (${item.pointsCost} نقطة) لبنك مكافآت السائقين بنجاح!`);
+    alert(
+      `✅ تم اعتماد وإضافة "${item.title}" (${item.pointsCost} نقطة) لبنك مكافآت السائقين بنجاح! ${
+        shouldHideAudit ? '(التحليل الاستشاري الداخلي لمُعِين محفوظ للإدارة ومخفي عن العميل)' : ''
+      }`
+    );
     setAiRewardAuditResult(null);
     setAiRewardGiftName('');
   };
@@ -1380,7 +1837,29 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     onUpdateConfig(updatedConfig);
     saveAppConfig(updatedConfig);
-    alert('✅ تم حفظ وتحديث كافة إعدادات المنظومة وكلمات السر وإعدادات الخصوصية بنجاح!');
+    saveDriverQuickIconsVisibility(quickIconsVis);
+
+    try {
+      localStorage.setItem('cargas_supervisor_vis', JSON.stringify(supervisorVis));
+      localStorage.setItem('cargas_finance_vis', JSON.stringify(financeVis));
+      localStorage.setItem('cargas_customer_service_vis', JSON.stringify(customerServiceVis));
+      localStorage.setItem('cargas_cylinder_vis', JSON.stringify(cylinderVis));
+    } catch {
+      // ignore
+    }
+
+    // التعميم الشامل وتثبيت كافة الإعدادات والأسعار والباسوردات والنصوص في ملفات كود المشروع
+    syncCurrentStateToCodebase({
+      navStations,
+      stationLocations: stations,
+      config: updatedConfig,
+      rewards,
+      crew: stationCrew,
+      mapFilters: getMapFacilityFilters(),
+      logoUrl: getMasterStationMapLogo() || editStationLogoUrl || updatedConfig.stationLogoUrl,
+    }).catch((err) => console.warn('Background codebase sync notice:', err));
+
+    alert('✅ تم حفظ وتحديث كافة إعدادات المنظومة وتثبيتها في كود المشروع وكلمات السر بنجاح!');
   };
 
   const handlePrintCard = (item: { title: string; qrUrl: string; sub: string }) => {
@@ -1388,6 +1867,78 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setTimeout(() => {
       window.print();
     }, 150);
+  };
+
+  // Export all current settings for GitHub & Vercel
+  const handleExportProductionConfig = () => {
+    const fullBundle = {
+      version: '2026.11-enterprise',
+      exportedAt: new Date().toISOString(),
+      config: config,
+      stations: stations,
+      campaigns: campaigns,
+      masterLogoUrl: getMasterStationMapLogo(),
+      rewards: rewards,
+      crew: stationCrew,
+    };
+    const jsonStr = JSON.stringify(fullBundle, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cargas-production-settings-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Import Production Config file (works on Vercel or any new deployment)
+  const handleImportProductionConfig = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string);
+        if (parsed.config) {
+          saveAppConfig(parsed.config);
+          onUpdateConfig(parsed.config);
+        }
+        if (parsed.stations && Array.isArray(parsed.stations)) {
+          saveStationLocations(parsed.stations);
+          onUpdateStations(parsed.stations);
+        }
+        if (parsed.masterLogoUrl) {
+          setMasterStationMapLogo(parsed.masterLogoUrl);
+        }
+        alert('✅ تم بنجاح استيراد وتطبيق كافة إعدادات ومحطات ولوجو كارجاس بنجاح بنسبة 100%!');
+      } catch (err) {
+        alert('فشل قراءة ملف التهيئة. يرجى التأكد من اختيار ملف JSON صحيح.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // Force Apply and Sync Official Cargas Logo
+  const handleForceApplyCargasOfficialLogo = () => {
+    setMasterStationMapLogo('/cargas-logo.svg');
+    const baseWasalny = config.wasalnyConfig || DEFAULT_WASALNY_CONFIG;
+    const updated: AppConfig = {
+      ...config,
+      appLogoUrl: '/cargas-logo.svg',
+      customAppLogoUrl: '/cargas-logo.svg',
+      stationLogoUrl: '/cargas-logo.svg',
+      wasalnyConfig: {
+        ...baseWasalny,
+        enabled: baseWasalny.enabled ?? true,
+        wasalnyLogoUrl: '/cargas-logo.svg',
+        stationUnifiedLogoUrl: '/cargas-logo.svg',
+      },
+    };
+    saveAppConfig(updated);
+    onUpdateConfig(updated);
+    alert('✅ تم تثبيت ومزامنة لوجو كارجاس الرسمي (/cargas-logo.svg) في كافة أرجاء النظام والخريطة والهيدر بنجاح!');
   };
 
   return (
@@ -1435,6 +1986,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
         <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-300">
           <button
+            type="button"
+            onClick={handleSyncAllToCodebase}
+            disabled={isSyncingCodebase}
+            className="flex items-center gap-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black px-4 py-2 rounded-xl transition shadow-lg border border-indigo-300 active:scale-95 cursor-pointer"
+            title="تثبيت واعتماد كافة المحطات (300 محطة) واللوجو وتوزيع الأيقونات والإعدادات الحالية في ملفات كود المشروع الأساسية لتظل ثابتة عند الرفع على GitHub و Vercel"
+          >
+            <Save className={`w-4 h-4 ${isSyncingCodebase ? 'animate-spin' : ''}`} />
+            <span>{isSyncingCodebase ? 'جاري تثبيت التعديلات بالكود...' : '💾 اعتماد وتثبيت التعديلات في كود المشروع (GitHub & Vercel)'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsKmzMapAdminModalOpen(true)}
+            className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black px-4 py-2 rounded-xl transition shadow-lg border border-emerald-300 active:scale-95 cursor-pointer"
+            title="فتح لوحة تحكم مدير النظام الشاملة لإدارة محطات الغاز الطبيعي وملفات KMZ وواجهة المستخدم"
+          >
+            <Compass className="w-4 h-4 text-slate-950 animate-spin" style={{ animationDuration: '8s' }} />
+            <span>لوحة تحكم الخرائط وKMZ المتقدمة 🗺️</span>
+          </button>
+          <button
             onClick={() => setActiveTab('rollback')}
             className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-xl transition shadow-xs"
           >
@@ -1447,9 +2017,71 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         </div>
       </div>
 
+      {/* Codebase Sync Notification Banner */}
+      {codebaseSyncResult && (
+        <div className={`p-4 rounded-2xl border transition animate-in slide-in-from-top-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+          codebaseSyncResult.success
+            ? 'bg-gradient-to-r from-emerald-950/90 via-slate-900 to-teal-950/90 border-emerald-500 text-emerald-200'
+            : 'bg-rose-950/90 border-rose-600 text-rose-200'
+        }`}>
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">{codebaseSyncResult.success ? '🎉' : '⚠️'}</span>
+            <div>
+              <div className="font-black text-sm text-white">
+                {codebaseSyncResult.message}
+              </div>
+              <div className="text-xs opacity-90 mt-0.5">
+                {codebaseSyncResult.success ? (
+                  <>
+                    تم تحديث ملفات: <code className="bg-slate-800 px-1.5 py-0.5 rounded text-emerald-300 font-mono">src/navigation/data/initialStations.ts</code> و <code className="bg-slate-800 px-1.5 py-0.5 rounded text-emerald-300 font-mono">src/services/customInitialData.ts</code> • عدد المحطات المثبتة: <b className="text-white font-bold">{codebaseSyncResult.stationCount ?? navStations.length}</b> • جاهز للـ Git Push و Vercel!
+                  </>
+                ) : (
+                  'يرجى مراجعة الخادم والتأكد من إمكانية الكتابة'
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => downloadSystemDataBackup({
+                navStations,
+                stationLocations: stations,
+                config,
+                logoUrl: getMasterStationMapLogo(),
+              })}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold border border-slate-600 flex items-center gap-1.5 cursor-pointer shadow-sm"
+              title="تحميل نسخة احتياطية من البيانات الثابتة JSON"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              <span>تحميل نسخة JSON احتياطية</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCodebaseSyncResult(null)}
+              className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Admin Tabs */}
       <div className="bg-white rounded-3xl shadow-xs border border-slate-200 overflow-hidden no-print">
         <div className="flex border-b border-slate-200 bg-slate-50 p-2 gap-2 overflow-x-auto no-scrollbar">
+          <button
+            onClick={() => setActiveTab('stations_map')}
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition whitespace-nowrap ${
+              activeTab === 'stations_map'
+                ? 'bg-gradient-to-r from-emerald-600 via-teal-700 to-emerald-800 text-white shadow-md font-black ring-2 ring-emerald-400'
+                : 'text-emerald-900 hover:text-emerald-950 bg-emerald-100/90 border border-emerald-300 font-bold'
+            }`}
+          >
+            <MapPin className="w-4 h-4 text-emerald-600" />
+            <span>خريطة المحطات وملفات KMZ (300 محطة) 🗺️</span>
+          </button>
+
           <button
             onClick={() => setActiveTab('refueling_ops')}
             className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition whitespace-nowrap ${
@@ -1511,11 +2143,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           <button
             onClick={() => setActiveTab('visibility')}
             className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition whitespace-nowrap ${
-              activeTab === 'visibility' ? 'bg-white text-purple-700 shadow-sm border border-slate-200' : 'text-slate-600'
+              activeTab === 'visibility' ? 'bg-white text-purple-700 shadow-sm border-2 border-purple-400' : 'text-slate-600'
             }`}
           >
             <Sliders className="w-4 h-4 text-purple-600" />
-            <span>التحكم في إظهار وإخفاء عناصر العميل والفني</span>
+            <span>التحكم فى ايقونات الصفحات (عميل - فني - مشرف - مالية وهكذا باقي الادارات) 🎛️</span>
           </button>
 
           <button
@@ -1548,6 +2180,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           >
             <MessageSquare className="w-4 h-4 text-teal-600" />
             <span>الشكاوى وتقييم الفنيين ({complaints.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('customer_requests')}
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black transition whitespace-nowrap ${
+              activeTab === 'customer_requests'
+                ? 'bg-gradient-to-r from-emerald-600 via-teal-700 to-emerald-800 text-white shadow-md font-black ring-2 ring-emerald-400'
+                : 'text-emerald-900 bg-emerald-50/80 border border-emerald-300 font-bold'
+            }`}
+          >
+            <Edit3 className="w-4 h-4 text-emerald-600" />
+            <span>طلبات تعديل بيانات العملاء</span>
+            {pendingRequestsCount > 0 ? (
+              <span className="bg-amber-400 text-slate-950 px-2 py-0.5 rounded-full text-[10px] font-black animate-pulse">
+                {pendingRequestsCount} جديد
+              </span>
+            ) : (
+              <span className="text-[10px] opacity-75 font-mono">({customerRequests.length})</span>
+            )}
           </button>
 
           <button
@@ -1607,6 +2258,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             <DynamicLayoutManager
               config={config}
               onUpdateConfig={onUpdateConfig}
+              onOpenDriverPreview={() => setIsDriverPreviewOpen(true)}
             />
           </div>
         )}
@@ -1614,6 +2266,37 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         {/* Tab: Stations Map & KMZ/Excel Coordinates Upload */}
         {activeTab === 'stations_map' && (
           <div className="p-6 space-y-6">
+            {/* HERO CARD: Direct Launcher for KMZ/Map Admin Panel (As in Developer Mohammed Abdelrahman Yousef Screenshot) */}
+            <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 border-2 border-emerald-500 rounded-3xl p-5 sm:p-6 shadow-2xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5">
+              <div className="space-y-2 text-right">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xl border border-emerald-400/40">
+                    🗺️
+                  </span>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                      <span>لوحة تحكم مدير النظام الشاملة | إدارة شبكة محطات كارجاس</span>
+                    </h3>
+                    <p className="text-xs text-emerald-300 font-bold">
+                      إدارة محطات الغاز الطبيعي وملفات KMZ وواجهة المستخدم (إدارة 300 محطة ومركز)
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
+                  تعديل أسماء ومواقع المحطات، تخصيص الأنشطة (⛽ غاز، 🛠️ تحويل، 🛢️ زيوت، 🔍 فحص أسطوانات)، ورفع ملفات KMZ و KML وإكسيل، مع حفظ فوري ومزدوج في التخزين الدائم بدون فقد البيانات عند التحديث أو الخروج.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsKmzMapAdminModalOpen(true)}
+                className="bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black px-6 py-3.5 rounded-2xl shadow-xl flex items-center gap-2 text-sm shrink-0 cursor-pointer active:scale-95 transition"
+              >
+                <Compass className="w-5 h-5 text-slate-950 animate-spin" style={{ animationDuration: '6s' }} />
+                <span>فتح لوحة إدارة محطات KMZ والأنشطة (300 محطة) 🚀</span>
+              </button>
+            </div>
+
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
               <div>
                 <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
@@ -2336,17 +3019,77 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
         )}
 
-        {/* Tab: Visibility Matrix Control (Show/Hide in Driver & Tech pages) */}
+        {/* Tab: Visibility Matrix Control (التحكم فى ايقونات الصفحات لجميع الإدارات) */}
         {activeTab === 'visibility' && (
           <div className="p-6 space-y-6">
-            <div className="border-b border-slate-200 pb-3">
-              <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                <Sliders className="w-5 h-5 text-purple-600" />
-                التحكم الشامل في ظهور وإخفاء محتويات صفحتي العميل والفني
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                يمكنك إخفاء أو إظهار أي عنصر في صفحات المستخدمين بنقرة زر (مثال: إخفاء أيقونة تعديل بيانات السيارة)
-              </p>
+            {/* Header */}
+            <div className="border-b border-slate-200 pb-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                  <Sliders className="w-5 h-5 text-purple-600" />
+                  <span>التحكم فى ايقونات الصفحات (عميل - فني - مشرف - مالية وهكذا باقي الادارات) 🎛️</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  لوحة التحكم الحصرية لمدير النظام لتحديد الأيقونات والمحتويات والخدمات المتاحة لكل إدارة، وبصمت تام عن العميل بدون أي تكرار.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSaveAllSettings()}
+                  className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-xl text-xs transition shadow-sm flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>حفظ التعديلات فوراً 💾</span>
+                </button>
+              </div>
+            </div>
+
+            {/* بطاقة التحكم الحصري والبارز في كارت الولاء الذهبي لصفحة العميل */}
+            <div className="bg-gradient-to-r from-amber-500/15 via-amber-400/20 to-amber-600/15 border-2 border-amber-400/80 p-5 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="flex items-start sm:items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-amber-600 text-slate-950 flex items-center justify-center font-black text-2xl shadow-md shrink-0">
+                  💳
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="font-black text-sm text-slate-900">
+                      التحكم السريع في ظهور كارت الولاء الذهبي بصفحة العميل:
+                    </h4>
+                    <span className={`text-[11px] font-black px-2.5 py-0.5 rounded-full border ${
+                      !quickIconsVis.golden_card
+                        ? 'bg-rose-100 text-rose-800 border-rose-300'
+                        : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                    }`}>
+                      {!quickIconsVis.golden_card ? '● مخفي حالياً تماماً عن العميل 🔒' : '● معروض حالياً في صفحة العميل 👁️'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    خاصية إدارية بحتة: إخفاء أو إظهار كارت الولاء الذهبي ورصيد النقاط وبنك الهدايا فوراً وبشكل صامت بدون أي إشعار أو تنبيه للعميل (لا تذكر أي عبارات تخصيص أو إخفاء في صفحة العميل مطلقاً).
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleAdminToggleQuickIcon('golden_card')}
+                className={`px-5 py-3 rounded-2xl font-black text-xs transition cursor-pointer flex items-center gap-2 shadow-md shrink-0 active:scale-95 ${
+                  !quickIconsVis.golden_card
+                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 border border-amber-400'
+                    : 'bg-rose-600 hover:bg-rose-700 text-white border border-rose-500'
+                }`}
+              >
+                {!quickIconsVis.golden_card ? (
+                  <>
+                    <span>إظهار كارت الولاء الذهبي في صفحة العميل 👁️</span>
+                  </>
+                ) : (
+                  <>
+                    <span>إخفاء كارت الولاء الذهبي من صفحة العميل 🔒</span>
+                  </>
+                )}
+              </button>
             </div>
 
             {/* Master Stage Mode Controller (التحكم الحصري لمدير النظام في مراحل إطلاق التطبيق للعملاء) */}
@@ -2459,211 +3202,673 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Driver Portal Controls */}
-              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3 text-xs">
-                <h4 className="font-black text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-200">
-                  <span>🚗 محتويات صفحة العميل (السائق):</span>
-                </h4>
+            {/* شريط تصفية الأقسام حسب الإدارة (عميل - فني - مشرف - مالية وهكذا باقي الادارات) */}
+            <div className="bg-slate-100 p-2 rounded-2xl flex flex-wrap items-center gap-1.5 border border-slate-200">
+              <span className="text-xs font-black text-slate-600 px-3 py-1 flex items-center gap-1 shrink-0">
+                <Sliders className="w-3.5 h-3.5 text-purple-600" />
+                <span>اختر الإدارة:</span>
+              </span>
 
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">أيقونة تعديل بيانات السيارة والملف</span>
-                    <span className="text-[10px] text-slate-500">مطلوب افتراضياً إخفاؤها لمنع تعديل السائق لبياناته</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showEditProfile}
-                    onChange={(e) => setDriverVis({ ...driverVis, showEditProfile: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">خريطة وأيقونة أقرب محطة كارجاس</span>
-                    <span className="text-[10px] text-slate-500">إظهار الخريطة ومحدد أقرب محطة وتوجيه GPS</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showNearestStationMap}
-                    onChange={(e) => setDriverVis({ ...driverVis, showNearestStationMap: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">كارت الولاء الذهبي والرصيد</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showGoldenCard}
-                    onChange={(e) => setDriverVis({ ...driverVis, showGoldenCard: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">بنك الهدايا واستبدال النقاط</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showRewardsBank}
-                    onChange={(e) => setDriverVis({ ...driverVis, showRewardsBank: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">جدول الصيانة الدورية الذكي</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showMaintenanceSchedule}
-                    onChange={(e) => setDriverVis({ ...driverVis, showMaintenanceSchedule: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">سجل التموينات السابقة</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showFuelingHistory}
-                    onChange={(e) => setDriverVis({ ...driverVis, showFuelingHistory: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">تقييم الخدمة ومعاملة الفني وقسم الشكاوى</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showServiceRating}
-                    onChange={(e) => setDriverVis({ ...driverVis, showServiceRating: e.target.checked, showComplaintsBox: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">رقم مرات التموين من المحطة ومن الطلمبة</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showFuelingCountStats}
-                    onChange={(e) => setDriverVis({ ...driverVis, showFuelingCountStats: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">بانر العروض والمسابقات وشرح برنامج الولاء للعملاء</span>
-                    <span className="text-[10px] text-slate-500">إظهار البانر التفاعلي أعلى شاشة السائق بالعروض المصاغة بالذكاء الاصطناعي</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={driverVis.showPromotionalBanner}
-                    onChange={(e) => setDriverVis({ ...driverVis, showPromotionalBanner: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-              </div>
-
-              {/* Technician Portal Controls */}
-              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3 text-xs">
-                <h4 className="font-black text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-200">
-                  <span>👷‍♂️ محتويات صفحة فني التموين (الوردية):</span>
-                </h4>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">كاميرا مسح باركود السيارات المباشرة</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={techVis.showCameraScanner}
-                    onChange={(e) => setTechVis({ ...techVis, showCameraScanner: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">حقل الإدخال اليدوي لرقم اللوحة</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={techVis.showManualEntry}
-                    onChange={(e) => setTechVis({ ...techVis, showManualEntry: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">نظام حوافز ومكافآت ونقاط الفني</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={techVis.showTechnicianIncentives}
-                    onChange={(e) => setTechVis({ ...techVis, showTechnicianIncentives: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">رادار فحص نطاق الـ 10 أمتار للـ GPS</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={techVis.showGpsRadar}
-                    onChange={(e) => setTechVis({ ...techVis, showGpsRadar: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">إحصائيات إنجاز الوردية وإجمالي المبيعات</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={techVis.showShiftStats}
-                    onChange={(e) => setTechVis({ ...techVis, showShiftStats: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-
-                <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
-                  <div>
-                    <span className="font-bold text-slate-900 block">رقم مرات التموين من المحطة ومن الطلمبة</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={techVis.showFuelingCountStats}
-                    onChange={(e) => setTechVis({ ...techVis, showFuelingCountStats: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                </label>
-              </div>
+              {[
+                { id: 'all' as const, label: 'كافة الإدارات والصفحات 📑' },
+                { id: 'driver' as const, label: 'عميل (السائق) 🚗' },
+                { id: 'technician' as const, label: 'فني التموين 👷‍♂️' },
+                { id: 'supervisor' as const, label: 'مشرف المحطة ⛽' },
+                { id: 'finance' as const, label: 'الإدارة المالية 💰' },
+                { id: 'customer_service' as const, label: 'خدمة العملاء والشكاوى 🎧' },
+                { id: 'cylinder_inspection' as const, label: 'فحص الأسطوانات 🔍' },
+              ].map((dept) => (
+                <button
+                  key={dept.id}
+                  type="button"
+                  onClick={() => setVisDeptFilter(dept.id)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    visDeptFilter === dept.id
+                      ? 'bg-purple-600 text-white shadow-sm font-black'
+                      : 'bg-white/80 hover:bg-white text-slate-700 hover:text-slate-900 border border-slate-200'
+                  }`}
+                >
+                  {dept.label}
+                </button>
+              ))}
             </div>
 
-            <button
-              onClick={() => handleSaveAllSettings()}
-              className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-2xl text-xs transition shadow-md"
-            >
-              حفظ مصفوفة الظهور والإخفاء فوراً 💾
-            </button>
+            {/* قسم إدارة العميل (السائق) 🚗 */}
+            {(visDeptFilter === 'all' || visDeptFilter === 'driver') && (
+              <div className="space-y-4 bg-emerald-50/40 p-5 rounded-3xl border-2 border-emerald-200/80">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-emerald-200">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-lg font-bold shadow-xs">
+                      🚗
+                    </div>
+                    <div>
+                      <h4 className="font-black text-slate-900 text-sm">
+                        إدارة صفحة العميل (السائق): التحكم في الأيقونات والمحتويات
+                      </h4>
+                      <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                        التحكم الحصري لمدير النظام فيما يظهر داخل بطاقة الترحيب البيضاء وأقسام الصفحة بدون أي تكرار
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleAdminToggleQuickIcon('golden_card')}
+                      className={`px-3.5 py-1.5 rounded-xl font-black text-xs transition cursor-pointer flex items-center gap-1.5 shadow-2xs ${
+                        !quickIconsVis.golden_card
+                          ? 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                          : 'bg-rose-500 hover:bg-rose-600 text-white'
+                      }`}
+                    >
+                      {!quickIconsVis.golden_card ? 'إظهار كارت الولاء الذهبي 👁️' : 'إخفاء كارت الولاء الذهبي 🔒'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* شبكة أيقونات الخدمات السريعة الـ 10 */}
+                <div className="space-y-2.5">
+                  <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
+                    <LayoutGrid className="w-4 h-4 text-emerald-600" />
+                    <span>أيقونات بطاقة الترحيب البيضاء (10 خدمات سريعة بدون تكرار):</span>
+                  </span>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5">
+                    {[
+                      { key: 'qr_code' as const, label: 'كود التموين QR 📱', desc: 'كود الـ QR للتموين السريع لمسحه بجهاز الفني' },
+                      { key: 'navigation' as const, label: 'طريقنا واحد 🧭 (الملاحة لأقرب محطة)', desc: 'الملاحة الفورية المباشرة لأقرب محطة كارجاس لموقعك عبر خرائط جوجل' },
+                      { key: 'golden_card' as const, label: 'كارت الولاء الذهبي 💳', desc: 'بطاقة الولاء ورصيد النقاط والخصومات' },
+                      { key: 'rewards' as const, label: 'استبدال النقاط 🎁', desc: 'بنك الهدايا والمكافآت التراكمية' },
+                      { key: 'maintenance' as const, label: 'جدول الصيانة 🔧', desc: 'جدول الصيانة وفحص الأسطوانة' },
+                      { key: 'history' as const, label: 'سجل التموينات 📋', desc: 'سجل التموينات السابقة وقيم الوفر' },
+                      { key: 'rating' as const, label: 'تقييم الفني ⭐', desc: 'تقييم الخدمة ومعاملة الفني بالمحطة' },
+                      { key: 'complaints' as const, label: 'خدمة العملاء 19058 📨', desc: 'صندوق الشكاوى والمقترحات والخط الساخن' },
+                      { key: 'chat' as const, label: 'شات الدعم 💬', desc: 'مراسلة خدمة العملاء الفورية المباشرة' },
+                      { key: 'update_profile' as const, label: 'طلب تعديل بياناتي ✏️', desc: 'إرسال طلب رسمي لتعديل بيانات السيارة أو السائق' },
+                    ].map((item) => (
+                      <label
+                        key={item.key}
+                        className={`flex flex-col justify-between p-3 rounded-2xl border-2 transition cursor-pointer select-none ${
+                          quickIconsVis[item.key]
+                            ? 'bg-white border-emerald-400 shadow-xs'
+                            : 'bg-slate-100/80 border-dashed border-slate-300 opacity-60'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="font-bold text-slate-900 text-xs">{item.label}</span>
+                          <input
+                            type="checkbox"
+                            checked={quickIconsVis[item.key]}
+                            onChange={() => handleAdminToggleQuickIcon(item.key)}
+                            className="w-4 h-4 text-emerald-600 rounded cursor-pointer"
+                          />
+                        </div>
+                        <p className="text-[10px] text-slate-500 leading-tight mb-2">{item.desc}</p>
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-md self-start ${
+                          quickIconsVis[item.key] ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                        }`}>
+                          {quickIconsVis[item.key] ? 'ظاهر الآن ✓' : 'مخفي حالياً ✖'}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* أقسام ومساحات صفحة العميل الأخرى */}
+                <div className="space-y-2.5 pt-3 border-t border-emerald-200">
+                  <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                    <Sliders className="w-4 h-4 text-emerald-600" />
+                    <span>مساحات وأقسام صفحة العميل الإضافية:</span>
+                  </span>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                    <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                      <div>
+                        <span className="font-bold text-slate-900 block">أيقونة تعديل بيانات السيارة والملف</span>
+                        <span className="text-[10px] text-slate-500">مطلوب افتراضياً إخفاؤها لمنع تعديل السائق لبياناته</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={driverVis.showEditProfile}
+                        onChange={(e) => setDriverVis({ ...driverVis, showEditProfile: e.target.checked })}
+                        className="w-5 h-5 text-purple-600 rounded"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                      <div>
+                        <span className="font-bold text-slate-900 block">خريطة وأيقونة أقرب محطة كارجاس</span>
+                        <span className="text-[10px] text-slate-500">إظهار الخريطة ومحدد أقرب محطة وتوجيه GPS</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={driverVis.showNearestStationMap}
+                        onChange={(e) => setDriverVis({ ...driverVis, showNearestStationMap: e.target.checked })}
+                        className="w-5 h-5 text-purple-600 rounded"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                      <div>
+                        <span className="font-bold text-slate-900 block">كارت الولاء الذهبي والرصيد</span>
+                        <span className="text-[10px] text-slate-500">مساحة الكارت الذهبي الرئيسية</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={driverVis.showGoldenCard}
+                        onChange={(e) => {
+                          const val = e.target.checked;
+                          setDriverVis({ ...driverVis, showGoldenCard: val });
+                          if (quickIconsVis.golden_card !== val) {
+                            handleAdminToggleQuickIcon('golden_card');
+                          }
+                        }}
+                        className="w-5 h-5 text-purple-600 rounded"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                      <div>
+                        <span className="font-bold text-slate-900 block">بنك الهدايا واستبدال النقاط</span>
+                        <span className="text-[10px] text-slate-500">عرض كتالوج المكافآت والجوائز</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={driverVis.showRewardsBank}
+                        onChange={(e) => setDriverVis({ ...driverVis, showRewardsBank: e.target.checked })}
+                        className="w-5 h-5 text-purple-600 rounded"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                      <div>
+                        <span className="font-bold text-slate-900 block">جدول الصيانة الدورية الذكي</span>
+                        <span className="text-[10px] text-slate-500">مواعيد الصيانة وفحص الأسطوانة</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={driverVis.showMaintenanceSchedule}
+                        onChange={(e) => setDriverVis({ ...driverVis, showMaintenanceSchedule: e.target.checked })}
+                        className="w-5 h-5 text-purple-600 rounded"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                      <div>
+                        <span className="font-bold text-slate-900 block">سجل التموينات السابقة</span>
+                        <span className="text-[10px] text-slate-500">عرض تاريخ التموين والوفر المالي</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={driverVis.showFuelingHistory}
+                        onChange={(e) => setDriverVis({ ...driverVis, showFuelingHistory: e.target.checked })}
+                        className="w-5 h-5 text-purple-600 rounded"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                      <div>
+                        <span className="font-bold text-slate-900 block">تقييم الخدمة ومعاملة الفني وقسم الشكاوى</span>
+                        <span className="text-[10px] text-slate-500">صندوق الشكاوى وتقييم الفني</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={driverVis.showServiceRating}
+                        onChange={(e) => setDriverVis({ ...driverVis, showServiceRating: e.target.checked, showComplaintsBox: e.target.checked })}
+                        className="w-5 h-5 text-purple-600 rounded"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                      <div>
+                        <span className="font-bold text-slate-900 block">رقم مرات التموين من المحطة ومن الطلمبة</span>
+                        <span className="text-[10px] text-slate-500">إحصائية عدد مرات التموين التراكمية</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={driverVis.showFuelingCountStats}
+                        onChange={(e) => setDriverVis({ ...driverVis, showFuelingCountStats: e.target.checked })}
+                        className="w-5 h-5 text-purple-600 rounded"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                      <div>
+                        <span className="font-bold text-slate-900 block">بانر العروض والمسابقات للعملاء</span>
+                        <span className="text-[10px] text-slate-500">إظهار البانر التفاعلي أعلى الشاشة</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={driverVis.showPromotionalBanner}
+                        onChange={(e) => setDriverVis({ ...driverVis, showPromotionalBanner: e.target.checked })}
+                        className="w-5 h-5 text-purple-600 rounded"
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* قسم إدارة فني التموين (الوردية) 👷‍♂️ */}
+            {(visDeptFilter === 'all' || visDeptFilter === 'technician') && (
+              <div className="space-y-4 bg-blue-50/40 p-5 rounded-3xl border-2 border-blue-200/80 text-xs">
+                <div className="flex items-center gap-2.5 pb-3 border-b border-blue-200">
+                  <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center text-lg font-bold shadow-xs">
+                    👷‍♂️
+                  </div>
+                  <div>
+                    <h4 className="font-black text-slate-900 text-sm">
+                      إدارة صفحة فني التموين (الوردية): التحكم في الأيقونات والمحتويات
+                    </h4>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      تحديد أدوات المسح، إدخال اللوحات، حوافز الفني، ورادار التموين
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">كاميرا مسح باركود السيارات المباشرة</span>
+                      <span className="text-[10px] text-slate-500">مسح كود الـ QR الخاص بالسيارة عبر الكاميرا</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={techVis.showCameraScanner}
+                      onChange={(e) => setTechVis({ ...techVis, showCameraScanner: e.target.checked })}
+                      className="w-5 h-5 text-blue-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">حقل الإدخال اليدوي لرقم اللوحة</span>
+                      <span className="text-[10px] text-slate-500">إدخال رقم لوحة السيارة يدوياً للبحث الفوري</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={techVis.showManualEntry}
+                      onChange={(e) => setTechVis({ ...techVis, showManualEntry: e.target.checked })}
+                      className="w-5 h-5 text-blue-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">نظام حوافز ومكافآت ونقاط الفني</span>
+                      <span className="text-[10px] text-slate-500">عرض رصيد عمولات وحوافز الفني في الوردية</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={techVis.showTechnicianIncentives}
+                      onChange={(e) => setTechVis({ ...techVis, showTechnicianIncentives: e.target.checked })}
+                      className="w-5 h-5 text-blue-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">رادار فحص نطاق الـ 10 أمتار للـ GPS</span>
+                      <span className="text-[10px] text-slate-500">التأكد التلقائي من تواجد السيارة بجوار الطلمبة</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={techVis.showGpsRadar}
+                      onChange={(e) => setTechVis({ ...techVis, showGpsRadar: e.target.checked })}
+                      className="w-5 h-5 text-blue-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">إحصائيات إنجاز الوردية وإجمالي المبيعات</span>
+                      <span className="text-[10px] text-slate-500">عرض عدد التموينات والأمتار المكعبة بالوردية</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={techVis.showShiftStats}
+                      onChange={(e) => setTechVis({ ...techVis, showShiftStats: e.target.checked })}
+                      className="w-5 h-5 text-blue-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">رقم مرات التموين من المحطة ومن الطلمبة</span>
+                      <span className="text-[10px] text-slate-500">إحصائية عدد مرات التموين من الطلمبة الحالية</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={techVis.showFuelingCountStats}
+                      onChange={(e) => setTechVis({ ...techVis, showFuelingCountStats: e.target.checked })}
+                      className="w-5 h-5 text-blue-600 rounded"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* قسم إدارة مشرف المحطة ⛽ */}
+            {(visDeptFilter === 'all' || visDeptFilter === 'supervisor') && (
+              <div className="space-y-4 bg-amber-50/40 p-5 rounded-3xl border-2 border-amber-200/80 text-xs">
+                <div className="flex items-center gap-2.5 pb-3 border-b border-amber-200">
+                  <div className="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center text-lg font-bold shadow-xs">
+                    ⛽
+                  </div>
+                  <div>
+                    <h4 className="font-black text-slate-900 text-sm">
+                      إدارة صفحة مشرف المحطة: التحكم في الأيقونات والمحتويات
+                    </h4>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      تحديد صلاحيات عرض شيت المبيعات، توزيع الطواقم، تنبيهات الأسطوانات، ومراقبة الطلمبات
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">شيت المبيعات اليومي ومطابقة العدادات</span>
+                      <span className="text-[10px] text-slate-500">عرض وتعديل الشيت الرقمي اليومي لمبيعات الغاز</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={supervisorVis.showDailySalesSheet}
+                      onChange={(e) => setSupervisorVis({ ...supervisorVis, showDailySalesSheet: e.target.checked })}
+                      className="w-5 h-5 text-amber-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">إدارة طاقم الفنيين وتوزيع الورديات</span>
+                      <span className="text-[10px] text-slate-500">تعيين الفنيين على الطلمبات وإدارة الحضور والانصراف</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={supervisorVis.showCrewRoster}
+                      onChange={(e) => setSupervisorVis({ ...supervisorVis, showCrewRoster: e.target.checked })}
+                      className="w-5 h-5 text-amber-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">تنبيهات فحص الأسطوانات ورخص السيارات</span>
+                      <span className="text-[10px] text-slate-500">إشعار فوري للسيارات ذات الأسطوانات منتهية الصلاحية</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={supervisorVis.showCylinderAlerts}
+                      onChange={(e) => setSupervisorVis({ ...supervisorVis, showCylinderAlerts: e.target.checked })}
+                      className="w-5 h-5 text-amber-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">مؤشرات ضغوط الغاز الحية وخزانات المحطة</span>
+                      <span className="text-[10px] text-slate-500">مراقبة ضغوط خط الغاز الطبيعي وخزانات الضغط</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={supervisorVis.showPumpPressure}
+                      onChange={(e) => setSupervisorVis({ ...supervisorVis, showPumpPressure: e.target.checked })}
+                      className="w-5 h-5 text-amber-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">سجل الشكاوى الفورية بالمحطة</span>
+                      <span className="text-[10px] text-slate-500">متابعة شكاوى واستفسارات السائقين في نفس اللحظة</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={supervisorVis.showComplaintsLog}
+                      onChange={(e) => setSupervisorVis({ ...supervisorVis, showComplaintsLog: e.target.checked })}
+                      className="w-5 h-5 text-amber-600 rounded"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* قسم إدارة المالية 💰 */}
+            {(visDeptFilter === 'all' || visDeptFilter === 'finance') && (
+              <div className="space-y-4 bg-teal-50/40 p-5 rounded-3xl border-2 border-teal-200/80 text-xs">
+                <div className="flex items-center gap-2.5 pb-3 border-b border-teal-200">
+                  <div className="w-9 h-9 rounded-xl bg-teal-600 text-white flex items-center justify-center text-lg font-bold shadow-xs">
+                    💰
+                  </div>
+                  <div>
+                    <h4 className="font-black text-slate-900 text-sm">
+                      إدارة صفحة الإدارة المالية: التحكم في الأيقونات والمحتويات
+                    </h4>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      تحديد مخصصات خصومات الغاز، تكلفة بنك الهدايا، ميزانيات المحطات، ومؤشرات الـ ROI
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">حاسبة المعادلة الاقتصادية ومخصص الخصومات</span>
+                      <span className="text-[10px] text-slate-500">حساب نسبة الخصم المئوية والوفر المالي المحقق</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={financeVis.showEconomicFormula}
+                      onChange={(e) => setFinanceVis({ ...financeVis, showEconomicFormula: e.target.checked })}
+                      className="w-5 h-5 text-teal-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">مراقبة تكلفة بنك الهدايا والجوائز</span>
+                      <span className="text-[10px] text-slate-500">حساب القيمة النقدية للنقاط المستبدلة وهدايا العملاء</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={financeVis.showRewardsCost}
+                      onChange={(e) => setFinanceVis({ ...financeVis, showRewardsCost: e.target.checked })}
+                      className="w-5 h-5 text-teal-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">ميزانيات مبيعات المحطات ونسب النمو</span>
+                      <span className="text-[10px] text-slate-500">توزيع المستهدفات المالية على المحطات ومتابعة التحقيق</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={financeVis.showSalesBudgets}
+                      onChange={(e) => setFinanceVis({ ...financeVis, showSalesBudgets: e.target.checked })}
+                      className="w-5 h-5 text-teal-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">تقارير العائد على الاستثمار (ROI) لبرامج الولاء</span>
+                      <span className="text-[10px] text-slate-500">قياس العائد المحقق مقابل كل جنيه ينفق على المكافآت</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={financeVis.showRoiReports}
+                      onChange={(e) => setFinanceVis({ ...financeVis, showRoiReports: e.target.checked })}
+                      className="w-5 h-5 text-teal-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">جدول التدفقات النقدية وفواتير تموين الأساطيل</span>
+                      <span className="text-[10px] text-slate-500">متابعة مطالبات تموين أساطيل النقل والشركات</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={financeVis.showFleetBilling}
+                      onChange={(e) => setFinanceVis({ ...financeVis, showFleetBilling: e.target.checked })}
+                      className="w-5 h-5 text-teal-600 rounded"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* قسم إدارة خدمة العملاء والشكاوى 🎧 */}
+            {(visDeptFilter === 'all' || visDeptFilter === 'customer_service') && (
+              <div className="space-y-4 bg-indigo-50/40 p-5 rounded-3xl border-2 border-indigo-200/80 text-xs">
+                <div className="flex items-center gap-2.5 pb-3 border-b border-indigo-200">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-lg font-bold shadow-xs">
+                    🎧
+                  </div>
+                  <div>
+                    <h4 className="font-black text-slate-900 text-sm">
+                      إدارة صفحة خدمة العملاء والشكاوى (19058): التحكم في الأيقونات والمحتويات
+                    </h4>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      تحديد صلاحيات صندوق الشكاوى، طلبات تعديل البيانات، تقييمات الفنيين، والشات الحي
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">صندوق استقبال شكاوى الخط الساخن 19058</span>
+                      <span className="text-[10px] text-slate-500">إدارة ومتابعة الشكاوى والرد الرسمي</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={customerServiceVis.showComplaintsInbox}
+                      onChange={(e) => setCustomerServiceVis({ ...customerServiceVis, showComplaintsInbox: e.target.checked })}
+                      className="w-5 h-5 text-indigo-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">لوحة طلبات تعديل بيانات العملاء والسيارات</span>
+                      <span className="text-[10px] text-slate-500">مراجعة واعتماد أو رفض طلبات التعديل الواردة</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={customerServiceVis.showProfileUpdateRequests}
+                      onChange={(e) => setCustomerServiceVis({ ...customerServiceVis, showProfileUpdateRequests: e.target.checked })}
+                      className="w-5 h-5 text-indigo-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">سجل تقييمات الفنيين وتجربة العملاء</span>
+                      <span className="text-[10px] text-slate-500">مراقبة تقييمات النجوم وملاحظات السائقين</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={customerServiceVis.showTechnicianRatings}
+                      onChange={(e) => setCustomerServiceVis({ ...customerServiceVis, showTechnicianRatings: e.target.checked })}
+                      className="w-5 h-5 text-indigo-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">نافذة المحادثة الفورية (Live Chat)</span>
+                      <span className="text-[10px] text-slate-500">التواصل المباشر في نفس اللحظة مع السائقين</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={customerServiceVis.showLiveChat}
+                      onChange={(e) => setCustomerServiceVis({ ...customerServiceVis, showLiveChat: e.target.checked })}
+                      className="w-5 h-5 text-indigo-600 rounded"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* قسم إدارة فحص الأسطوانات 🔍 */}
+            {(visDeptFilter === 'all' || visDeptFilter === 'cylinder_inspection') && (
+              <div className="space-y-4 bg-rose-50/40 p-5 rounded-3xl border-2 border-rose-200/80 text-xs">
+                <div className="flex items-center gap-2.5 pb-3 border-b border-rose-200">
+                  <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center text-lg font-bold shadow-xs">
+                    🔍
+                  </div>
+                  <div>
+                    <h4 className="font-black text-slate-900 text-sm">
+                      إدارة صفحة فحص واختبار الأسطوانات: التحكم في الأيقونات والمحتويات
+                    </h4>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      تحديد سجلات الفحص، تنبيهات انتهاء الصلاحية وإيقاف التموين، وإصدار الشهادات الرقمية
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">سجل فحص شهادات واختبارات الأسطوانات</span>
+                      <span className="text-[10px] text-slate-500">سجل إلكتروني لاختبارات الضغط وسلامة الأسطوانة</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={cylinderVis.showInspectionRecords}
+                      onChange={(e) => setCylinderVis({ ...cylinderVis, showInspectionRecords: e.target.checked })}
+                      className="w-5 h-5 text-rose-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">تنبيهات انتهاء صلاحية الأسطوانة وإيقاف التموين</span>
+                      <span className="text-[10px] text-slate-500">حظر التموين التلقائي للأسطوانات المخالفة لمعايير الأمان</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={cylinderVis.showExpiryAlerts}
+                      onChange={(e) => setCylinderVis({ ...cylinderVis, showExpiryAlerts: e.target.checked })}
+                      className="w-5 h-5 text-rose-600 rounded"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                    <div>
+                      <span className="font-bold text-slate-900 block">إصدار شهادات الصلاحية الرقمية وبطاقات الفحص</span>
+                      <span className="text-[10px] text-slate-500">طباعة شهادات الفحص وتحديث الباركود الرقمي للسيارة</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={cylinderVis.showCertificates}
+                      onChange={(e) => setCylinderVis({ ...cylinderVis, showCertificates: e.target.checked })}
+                      className="w-5 h-5 text-rose-600 rounded"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* زر الحفظ السفلي الرئيسي */}
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <div className="flex items-center gap-2 text-xs text-slate-600">
+                <Check className="w-4 h-4 text-emerald-600" />
+                <span>يتم تطبيق كافة التغييرات فورياً وتعميمها على شاشات كافة المستخدمين.</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleSaveAllSettings()}
+                className="bg-purple-600 hover:bg-purple-700 text-white font-black py-3 px-8 rounded-2xl text-xs transition shadow-md flex items-center gap-2 cursor-pointer active:scale-95 w-full sm:w-auto justify-center"
+              >
+                <Save className="w-4 h-4" />
+                <span>حفظ مصفوفة التحكم فى ايقونات ومحتويات كافة الصفحات فوراً 💾</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -4487,7 +5692,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       حساب المكافأة آلياً بالموازنة:
                     </span>
                     {(() => {
-                      const costPerPoint = loyaltyModel.costPerPointEgp || 0.35;
+                      const costPerPoint = loyaltyModel.costPerPointEgp || 0.15;
                       const count = campaignTargetDrivers > 0 ? campaignTargetDrivers : 1;
                       const perDriver = campaignBudgetItemEgp / count;
                       const pts = Math.max(25, Math.round(perDriver / costPerPoint));
@@ -4839,7 +6044,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             setEditingCampaign({
                               ...editingCampaign,
                               pointsReward: pts,
-                              financialEquivalentEgp: Number((pts * (loyaltyModel.costPerPointEgp || 0.35)).toFixed(1)),
+                              financialEquivalentEgp: Number((pts * (loyaltyModel.costPerPointEgp || 0.15)).toFixed(1)),
                             });
                           }}
                           className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono font-bold"
@@ -4964,7 +6169,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
           const handleResetOfficialEconomicStandard = () => {
             setOfficialGasPrice(13.0);
-            setOfficialCostPerPoint(0.35);
+            setOfficialCostPerPoint(0.15);
             setOfficialGasolineSavingsPerMeter(10.5);
             setOfficialMarginGainPct(28);
             setCentennialMeters(108);
@@ -5366,7 +6571,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         onChange={(e) => setCalcCostPerPoint(Number(e.target.value))}
                         className="w-full bg-white border border-slate-200 rounded-xl p-2 font-mono font-black text-sm"
                       />
-                      <span className="text-[9px] text-slate-400 block">التكلفة المالية (0.35 ج)</span>
+                      <span className="text-[9px] text-slate-400 block">التكلفة المالية المعتمدة (0.15 ج)</span>
                     </div>
 
                     <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-1">
@@ -5572,13 +6777,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       </span>
                     </div>
 
-                    <button
-                      onClick={handleAdoptAiReward}
-                      className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black px-4 py-1.5 rounded-xl text-xs transition shadow-md flex items-center gap-1.5"
-                    >
-                      <Check className="w-4 h-4" />
-                      <span>اعتماد وإضافة الهدية لبنك السائقين فوراً ✓</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-emerald-300 font-bold bg-emerald-950/60 px-2 py-1 rounded-lg border border-emerald-500/30">
+                        🔒 يُحفظ تقرير مُعِين للإدارة ويُخفى عن العميل
+                      </span>
+                      <button
+                        onClick={handleAdoptAiReward}
+                        className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black px-4 py-1.5 rounded-xl text-xs transition shadow-md flex items-center gap-1.5"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>اعتماد وإضافة الهدية لبنك السائقين فوراً ✓</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Calculated Metrics Cards */}
@@ -5594,7 +6804,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       <span className="font-mono font-black text-cyan-300 text-sm">
                         {aiRewardAuditResult.pointsCost} نقطة
                       </span>
-                      <span className="text-[9px] text-slate-400 block">(تكلفة النقطة 0.35 ج)</span>
+                      <span className="text-[9px] text-slate-400 block">
+                        (تكلفة النقطة {loyaltyModel.costPerPointEgp || 0.15} ج)
+                      </span>
                     </div>
                     <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
                       <span className="text-[10px] text-slate-400 block">ما يعادله بالغاز الطبيعي:</span>
@@ -5664,17 +6876,79 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </button>
             </form>
 
+            {/* Global Privacy Toggle for Moeen Consultant Analysis */}
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-4 sm:p-5 rounded-2xl border border-indigo-900/60 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-lg shrink-0 ${
+                    config.hideAiAuditFromCustomers !== false
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-400/30'
+                      : 'bg-amber-500/20 text-amber-400 border border-amber-400/30'
+                  }`}
+                >
+                  {config.hideAiAuditFromCustomers !== false ? '🔒' : '👁️'}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h5 className="font-black text-sm text-white">
+                      إخفاء التحليل الاستشاري الذكي لمُعِين عن العملاء والسائقين
+                    </h5>
+                    <span
+                      className={`text-[10px] font-black px-2.5 py-0.5 rounded-full border ${
+                        config.hideAiAuditFromCustomers !== false
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
+                          : 'bg-amber-500/20 text-amber-300 border-amber-400/40'
+                      }`}
+                    >
+                      {config.hideAiAuditFromCustomers !== false
+                        ? 'مفعل (محمي ومخفي عن العميل) ✓'
+                        : 'معطل (التحليل ظاهر للعميل)'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-indigo-200 mt-1">
+                    عند التفعيل، لن يرى السائق أو العميل مذكرات دراسة السوق وتفاصيل الموازنة الداخلية لـ "مُعِين"، ويقتصر العرض على الوصف التسويقي الجذاب.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const current = config.hideAiAuditFromCustomers !== false;
+                  const updatedConfig = { ...config, hideAiAuditFromCustomers: !current };
+                  onUpdateConfig(updatedConfig);
+                  saveAppConfig(updatedConfig);
+                }}
+                className={`px-5 py-2.5 rounded-xl text-xs font-black transition flex items-center gap-2 shrink-0 shadow-md active:scale-95 ${
+                  config.hideAiAuditFromCustomers !== false
+                    ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
+                    : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                }`}
+              >
+                <span>
+                  {config.hideAiAuditFromCustomers !== false
+                    ? 'التحليل مخفي عن العميل 🔒'
+                    : 'إخفاء التحليل عن العميل الآن 🔒'}
+                </span>
+              </button>
+            </div>
+
             {/* Active Rewards Filter & Toolbar */}
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <Gift className="w-5 h-5 text-emerald-600" />
                   <div>
-                    <h4 className="font-black text-sm text-slate-900">
-                      قائمة بنك الهدايا والمكافآت المعتمدة ({rewards.length} هدية وكوبون)
-                    </h4>
-                    <p className="text-[11px] text-slate-500">
-                      نظام حوافز يعتمد على المنتجات العينية، الزيوت، الصيانة، الفحص، وكوبونات الشركاء
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-black text-sm text-slate-900">
+                        قائمة بنك الهدايا والمكافآت المعتمدة ({rewards.length} هدية وكوبون)
+                      </h4>
+                      <span className="text-[10px] font-black bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full border border-emerald-300">
+                        معتمد مالياً: {loyaltyModel.costPerPointEgp || 0.15} ج/نقطة 💼
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      نظام حوافز متزامن مالياً: تتغير نقاط الهدايا تلقائياً وبدقة عند تحديث تسعير النقطة من الإدارة المالية
                     </p>
                   </div>
                 </div>
@@ -5799,6 +7073,35 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             </span>
                           )}
                         </div>
+
+                        {r.aiAuditNotes && (
+                          <div className="mt-2.5 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-[11px] space-y-1">
+                            <div className="flex items-center justify-between text-[10px] font-bold">
+                              <span className="text-amber-800 flex items-center gap-1">
+                                <span>💡 تقرير مُعِين الاستشاري:</span>
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-black border ${
+                                    config.hideAiAuditFromCustomers !== false
+                                      ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                                      : 'bg-amber-100 text-amber-900 border-amber-300'
+                                  }`}
+                                >
+                                  {config.hideAiAuditFromCustomers !== false
+                                    ? 'مخفي عن العميل 🔒'
+                                    : 'ظاهر للعميل 👁️'}
+                                </span>
+                              </span>
+                            </div>
+                            <details className="text-[10px] text-slate-600">
+                              <summary className="cursor-pointer text-indigo-600 hover:text-indigo-800 font-bold">
+                                عرض نص التحليل الداخلي للإدارة...
+                              </summary>
+                              <p className="mt-1 bg-white p-2 rounded-lg border border-slate-200 whitespace-pre-line leading-relaxed font-mono text-slate-700">
+                                {r.aiAuditNotes}
+                              </p>
+                            </details>
+                          </div>
+                        )}
                       </div>
 
                       <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
@@ -6120,6 +7423,587 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
         )}
 
+        {/* Tab: Customer Data Update Requests (إدارة واعتماد وتعديل طلبات بيانات العملاء) */}
+        {activeTab === 'customer_requests' && (
+          <div className="p-6 space-y-6">
+            {/* Tab Header Banner */}
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-600 text-white flex items-center justify-center text-2xl shadow-md">
+                  📝
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-black text-base sm:text-lg text-slate-900">
+                      إدارة وتعديل طلبات بيانات العملاء والسيارات
+                    </h3>
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full font-bold">
+                      خدمة العملاء ومدير النظام
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    مراجعة طلبات تعديل البيانات المرسلة من العملاء، وتعديل أي حقل مطلوب واعتماده ليطبق فوراً في التطبيق
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDirectDriver(getDriverProfile());
+                    setIsDirectDriverEditOpen(true);
+                  }}
+                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-black py-2.5 px-4 rounded-xl transition flex items-center gap-1.5 shadow-sm active:scale-95"
+                >
+                  <Edit3 className="w-3.5 h-3.5 text-amber-300" />
+                  <span>تعديل بيانات العميل مباشرة ✏️</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Stats Overview */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
+                <span className="text-[11px] text-slate-500 block font-medium">إجمالي الطلبات</span>
+                <span className="text-xl sm:text-2xl font-black text-slate-900 mt-1 block">
+                  {customerRequests.length}
+                </span>
+              </div>
+
+              <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 text-center">
+                <span className="text-[11px] text-amber-800 block font-medium">قيد المراجعة والانتظار</span>
+                <span className="text-xl sm:text-2xl font-black text-amber-900 mt-1 block">
+                  {pendingRequestsCount}
+                </span>
+              </div>
+
+              <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200 text-center">
+                <span className="text-[11px] text-emerald-800 block font-medium">تم اعتمادها وتطبيقها</span>
+                <span className="text-xl sm:text-2xl font-black text-emerald-900 mt-1 block">
+                  {customerRequests.filter((r) => r.status === 'approved').length}
+                </span>
+              </div>
+
+              <div className="bg-rose-50 p-4 rounded-2xl border border-rose-200 text-center">
+                <span className="text-[11px] text-rose-800 block font-medium">طلبات مرفوضة</span>
+                <span className="text-xl sm:text-2xl font-black text-rose-900 mt-1 block">
+                  {customerRequests.filter((r) => r.status === 'rejected').length}
+                </span>
+              </div>
+            </div>
+
+            {/* Current Driver Quick Card */}
+            <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 text-white p-4 rounded-2xl border border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+              <div>
+                <span className="text-[10px] text-emerald-300 font-bold block">البيانات الحالية للعميل المسجل:</span>
+                <div className="flex flex-wrap items-center gap-3 font-bold mt-1">
+                  <span className="text-sm font-black text-white">{getDriverProfile().name}</span>
+                  <span className="font-mono bg-white/10 px-2 py-0.5 rounded text-emerald-200">
+                    لوحة: {getDriverProfile().carPlate}
+                  </span>
+                  <span className="text-slate-300">{getDriverProfile().carModel}</span>
+                  <span className="font-mono text-emerald-300">{getDriverProfile().phone}</span>
+                  <span className="bg-emerald-500/30 text-emerald-200 px-2 py-0.5 rounded">
+                    سعة: {getDriverProfile().cngCylinderCapacity || 70} لتر
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setDirectDriver(getDriverProfile());
+                  setIsDirectDriverEditOpen(true);
+                }}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1.5 rounded-xl text-xs transition active:scale-95 shrink-0"
+              >
+                تعديل يدوي ✏️
+              </button>
+            </div>
+
+            {/* Requests List */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="font-black text-sm text-slate-900 flex items-center gap-2">
+                  <span>سجل طلبات تعديل البيانات الواردة:</span>
+                  <span className="text-xs font-normal text-slate-500">
+                    (يتم تحديث الملف الشخصي وكود QR فور الاعتماد)
+                  </span>
+                </h4>
+              </div>
+
+              {customerRequests.length === 0 ? (
+                <div className="p-12 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-300 text-slate-500 text-xs">
+                  <Edit3 className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+                  <p className="font-bold">لا توجد طلبات تعديل بيانات واردة حالياً.</p>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    عندما يقوم العميل بإرسال طلب تعديل بياناته من صفحته، سيظهر هنا فوراً للمراجعة والاعتماد.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {customerRequests.map((req) => {
+                    const isPending = req.status === 'pending';
+                    const isApproved = req.status === 'approved';
+                    const isRejected = req.status === 'rejected';
+
+                    return (
+                      <div
+                        key={req.id}
+                        className={`p-5 rounded-2xl border transition shadow-xs space-y-3 text-xs ${
+                          isPending
+                            ? 'bg-amber-50/40 border-amber-300 hover:border-amber-400'
+                            : isApproved
+                            ? 'bg-white border-emerald-300'
+                            : 'bg-white border-slate-200'
+                        }`}
+                      >
+                        {/* Request Header */}
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-200/80 pb-2.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-black text-slate-900 text-sm">
+                              طلب تعديل #{req.id.slice(-6)}
+                            </span>
+                            <span className="font-mono text-slate-500 text-[11px]">
+                              (كود العميل: {req.driverId})
+                            </span>
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-black ${
+                                isPending
+                                  ? 'bg-amber-200 text-amber-900 border border-amber-300 animate-pulse'
+                                  : isApproved
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                  : 'bg-rose-100 text-rose-800 border border-rose-300'
+                              }`}
+                            >
+                              {isPending
+                                ? 'قيد المراجعة ⏳'
+                                : isApproved
+                                ? 'تم الاعتماد والتطبيق ✓'
+                                : 'مرفوض ✖'}
+                            </span>
+                          </div>
+
+                          <span className="text-[11px] text-slate-400">
+                            تاريخ الإرسال:{' '}
+                            {new Date(req.submittedAt).toLocaleDateString('ar-EG', {
+                              day: 'numeric',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+
+                        {/* Customer Information & Requested Changes Comparison Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-white p-3.5 rounded-xl border border-slate-200">
+                          {/* Current Data */}
+                          <div className="space-y-1.5 border-b md:border-b-0 md:border-l border-slate-200 pb-2 md:pb-0 md:pl-3">
+                            <span className="text-[10px] font-bold text-slate-400 block uppercase">
+                              البيانات المسجلة حالياً:
+                            </span>
+                            <div className="space-y-1">
+                              <p className="text-slate-700">
+                                <span className="font-bold text-slate-500">اسم العميل:</span> {req.driverName}
+                              </p>
+                              <p className="text-slate-700">
+                                <span className="font-bold text-slate-500">رقم الهاتف:</span>{' '}
+                                <span className="font-mono">{req.driverPhone}</span>
+                              </p>
+                              <p className="text-slate-700">
+                                <span className="font-bold text-slate-500">لوحة السيارة:</span>{' '}
+                                <span className="font-mono font-bold bg-slate-100 px-1.5 py-0.5 rounded">
+                                  {req.currentCarPlate}
+                                </span>
+                              </p>
+                              <p className="text-slate-700">
+                                <span className="font-bold text-slate-500">موديل السيارة:</span>{' '}
+                                {req.currentCarModel}
+                              </p>
+                              <p className="text-slate-700">
+                                <span className="font-bold text-slate-500">سعة الأسطوانة / العداد:</span>{' '}
+                                <span className="font-mono">
+                                  {req.currentCngCylinderCapacity}L • {req.currentOdometerKm?.toLocaleString()} كم
+                                </span>
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Requested Changes */}
+                          <div className="space-y-1.5">
+                            <span className="text-[10px] font-bold text-emerald-700 block uppercase">
+                              البيانات الجديدة المطلوبة من العميل:
+                            </span>
+                            <div className="space-y-1">
+                              <p className={req.requestedName !== req.driverName ? 'font-bold text-emerald-700' : 'text-slate-700'}>
+                                <span className="font-bold text-slate-500">الاسم المطلوب:</span> {req.requestedName}
+                                {req.requestedName !== req.driverName && (
+                                  <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded mr-1">تعديل</span>
+                                )}
+                              </p>
+                              <p className={req.requestedPhone !== req.driverPhone ? 'font-bold text-emerald-700 font-mono' : 'text-slate-700 font-mono'}>
+                                <span className="font-bold text-slate-500 font-sans">الهاتف الجديد:</span> {req.requestedPhone}
+                                {req.requestedPhone !== req.driverPhone && (
+                                  <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded mr-1 font-sans">تعديل</span>
+                                )}
+                              </p>
+                              <p className={req.requestedCarPlate !== req.currentCarPlate ? 'font-bold text-emerald-800' : 'text-slate-700'}>
+                                <span className="font-bold text-slate-500">اللوحة الجديدة:</span>{' '}
+                                <span className="font-mono font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 px-2 py-0.5 rounded">
+                                  {req.requestedCarPlate}
+                                </span>
+                                {req.requestedCarPlate !== req.currentCarPlate && (
+                                  <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded mr-1">تعديل</span>
+                                )}
+                              </p>
+                              <p className={req.requestedCarModel !== req.currentCarModel ? 'font-bold text-emerald-700' : 'text-slate-700'}>
+                                <span className="font-bold text-slate-500">الموديل الجديد:</span> {req.requestedCarModel}
+                                {req.requestedCarModel !== req.currentCarModel && (
+                                  <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded mr-1">تعديل</span>
+                                )}
+                              </p>
+                              <p className="text-slate-700 font-mono">
+                                <span className="font-bold text-slate-500 font-sans">السعة والعداد:</span>{' '}
+                                <span className={req.requestedCngCylinderCapacity !== req.currentCngCylinderCapacity ? 'font-bold text-emerald-700' : ''}>
+                                  {req.requestedCngCylinderCapacity}L
+                                </span>{' '}
+                                •{' '}
+                                <span className={req.requestedOdometerKm !== req.currentOdometerKm ? 'font-bold text-emerald-700' : ''}>
+                                  {req.requestedOdometerKm?.toLocaleString()} كم
+                                </span>
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Customer Reason / Notes */}
+                        {req.requestNotes && (
+                          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                            <span className="font-bold text-slate-700 block mb-0.5">
+                              سبب التعديل أو ملاحظات العميل:
+                            </span>
+                            <p className="text-slate-800 leading-relaxed">{req.requestNotes}</p>
+                          </div>
+                        )}
+
+                        {/* Audit Details if Reviewed */}
+                        {req.reviewedAt && (
+                          <div className="bg-slate-100/80 p-2.5 rounded-xl border border-slate-200 text-[11px] text-slate-600 flex flex-wrap items-center justify-between gap-2">
+                            <span>
+                              <b>تمت المراجعة بواسطة:</b> {req.reviewedBy || 'مدير النظام'} في{' '}
+                              {new Date(req.reviewedAt).toLocaleDateString('ar-EG', {
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                            {req.adminNotes && (
+                              <span className="font-medium text-slate-800">
+                                <b>ملاحظات الإدارة:</b> {req.adminNotes}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Action Buttons for Pending Request */}
+                        {isPending && (
+                          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-200">
+                            {/* Instant Quick Approve */}
+                            <button
+                              type="button"
+                              onClick={() => handleDirectApprove(req)}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-4 py-2 rounded-xl transition shadow-xs active:scale-95 flex items-center gap-1.5"
+                            >
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              <span>اعتماد وتطبيق التعديل فوراً ✓</span>
+                            </button>
+
+                            {/* Edit Before Approving (تعديل البيانات حسب ما يريد العميل والإدارة) */}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenReviewModal(req)}
+                              className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black px-4 py-2 rounded-xl transition shadow-xs active:scale-95 flex items-center gap-1.5"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                              <span>تعديل البيانات قبل الاعتماد ✏️</span>
+                            </button>
+
+                            {/* Reject Request */}
+                            <button
+                              type="button"
+                              onClick={() => handleRejectRequest(req.id)}
+                              className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-bold px-3 py-2 rounded-xl transition active:scale-95 flex items-center gap-1.5 mr-auto"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              <span>رفض الطلب ✖</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Modal: Review & Edit Request Before Approval */}
+            {selectedReqForReview && (
+              <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
+                <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-200 text-right">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center text-lg font-black">
+                        ✏️
+                      </div>
+                      <div>
+                        <h3 className="font-black text-base text-slate-900">
+                          مراجعة وتعديل بيانات الطلب #{selectedReqForReview.id.slice(-6)}
+                        </h3>
+                        <p className="text-[11px] text-slate-500">
+                          يمكنك تعديل أي خانة يدوياً قبل اعتمادها لتحديث بروفايل العميل
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setSelectedReqForReview(null)}
+                      className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center font-bold"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleApproveRequest(selectedReqForReview.id);
+                    }}
+                    className="space-y-3 text-xs"
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">اسم العميل:</label>
+                        <input
+                          type="text"
+                          required
+                          value={reviewEditName}
+                          onChange={(e) => setReviewEditName(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">رقم الهاتف:</label>
+                        <input
+                          type="tel"
+                          required
+                          value={reviewEditPhone}
+                          onChange={(e) => setReviewEditPhone(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">رقم لوحة السيارة:</label>
+                        <input
+                          type="text"
+                          required
+                          value={reviewEditPlate}
+                          onChange={(e) => setReviewEditPlate(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-mono font-bold text-emerald-800"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">موديل ونوع السيارة:</label>
+                        <input
+                          type="text"
+                          required
+                          value={reviewEditModel}
+                          onChange={(e) => setReviewEditModel(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">سعة أسطوانة الغاز (لتر):</label>
+                        <input
+                          type="number"
+                          min="30"
+                          max="140"
+                          value={reviewEditCapacity}
+                          onChange={(e) => setReviewEditCapacity(Number(e.target.value))}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">قراءة العداد الحالية (كم):</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={reviewEditOdo}
+                          onChange={(e) => setReviewEditOdo(Number(e.target.value))}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-mono font-bold"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">
+                        ملاحظات أو قرار الإدارة (تظهر للعميل في صفحته):
+                      </label>
+                      <input
+                        type="text"
+                        value={reviewAdminNotes}
+                        onChange={(e) => setReviewAdminNotes(e.target.value)}
+                        placeholder="مثال: تم مراجعة رخصة التسيير واعتماد تعديل رقم اللوحة بنجاح"
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-3 border-t border-slate-100">
+                      <button
+                        type="submit"
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-2xl transition shadow-md active:scale-95"
+                      >
+                        حفظ واعتماد التعديل فوراً في المنظومة ✓
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedReqForReview(null)}
+                        className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition"
+                      >
+                        إلغاء
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* Modal: Direct Driver Profile Edit by Admin */}
+            {isDirectDriverEditOpen && (
+              <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
+                <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-200 text-right">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center text-lg font-black">
+                        👑
+                      </div>
+                      <div>
+                        <h3 className="font-black text-base text-slate-900">
+                          تعديل بيانات العميل المباشر (صلاحية مدير عام النظام)
+                        </h3>
+                        <p className="text-[11px] text-slate-500">
+                          تعديل وحفظ فوري للبيانات دون الحاجة لطلب سابق
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setIsDirectDriverEditOpen(false)}
+                      className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center font-bold"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleSaveDirectDriver} className="space-y-3 text-xs">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">اسم العميل:</label>
+                        <input
+                          type="text"
+                          required
+                          value={directDriver.name}
+                          onChange={(e) => setDirectDriver({ ...directDriver, name: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">رقم الهاتف:</label>
+                        <input
+                          type="tel"
+                          required
+                          value={directDriver.phone}
+                          onChange={(e) => setDirectDriver({ ...directDriver, phone: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">رقم لوحة السيارة:</label>
+                        <input
+                          type="text"
+                          required
+                          value={directDriver.carPlate}
+                          onChange={(e) => setDirectDriver({ ...directDriver, carPlate: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-mono font-bold text-emerald-800"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">نوع وموديل السيارة:</label>
+                        <input
+                          type="text"
+                          required
+                          value={directDriver.carModel}
+                          onChange={(e) => setDirectDriver({ ...directDriver, carModel: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">سعة أسطوانة الغاز (لتر):</label>
+                        <input
+                          type="number"
+                          min="30"
+                          max="140"
+                          value={directDriver.cngCylinderCapacity || 70}
+                          onChange={(e) => setDirectDriver({ ...directDriver, cngCylinderCapacity: Number(e.target.value) })}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-mono font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">رصيد نقاط الولاء الحالي:</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={directDriver.points}
+                          onChange={(e) => setDirectDriver({ ...directDriver, points: Number(e.target.value) })}
+                          className="w-full bg-amber-50 border border-amber-300 rounded-xl p-2.5 font-mono font-bold text-amber-900"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-3 border-t border-slate-100">
+                      <button
+                        type="submit"
+                        className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-black py-3 rounded-2xl transition shadow-md active:scale-95"
+                      >
+                        حفظ وتطبيق التعديل مباشرة 💾
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsDirectDriverEditOpen(false)}
+                        className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition"
+                      >
+                        إلغاء
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Tab: Version Snapshot, Backup & Rollback Manager */}
         {activeTab === 'rollback' && (
           <div className="p-6 space-y-6">
@@ -6167,6 +8051,90 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 >
                   العودة للنسخة الكلاسيكية ومسح التعديلات 🔄
                 </button>
+              </div>
+            </div>
+
+            {/* Vercel & GitHub Production Export / Import Engine */}
+            <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-6 border-2 border-indigo-400/40 shadow-xl space-y-5">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-indigo-800/60 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-2xl">
+                    🚀
+                  </div>
+                  <div>
+                    <h4 className="font-black text-sm sm:text-base text-white flex items-center gap-2">
+                      <span>تصدير وضمان مزامنة Vercel & GitHub وشعار كارجاس الرسمي المعتمد</span>
+                      <span className="text-[10px] bg-emerald-500 text-slate-950 font-black px-2 py-0.5 rounded-full">
+                        حل جذري ودائم 100%
+                      </span>
+                    </h4>
+                    <p className="text-xs text-indigo-200 mt-0.5">
+                      يحل مشكلة تغير اللوجو عند الرفع على فيرسل أو استعراض التطبيق من أجهزة ومستخدمين جدد عبر تثبيت شعار كارجاس الرسمي الافتراضي وتصدير حزمة الإعدادات كاملة
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                {/* Action 1: Export JSON bundle */}
+                <div className="bg-slate-800/70 p-4 rounded-2xl border border-indigo-500/20 flex flex-col justify-between space-y-3">
+                  <div>
+                    <span className="font-black text-amber-300 block text-xs">1. تصدير ملف الإعدادات الكامل لـ GitHub</span>
+                    <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                      تصدير كافة المحطات، الأنشطة، الإحداثيات، وشعار كارجاس المعتمد في ملف JSON رسمي.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleExportProductionConfig}
+                    className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black py-2.5 px-4 rounded-xl text-xs transition shadow-md flex items-center justify-center gap-2"
+                  >
+                    <span>تحميل حزمة الإعدادات (JSON) 📥</span>
+                  </button>
+                </div>
+
+                {/* Action 2: Import on Vercel or any new machine */}
+                <div className="bg-slate-800/70 p-4 rounded-2xl border border-indigo-500/20 flex flex-col justify-between space-y-3">
+                  <div>
+                    <span className="font-black text-cyan-300 block text-xs">2. استيراد وتطبيق الحزمة على Vercel</span>
+                    <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                      عند فتح التطبيق على Vercel لأول مرة، يمكنك استيراد الملف بنقرة واحدة لتطبيق كل ما قمت به.
+                    </p>
+                  </div>
+                  <div>
+                    <input
+                      type="file"
+                      id="importProductionJsonInput"
+                      accept=".json"
+                      className="hidden"
+                      onChange={handleImportProductionConfig}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => document.getElementById('importProductionJsonInput')?.click()}
+                      className="w-full bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-700 hover:to-cyan-800 text-white font-black py-2.5 px-4 rounded-xl text-xs transition shadow-md flex items-center justify-center gap-2"
+                    >
+                      <span>استيراد وتطبيق الحزمة 📤</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Action 3: Force apply official SVG logo */}
+                <div className="bg-slate-800/70 p-4 rounded-2xl border border-indigo-500/20 flex flex-col justify-between space-y-3">
+                  <div>
+                    <span className="font-black text-emerald-300 block text-xs">3. تثبيت لوجو كارجاس الرسمي المعتمد</span>
+                    <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                      تطبيق شعار كارجاس الأصلي المتجهي (/cargas-logo.svg) على كافة الصفحات والخرائط والفوتر.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleForceApplyCargasOfficialLogo}
+                    className="w-full bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-black py-2.5 px-4 rounded-xl text-xs transition shadow-md flex items-center justify-center gap-2"
+                  >
+                    <span>تثبيت لوجو كارجاس المعتمد ⛽</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -7683,6 +9651,71 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* لوحة تحكم مدير النظام الشاملة لإدارة محطات الغاز الطبيعي وملفات KMZ وواجهة المستخدم (لوحة المطور محمد عبد الرحمن يوسف) */}
+      <KmzMapAdminModal
+        isOpen={isKmzMapAdminModalOpen}
+        onClose={() => setIsKmzMapAdminModalOpen(false)}
+        stations={navStations}
+        onSaveStations={handleSaveNavStationsFromAdmin}
+        config={navConfig}
+        onSaveConfig={(updated) => {
+          setNavConfig(updated);
+          localStorage.setItem('cargas_config_v2', JSON.stringify(updated));
+        }}
+        onApplyLogoToAllStations={handleApplyNavLogoToAllStations}
+        initialAuthenticated={true}
+      />
+
+      {/* Live Customer Portal Preview Modal for Admin (معاينة صفحة العميل وتحريك عناصرها بالضغط 10 مرات) */}
+      {isDriverPreviewOpen && (
+        <div className="fixed inset-0 z-[1150] flex flex-col bg-slate-950/90 backdrop-blur-md p-2 sm:p-4 overflow-y-auto animate-in fade-in">
+          <div className="bg-slate-900 border-2 border-emerald-500 rounded-3xl p-4 sm:p-6 text-white max-w-7xl w-full mx-auto shadow-2xl space-y-4 my-auto">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-3">
+                <span className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xl border border-emerald-400/40">
+                  📱
+                </span>
+                <div>
+                  <h3 className="font-black text-sm sm:text-base text-white flex items-center gap-2">
+                    <span>معاينة حية تفاعلية لصفحة العميل (خاص بمدير النظام)</span>
+                    <span className="bg-emerald-500 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full">
+                      تحكم ونقل العناصر
+                    </span>
+                  </h3>
+                  <p className="text-xs text-emerald-300">
+                    💡 اضغط 10 مرات متتالية على أي مساحة فارغة في الصفحة لتفعيل وضع السحب والإفلات وإعادة ترتيب ونقل الأيقونات مباشرة!
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsDriverPreviewOpen(false)}
+                className="bg-slate-800 hover:bg-slate-700 text-white font-bold px-4 py-2 rounded-xl text-xs transition border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+                <span>إغلاق المعاينة والرجوع للوحة الإدارة</span>
+              </button>
+            </div>
+
+            <div className="bg-slate-100 dark:bg-slate-900 p-2 sm:p-4 rounded-2xl border border-slate-800 max-h-[80vh] overflow-y-auto">
+              <DriverPortal
+                config={config}
+                driver={getDriverProfile()}
+                rewards={rewards}
+                transactions={transactions}
+                stations={stations}
+                crew={stationCrew}
+                onUpdateDriver={() => {}}
+                onRefreshData={() => {}}
+                onUpdateConfig={onUpdateConfig}
+                isAdminPreview={true}
+              />
+            </div>
           </div>
         </div>
       )}

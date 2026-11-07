@@ -2,7 +2,6 @@ import React from 'react';
 import { Station, CongestionLevel } from '../types';
 import { CARGAS_FACILITY_META, getCongestionBadge } from '../utils/companyAssets';
 import { CARGAS_LOGO_SVG } from '../utils/cargasLogo';
-import { speechService } from '../services/speechService';
 import { getWasalnyFullConfig } from '../../services/storageService';
 import { 
   Navigation, 
@@ -17,7 +16,6 @@ import {
   Gauge, 
   Share2,
   Users,
-  Volume2,
   Wrench,
   Droplets,
   Edit3,
@@ -26,6 +24,7 @@ import {
 
 interface StationDetailSheetProps {
   station: Station;
+  userLocation?: [number, number];
   distanceKm?: number;
   durationMin?: number;
   onClose: () => void;
@@ -39,6 +38,7 @@ interface StationDetailSheetProps {
 
 export const StationDetailSheet: React.FC<StationDetailSheetProps> = ({
   station,
+  userLocation,
   distanceKm,
   durationMin,
   onClose,
@@ -52,15 +52,11 @@ export const StationDetailSheet: React.FC<StationDetailSheetProps> = ({
   const facility = CARGAS_FACILITY_META[station.facilityType] || CARGAS_FACILITY_META.station;
   const congestion = getCongestionBadge(station.congestionLevel, station.waitTimeMinutes);
 
-  const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${station.lat},${station.lng}`;
+  const userOriginParam = userLocation && userLocation[0] && userLocation[1]
+    ? `&origin=${userLocation[0]},${userLocation[1]}`
+    : '';
+  const googleMapsUrl = `https://www.google.com/maps/dir/?api=1${userOriginParam}&destination=${station.lat},${station.lng}&travelmode=driving&dir_action=navigate`;
   const [copied, setCopied] = React.useState(false);
-  const [isEditingName, setIsEditingName] = React.useState(false);
-  const [editedName, setEditedName] = React.useState(station.name);
-
-  React.useEffect(() => {
-    setEditedName(station.name);
-    setIsEditingName(false);
-  }, [station.id, station.name]);
 
   const handleShare = () => {
     if (navigator.share) {
@@ -76,21 +72,9 @@ export const StationDetailSheet: React.FC<StationDetailSheetProps> = ({
     }
   };
 
-  // Speak station description out loud (helps non-readers)
-  const handleSpeakDetails = () => {
-    speechService.playChime('turn');
-    const text = station.voiceGuideText || `
-      ${station.name}. على بعد ${distanceKm?.toFixed(1) || ''} كيلو. 
-      حالة الزحام ${station.congestionLevel === 'low' ? 'خفيف ورايق' : 'متوسط'}.
-      وقت الانتظار المتوقع ${station.waitTimeMinutes} دقيقة.
-      دوس على الزر الأخضر الكبير عشان نبدأ الملاحة فوراً!
-    `;
-    speechService.speak(text, { priority: true });
-  };
-
   return (
-    <div className="fixed inset-x-0 bottom-0 z-[900] p-2 md:p-5 pointer-events-none animate-in slide-in-from-bottom-8 duration-300">
-      <div className="pointer-events-auto max-w-xl mx-auto w-full bg-slate-900/98 border-2 border-emerald-500/60 rounded-3xl shadow-2xl backdrop-blur-2xl p-4 md:p-6 text-white max-h-[85vh] overflow-y-auto">
+    <div className="absolute inset-x-0 bottom-0 z-[900] p-2 md:p-5 pointer-events-none animate-in slide-in-from-bottom-8 duration-300">
+      <div className="pointer-events-auto max-w-xl mx-auto w-full bg-slate-900/98 border-2 border-emerald-500/60 rounded-3xl shadow-2xl backdrop-blur-2xl p-4 md:p-6 text-white max-h-[85%] overflow-y-auto">
         {/* Header with Official Cargas NGV Logo */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
@@ -118,69 +102,11 @@ export const StationDetailSheet: React.FC<StationDetailSheetProps> = ({
                   كارجاس معتمدة
                 </span>
               </div>
-              {isEditingName ? (
-                <div className="mt-1 flex items-center gap-1.5 max-w-sm">
-                  <input
-                    type="text"
-                    value={editedName}
-                    onChange={(e) => setEditedName(e.target.value)}
-                    placeholder="اسم المحطة الجديد..."
-                    className="px-2.5 py-1 text-sm font-black rounded-xl bg-slate-950 border-2 border-emerald-500 text-white outline-none w-full"
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        if (editedName.trim() && onUpdateStationName) {
-                          onUpdateStationName(editedName.trim());
-                          setIsEditingName(false);
-                        }
-                      }
-                      if (e.key === 'Escape') setIsEditingName(false);
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (editedName.trim() && onUpdateStationName) {
-                        onUpdateStationName(editedName.trim());
-                        setIsEditingName(false);
-                      }
-                    }}
-                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-black shrink-0 flex items-center gap-1 shadow cursor-pointer"
-                    title="حفظ الاسم الجديد"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>حفظ</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsEditingName(false)}
-                    className="p-1 text-slate-400 hover:text-white rounded-lg text-xs shrink-0 cursor-pointer"
-                    title="إلغاء"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
                 <div className="flex items-center gap-2 mt-1">
                   <h2 className="text-lg md:text-xl font-black text-white leading-snug">
                     {station.name}
                   </h2>
-                  {onUpdateStationName && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditedName(station.name);
-                        setIsEditingName(true);
-                      }}
-                      className="p-1.5 rounded-lg text-emerald-400 hover:text-white hover:bg-emerald-600/40 border border-emerald-500/40 transition cursor-pointer flex items-center gap-1 text-[11px] font-bold"
-                      title="تعديل اسم المحطة (مدير النظام)"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                      <span>تعديل الاسم</span>
-                    </button>
-                  )}
                 </div>
-              )}
               {/* Composite Facility Badges for this Station */}
               <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                 {station.cng && <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700 font-bold">⛽ تموين غاز</span>}
@@ -199,19 +125,7 @@ export const StationDetailSheet: React.FC<StationDetailSheetProps> = ({
           </button>
         </div>
 
-        {/* Big Audio Read Button (For Non-Readers) */}
-        <div className="mt-3">
-          <button
-            onClick={handleSpeakDetails}
-            className="w-full py-2.5 px-4 bg-emerald-950/80 hover:bg-emerald-900/80 border border-emerald-500/50 rounded-2xl flex items-center justify-between text-xs md:text-sm text-emerald-300 font-black cursor-pointer shadow"
-          >
-            <div className="flex items-center gap-2">
-              <Volume2 className="w-5 h-5 text-emerald-400 animate-pulse" />
-              <span>🔊 اسمع تفاصيل المحطة بالصوت الإرشادي (بدون قراءة)</span>
-            </div>
-            <span className="text-[10px] bg-emerald-700 text-white px-2 py-0.5 rounded-lg">استمع</span>
-          </button>
-        </div>
+
 
         {/* Address & Distance */}
         <div className="mt-3 text-xs text-slate-300 flex items-start gap-2 bg-slate-800/60 p-3 rounded-2xl border border-slate-700">
@@ -291,13 +205,16 @@ export const StationDetailSheet: React.FC<StationDetailSheetProps> = ({
 
         {/* GIANT 1-TAP START NAVIGATION BUTTON (For Drivers / Non-Readers) */}
         <div className="mt-5 flex flex-col gap-2">
-          <button
+          <a
+            href={googleMapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
             onClick={() => onStartNavigation(station)}
-            className="w-full py-4 px-6 bg-gradient-to-r from-emerald-600 via-emerald-700 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-base md:text-lg rounded-2xl shadow-2xl shadow-emerald-950/80 flex items-center justify-center gap-3 cursor-pointer transition transform active:scale-98 border-2 border-emerald-400"
+            className="w-full py-4 px-6 bg-gradient-to-r from-emerald-600 via-emerald-700 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-base md:text-lg rounded-2xl shadow-2xl shadow-emerald-950/80 flex items-center justify-center gap-3 cursor-pointer transition transform active:scale-98 border-2 border-emerald-400 text-center"
           >
             <Navigation className="w-7 h-7 text-amber-300 animate-bounce" />
-            <span>ابدأ الملاحة فوراً (إرشاد صوتي) 🚀</span>
-          </button>
+            <span>الملاحة عبر خرائط جوجل (Google Maps) 🚀</span>
+          </a>
 
           {/* Secondary Actions */}
           <div className="grid grid-cols-3 gap-2">

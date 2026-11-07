@@ -27,6 +27,9 @@ import {
   MessageCircle,
   CheckCheck,
   User,
+  Edit3,
+  Edit,
+  CheckCircle,
 } from 'lucide-react';
 import {
   AppConfig,
@@ -34,6 +37,7 @@ import {
   ServiceAppointment,
   AppointmentStatus,
   CustomerDirectMessage,
+  CustomerDataUpdateRequest,
 } from '../types';
 import {
   getServiceAppointments,
@@ -41,6 +45,10 @@ import {
   getCustomerDirectMessages,
   sendCustomerDirectMessage,
   markCustomerMessagesRead,
+  getCustomerDataUpdateRequests,
+  approveCustomerDataUpdateRequest,
+  rejectCustomerDataUpdateRequest,
+  getDriverProfile,
 } from '../services/storageService';
 
 interface CustomerServicePortalProps {
@@ -57,7 +65,90 @@ export const CustomerServicePortal: React.FC<CustomerServicePortalProps> = ({
   const [appointments, setAppointments] = useState<ServiceAppointment[]>(() =>
     getServiceAppointments()
   );
-  const [activeTab, setActiveTab] = useState<'maintenance' | 'messages'>('maintenance');
+  const [activeTab, setActiveTab] = useState<'maintenance' | 'messages' | 'customer_requests'>('maintenance');
+
+  // Customer Data Update Requests State & Handlers
+  const [customerRequests, setCustomerRequests] = useState<CustomerDataUpdateRequest[]>(() =>
+    getCustomerDataUpdateRequests()
+  );
+  const [selectedReqForReview, setSelectedReqForReview] = useState<CustomerDataUpdateRequest | null>(null);
+  const [reviewEditName, setReviewEditName] = useState('');
+  const [reviewEditPhone, setReviewEditPhone] = useState('');
+  const [reviewEditPlate, setReviewEditPlate] = useState('');
+  const [reviewEditModel, setReviewEditModel] = useState('');
+  const [reviewEditCapacity, setReviewEditCapacity] = useState<number>(70);
+  const [reviewEditOdo, setReviewEditOdo] = useState<number>(0);
+  const [reviewAdminNotes, setReviewAdminNotes] = useState('');
+
+  useEffect(() => {
+    const handleRequestsUpdate = () => {
+      setCustomerRequests(getCustomerDataUpdateRequests());
+    };
+    window.addEventListener('cargas_customer_requests_updated', handleRequestsUpdate);
+    return () => {
+      window.removeEventListener('cargas_customer_requests_updated', handleRequestsUpdate);
+    };
+  }, []);
+
+  const pendingRequestsCount = customerRequests.filter((r) => r.status === 'pending').length;
+
+  const handleOpenReviewModal = (req: CustomerDataUpdateRequest) => {
+    setSelectedReqForReview(req);
+    setReviewEditName(req.requestedName);
+    setReviewEditPhone(req.requestedPhone);
+    setReviewEditPlate(req.requestedCarPlate);
+    setReviewEditModel(req.requestedCarModel);
+    setReviewEditCapacity(req.requestedCngCylinderCapacity);
+    setReviewEditOdo(req.requestedOdometerKm);
+    setReviewAdminNotes(req.adminNotes || '');
+  };
+
+  const handleApproveRequest = (reqId: string, customData?: any) => {
+    const dataToApply = customData || {
+      name: reviewEditName || undefined,
+      phone: reviewEditPhone || undefined,
+      carPlate: reviewEditPlate || undefined,
+      carModel: reviewEditModel || undefined,
+      cngCylinderCapacity: reviewEditCapacity || undefined,
+      odometerKm: reviewEditOdo || undefined,
+    };
+    approveCustomerDataUpdateRequest(
+      reqId,
+      dataToApply,
+      `${agentName}`,
+      reviewAdminNotes || 'تم مراجعة الطلب وتعديل وتحديث البيانات بنجاح من مكتب خدمة العملاء'
+    );
+    setCustomerRequests(getCustomerDataUpdateRequests());
+    setSelectedReqForReview(null);
+    showToast('✅ تم اعتماد طلب التعديل وتحديث بيانات العميل والسيارة بنجاح!');
+  };
+
+  const handleDirectApprove = (req: CustomerDataUpdateRequest) => {
+    approveCustomerDataUpdateRequest(
+      req.id,
+      {
+        name: req.requestedName,
+        phone: req.requestedPhone,
+        carPlate: req.requestedCarPlate,
+        carModel: req.requestedCarModel,
+        cngCylinderCapacity: req.requestedCngCylinderCapacity,
+        odometerKm: req.requestedOdometerKm,
+      },
+      `${agentName}`,
+      'تم الاعتماد الفوري من خدمة العملاء'
+    );
+    setCustomerRequests(getCustomerDataUpdateRequests());
+    showToast('✅ تم اعتماد وتطبيق التعديل في المنظومة فوراً!');
+  };
+
+  const handleRejectRequest = (reqId: string) => {
+    const reason = prompt('يرجى كتابة سبب رفض طلب التعديل لإعلام العميل به:', 'البيانات غير مطابقة');
+    if (!reason) return;
+    rejectCustomerDataUpdateRequest(reqId, reason, `${agentName}`);
+    setCustomerRequests(getCustomerDataUpdateRequests());
+    setSelectedReqForReview(null);
+    showToast('تم تسجيل رفض الطلب مع السبب.');
+  };
 
   // Customer Service Agent Identity
   const [agentName, setAgentName] = useState<string>('سارة ممدوح (خدمة العملاء)');
@@ -465,6 +556,32 @@ export const CustomerServicePortal: React.FC<CustomerServicePortalProps> = ({
               </span>
             )}
           </button>
+
+          {/* Tab 3: Customer Data Update Requests */}
+          <button
+            onClick={() => setActiveTab('customer_requests')}
+            className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-xs sm:text-sm font-black transition-all ${
+              activeTab === 'customer_requests'
+                ? 'bg-amber-600 text-white shadow-md'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <Edit3 className="w-4 h-4" />
+            <span>3. طلبات تعديل بيانات العملاء 📝</span>
+            {pendingRequestsCount > 0 ? (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-400 text-slate-950 animate-pulse">
+                {pendingRequestsCount} جديد
+              </span>
+            ) : (
+              <span
+                className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                  activeTab === 'customer_requests' ? 'bg-amber-800 text-white' : 'bg-slate-200 text-slate-700'
+                }`}
+              >
+                {customerRequests.length}
+              </span>
+            )}
+          </button>
         </div>
 
         <button
@@ -791,6 +908,328 @@ export const CustomerServicePortal: React.FC<CustomerServicePortalProps> = ({
                 <span className="text-xs font-bold">اختر محادثة من القائمة للرد على العميل مباشرة.</span>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Tab 3: Customer Data Update Requests (مراجعة وتعديل طلبات بيانات العملاء والسيارات) */}
+      {activeTab === 'customer_requests' && (
+        <div className="space-y-4 animate-in fade-in">
+          {/* Section Header */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-amber-500/10 border border-amber-400/30 flex items-center justify-center text-amber-600 text-xl font-black">
+                📝
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900">
+                  طلبات تعديل بيانات العملاء والسيارات الواردة
+                </h3>
+                <p className="text-xs text-slate-500">
+                  يمكن لموظف خدمة العملاء تعديل أي بيان حسب رغبة العميل واعتماده ليطبق فوراً في المنظومة
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="bg-amber-100 text-amber-900 font-bold px-3 py-1 rounded-full text-xs">
+                {pendingRequestsCount} طلب بانتظار المراجعة
+              </span>
+            </div>
+          </div>
+
+          {/* Quick Stats Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-white p-3.5 rounded-2xl border border-slate-200 text-center">
+              <span className="text-[11px] text-slate-500 font-bold block">إجمالي الطلبات</span>
+              <span className="text-xl font-black text-slate-900 mt-0.5 block">{customerRequests.length}</span>
+            </div>
+            <div className="bg-amber-50 p-3.5 rounded-2xl border border-amber-200 text-center">
+              <span className="text-[11px] text-amber-800 font-bold block">بانتظار المراجعة</span>
+              <span className="text-xl font-black text-amber-900 mt-0.5 block">{pendingRequestsCount}</span>
+            </div>
+            <div className="bg-emerald-50 p-3.5 rounded-2xl border border-emerald-200 text-center">
+              <span className="text-[11px] text-emerald-800 font-bold block">معتمدة ومحدثة</span>
+              <span className="text-xl font-black text-emerald-900 mt-0.5 block">
+                {customerRequests.filter((r) => r.status === 'approved').length}
+              </span>
+            </div>
+            <div className="bg-rose-50 p-3.5 rounded-2xl border border-rose-200 text-center">
+              <span className="text-[11px] text-rose-800 font-bold block">طلبات مرفوضة</span>
+              <span className="text-xl font-black text-rose-900 mt-0.5 block">
+                {customerRequests.filter((r) => r.status === 'rejected').length}
+              </span>
+            </div>
+          </div>
+
+          {/* Requests Cards List */}
+          <div className="space-y-3">
+            {customerRequests.length === 0 ? (
+              <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-slate-300 text-slate-400 text-xs">
+                <Edit3 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                <p className="font-bold">لا توجد طلبات تعديل بيانات واردة حالياً من العملاء.</p>
+              </div>
+            ) : (
+              customerRequests.map((req) => {
+                const isPending = req.status === 'pending';
+                const isApproved = req.status === 'approved';
+
+                return (
+                  <div
+                    key={req.id}
+                    className={`bg-white p-5 rounded-2xl border transition shadow-xs space-y-3 text-xs ${
+                      isPending ? 'border-amber-300 bg-amber-50/20' : isApproved ? 'border-emerald-300' : 'border-slate-200'
+                    }`}
+                  >
+                    {/* Header */}
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-black text-slate-900 text-sm">طلب رقم #{req.id.slice(-6)}</span>
+                        <span className="font-mono text-slate-500 text-[11px]">كود: {req.driverId}</span>
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-black ${
+                            isPending
+                              ? 'bg-amber-100 text-amber-900 border border-amber-300 animate-pulse'
+                              : isApproved
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                              : 'bg-rose-100 text-rose-800 border border-rose-300'
+                          }`}
+                        >
+                          {isPending ? 'قيد المراجعة ⏳' : isApproved ? 'تم الاعتماد والتطبيق ✓' : 'مرفوض ✖'}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-400">
+                        {new Date(req.submittedAt).toLocaleDateString('ar-EG', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </div>
+
+                    {/* Comparison Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                      <div className="space-y-1 text-slate-700">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">البيانات الحالية:</span>
+                        <p><span className="font-bold text-slate-500">الاسم:</span> {req.driverName}</p>
+                        <p><span className="font-bold text-slate-500">الهاتف:</span> <span className="font-mono">{req.driverPhone}</span></p>
+                        <p><span className="font-bold text-slate-500">اللوحة:</span> <span className="font-mono font-bold">{req.currentCarPlate}</span></p>
+                        <p><span className="font-bold text-slate-500">السيارة:</span> {req.currentCarModel}</p>
+                        <p><span className="font-bold text-slate-500">السعة/العداد:</span> <span className="font-mono">{req.currentCngCylinderCapacity}L • {req.currentOdometerKm?.toLocaleString()} كم</span></p>
+                      </div>
+
+                      <div className="space-y-1 text-slate-800">
+                        <span className="text-[10px] font-bold text-emerald-700 block uppercase">البيانات الجديدة المطلوبة:</span>
+                        <p className={req.requestedName !== req.driverName ? 'font-bold text-emerald-700' : ''}>
+                          <span className="font-bold text-slate-500">الاسم:</span> {req.requestedName}
+                        </p>
+                        <p className={req.requestedPhone !== req.driverPhone ? 'font-bold text-emerald-700 font-mono' : 'font-mono'}>
+                          <span className="font-bold text-slate-500 font-sans">الهاتف:</span> {req.requestedPhone}
+                        </p>
+                        <p className={req.requestedCarPlate !== req.currentCarPlate ? 'font-bold text-emerald-900' : ''}>
+                          <span className="font-bold text-slate-500">اللوحة:</span>{' '}
+                          <span className="font-mono font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 px-2 py-0.5 rounded">
+                            {req.requestedCarPlate}
+                          </span>
+                        </p>
+                        <p className={req.requestedCarModel !== req.currentCarModel ? 'font-bold text-emerald-700' : ''}>
+                          <span className="font-bold text-slate-500">السيارة:</span> {req.requestedCarModel}
+                        </p>
+                        <p className="font-mono">
+                          <span className="font-bold text-slate-500 font-sans">السعة/العداد:</span>{' '}
+                          <span>{req.requestedCngCylinderCapacity}L • {req.requestedOdometerKm?.toLocaleString()} كم</span>
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Customer Notes */}
+                    {req.requestNotes && (
+                      <div className="bg-amber-50/60 p-2.5 rounded-xl border border-amber-200 text-xs">
+                        <span className="font-bold text-amber-950 block mb-0.5">سبب التعديل المرسل من العميل:</span>
+                        <p className="text-amber-900">{req.requestNotes}</p>
+                      </div>
+                    )}
+
+                    {/* Review Notes if Reviewed */}
+                    {req.reviewedAt && (
+                      <div className="bg-slate-100 p-2 rounded-xl text-[11px] text-slate-600 flex flex-wrap items-center justify-between gap-2">
+                        <span>تمت المراجعة بواسطة: <b>{req.reviewedBy}</b></span>
+                        {req.adminNotes && <span>ملاحظات: {req.adminNotes}</span>}
+                      </div>
+                    )}
+
+                    {/* Action Buttons for Customer Service */}
+                    {isPending && (
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => handleDirectApprove(req)}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-4 py-2 rounded-xl transition text-xs flex items-center gap-1.5 shadow-xs"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          <span>اعتماد وتطبيق فوراً ✓</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenReviewModal(req)}
+                          className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black px-4 py-2 rounded-xl transition text-xs flex items-center gap-1.5 shadow-xs"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                          <span>تعديل البيانات حسب رغبة العميل ✏️</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRejectRequest(req.id)}
+                          className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-bold px-3 py-2 rounded-xl transition text-xs mr-auto"
+                        >
+                          رفض الطلب ✖
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Review & Edit Request Before Approval by CS */}
+      {selectedReqForReview && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95 text-right">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center text-lg font-black">
+                  ✏️
+                </div>
+                <div>
+                  <h3 className="font-black text-sm sm:text-base text-slate-900">
+                    تعديل بيانات العميل واعتمادها #{selectedReqForReview.id.slice(-6)}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    يمكنك تعديل أي بيان يريده العميل قبل حفظ التغييرات وتطبيقها
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedReqForReview(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleApproveRequest(selectedReqForReview.id);
+              }}
+              className="space-y-3 text-xs"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">اسم العميل:</label>
+                  <input
+                    type="text"
+                    required
+                    value={reviewEditName}
+                    onChange={(e) => setReviewEditName(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">رقم الهاتف:</label>
+                  <input
+                    type="tel"
+                    required
+                    value={reviewEditPhone}
+                    onChange={(e) => setReviewEditPhone(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">رقم لوحة السيارة:</label>
+                  <input
+                    type="text"
+                    required
+                    value={reviewEditPlate}
+                    onChange={(e) => setReviewEditPlate(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-mono font-bold text-emerald-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">نوع وموديل السيارة:</label>
+                  <input
+                    type="text"
+                    required
+                    value={reviewEditModel}
+                    onChange={(e) => setReviewEditModel(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">سعة أسطوانة الغاز (لتر):</label>
+                  <input
+                    type="number"
+                    min="30"
+                    max="140"
+                    value={reviewEditCapacity}
+                    onChange={(e) => setReviewEditCapacity(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">قراءة العداد الحالية (كم):</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={reviewEditOdo}
+                    onChange={(e) => setReviewEditOdo(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-mono font-bold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  ملاحظات خدمة العملاء للطلب:
+                </label>
+                <input
+                  type="text"
+                  value={reviewAdminNotes}
+                  onChange={(e) => setReviewAdminNotes(e.target.value)}
+                  placeholder="مثال: تم التواصل مع العميل واعتماد اللوحة الجديدة"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5"
+                />
+              </div>
+
+              <div className="flex items-center gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="submit"
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-2xl transition shadow-md active:scale-95"
+                >
+                  اعتماد وتطبيق التعديل في المنظومة فوراً ✓
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedReqForReview(null)}
+                  className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

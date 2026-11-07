@@ -127,7 +127,7 @@ export const DragDropMapTool: React.FC<DragDropMapToolProps> = ({
   };
 
   return (
-    <div className="fixed top-24 left-4 z-[700] max-w-xs md:max-w-sm w-full font-['Cairo'] transition-all">
+    <div className="absolute top-20 sm:top-24 left-4 z-[700] max-w-xs md:max-w-sm w-full font-['Cairo'] transition-all">
       <div className="bg-slate-900/95 text-white border-2 border-emerald-500/80 rounded-2xl shadow-2xl backdrop-blur-xl overflow-hidden">
         {/* Header Bar */}
         <div className="px-3.5 py-2.5 bg-gradient-to-r from-emerald-900/90 via-slate-900 to-slate-900 flex items-center justify-between border-b border-slate-800">

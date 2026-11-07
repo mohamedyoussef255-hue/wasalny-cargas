@@ -56,7 +56,11 @@ import {
   getTechnicianIncentiveConfig,
   saveTechnicianIncentiveConfig,
   calculateTechnicianFinancialIncentive,
+  getMasterStationMapLogo,
+  getMapFacilityFilters,
+  recalculateSystemForFinancialPointCost,
 } from '../services/storageService';
+import { syncCurrentStateToCodebase } from '../services/codebaseSyncService';
 
 interface FinancialManagementPortalProps {
   config: AppConfig;
@@ -177,8 +181,8 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
 
   // Bulk Region Update State (يشمل التعميم على جميع المحطات بالكامل أو منطقة محددة)
   const [bulkRegion, setBulkRegion] = useState<string>('all');
-  const [bulkCostPerPoint, setBulkCostPerPoint] = useState<number>(0.15);
-  const [bulkPointsRate, setBulkPointsRate] = useState<number>(1.0);
+  const [bulkCostPerPoint, setBulkCostPerPoint] = useState<number>(() => config.loyaltyCostModel?.costPerPointEgp ?? 0.15);
+  const [bulkPointsRate, setBulkPointsRate] = useState<number>(() => config.pointsPerMeter || 1.0);
   const [bulkActiveStatus, setBulkActiveStatus] = useState<boolean>(true);
   const [isBulkSuccess, setIsBulkSuccess] = useState<boolean>(false);
 
@@ -210,9 +214,11 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
   const totalRevenueEgp = transactions.reduce((acc, t) => acc + (t.totalAmountEgp || 0), 0);
   const totalPointsEarned = transactions.reduce((acc, t) => acc + (t.pointsEarned || 0), 0);
 
+  const defaultCost = config.loyaltyCostModel?.costPerPointEgp ?? 0.15;
+
   // Total Points Financial Liability = sum(points * stationCostPerPoint)
   const totalLiabilityEgp = transactions.reduce((acc, t) => {
-    const cost = t.stationCostPerPointEgp ?? 0.35;
+    const cost = t.stationCostPerPointEgp ?? defaultCost;
     return acc + (t.pointsEarned || 0) * cost;
   }, 0);
 
@@ -222,7 +228,7 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
   const totalRewardsEgpValue = redemptionsList.reduce((acc, r) => acc + (r.calculatedEgpValue || 0), 0);
 
   const weightedCostPerPoint =
-    totalPointsEarned > 0 ? totalLiabilityEgp / totalPointsEarned : 0.35;
+    totalPointsEarned > 0 ? totalLiabilityEgp / totalPointsEarned : defaultCost;
   const loyaltyCostRatioPct =
     totalRevenueEgp > 0 ? (totalLiabilityEgp / totalRevenueEgp) * 100 : 0;
 
@@ -250,18 +256,23 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
     saveStationLocations(updated);
   };
 
-  // Bulk Apply for Whole Region OR All Stations
+  // Bulk Apply for Whole Region OR All Stations & Generalize Across Entire App
   const handleApplyBulkRegion = () => {
     const isAll = bulkRegion === 'all';
+    const costValue = Number(bulkCostPerPoint) || 0.15;
+
+    // اعتماد وتعميم التكلفة على بنك الهدايا والمكافآت (100+ هدية) واستوديو الأفكار وحاسبة النقاط والعروض
+    const { config: syncedCfg } = recalculateSystemForFinancialPointCost(costValue);
+
     const updated = stationList.map((st) => {
       const stRegion = st.region || st.city || 'القاهرة الكبرى';
       if (isAll || stRegion === bulkRegion) {
         return {
           ...st,
-          costPerPointEgp: Number(bulkCostPerPoint),
+          costPerPointEgp: costValue,
           pointsAwardRatePerMeter: Number(bulkPointsRate),
           isLoyaltyProgramActive: bulkActiveStatus,
-          financialApprovedByAdmin: false,
+          financialApprovedByAdmin: true,
         };
       }
       return st;
@@ -271,8 +282,49 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
     onUpdateStations(updated);
     saveStationLocations(updated);
 
+    // تعميم النسبة وتكلفة النقطة التي حددتها الإدارة المالية على كامل إعدادات المنظومة
+    const updatedConfig: AppConfig = {
+      ...syncedCfg,
+      pointsPerMeter: Number(bulkPointsRate),
+      loyaltyCostModel: {
+        ...syncedCfg.loyaltyCostModel,
+        costPerPointEgp: costValue,
+        officialCostPerPoint: costValue,
+      },
+      pointsFormula: {
+        ...(config.pointsFormula || {}),
+        ratioMode: syncedCfg.pointsFormula?.ratioMode ?? config.pointsFormula?.ratioMode ?? 'points_per_meter',
+        metersPerPointUnit: syncedCfg.pointsFormula?.metersPerPointUnit ?? config.pointsFormula?.metersPerPointUnit ?? 5,
+        basePointsPerMeter: syncedCfg.pointsFormula?.basePointsPerMeter ?? config.pointsFormula?.basePointsPerMeter ?? 1,
+        gasPricePerMeter: syncedCfg.pointsFormula?.gasPricePerMeter ?? config.pointsFormula?.gasPricePerMeter ?? 13,
+        calculationBasis: syncedCfg.pointsFormula?.calculationBasis ?? config.pointsFormula?.calculationBasis ?? 'meters',
+        tierBronzeMultiplier: syncedCfg.pointsFormula?.tierBronzeMultiplier ?? config.pointsFormula?.tierBronzeMultiplier ?? 1.0,
+        tierSilverMultiplier: syncedCfg.pointsFormula?.tierSilverMultiplier ?? config.pointsFormula?.tierSilverMultiplier ?? 1.5,
+        tierGoldMultiplier: syncedCfg.pointsFormula?.tierGoldMultiplier ?? config.pointsFormula?.tierGoldMultiplier ?? 2.0,
+        volumeBonusThresholdM3: syncedCfg.pointsFormula?.volumeBonusThresholdM3 ?? config.pointsFormula?.volumeBonusThresholdM3 ?? 30,
+        volumeBonusPoints: syncedCfg.pointsFormula?.volumeBonusPoints ?? config.pointsFormula?.volumeBonusPoints ?? 10,
+        technicianWelcomePointsPerShift: syncedCfg.pointsFormula?.technicianWelcomePointsPerShift ?? config.pointsFormula?.technicianWelcomePointsPerShift ?? 350,
+        pointsToEgpRedemptionRatio: costValue,
+      },
+    };
+    onUpdateConfig(updatedConfig);
+    saveAppConfig(updatedConfig);
+
+    // مزامنة فورية في الخلفية مع ملفات كود المشروع على القرص لاعتمادها لـ GitHub و Vercel
+    syncCurrentStateToCodebase({
+      navStations: getStationLocations().map((s) => ({
+        ...s,
+        cng: true,
+      })) as any,
+      stationLocations: updated,
+      config: updatedConfig,
+      crew: crewList,
+      mapFilters: getMapFacilityFilters(),
+      logoUrl: getMasterStationMapLogo() || config.stationLogoUrl,
+    }).catch((err) => console.warn('Financial codebase sync notice:', err));
+
     setIsBulkSuccess(true);
-    setTimeout(() => setIsBulkSuccess(false), 4000);
+    setTimeout(() => setIsBulkSuccess(false), 5000);
   };
 
   // Admin Approve Station Pricing
@@ -512,20 +564,23 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
       'رقم اللوحة',
     ];
 
-    const rows = transactions.map((tx) => [
-      tx.receiptNumber,
-      new Date(tx.timestamp).toLocaleString('ar-EG'),
-      `"${tx.stationName}"`,
-      `"${tx.regionName || 'القاهرة الكبرى'}"`,
-      tx.metersQuantity,
-      tx.pricePerMeter,
-      tx.totalAmountEgp,
-      tx.pointsEarned,
-      tx.stationCostPerPointEgp ?? 0.35,
-      (tx.financialLiabilityEgp ?? (tx.pointsEarned * (tx.stationCostPerPointEgp ?? 0.35))).toFixed(2),
-      `"${tx.driverName}"`,
-      `"${tx.carPlate}"`,
-    ]);
+    const rows = transactions.map((tx) => {
+      const pointCost = tx.stationCostPerPointEgp ?? defaultCost;
+      return [
+        tx.receiptNumber,
+        new Date(tx.timestamp).toLocaleString('ar-EG'),
+        `"${tx.stationName}"`,
+        `"${tx.regionName || 'القاهرة الكبرى'}"`,
+        tx.metersQuantity,
+        tx.pricePerMeter,
+        tx.totalAmountEgp,
+        tx.pointsEarned,
+        pointCost,
+        (tx.financialLiabilityEgp ?? (tx.pointsEarned * pointCost)).toFixed(2),
+        `"${tx.driverName}"`,
+        `"${tx.carPlate}"`,
+      ];
+    });
 
     const csvContent =
       '\uFEFF' +
@@ -544,7 +599,7 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
     const volume = stTx.reduce((sum, t) => sum + (t.metersQuantity || 0), 0);
     const revenue = stTx.reduce((sum, t) => sum + (t.totalAmountEgp || 0), 0);
     const points = stTx.reduce((sum, t) => sum + (t.pointsEarned || 0), 0);
-    const costPerPoint = st.costPerPointEgp ?? 0.35;
+    const costPerPoint = st.costPerPointEgp ?? defaultCost;
     const liability = points * costPerPoint;
     return {
       station: st,
@@ -1543,15 +1598,25 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
       {activeSubTab === 'matrix' && (
         <div className="space-y-5 animate-in fade-in">
           {/* Bulk Region Update Tool */}
-          <div className="bg-gradient-to-r from-teal-900 via-slate-900 to-teal-950 text-white p-5 rounded-3xl border border-teal-700/50 shadow-md">
-            <div className="flex items-center gap-2 pb-3 border-b border-white/10">
-              <BadgePercent className="w-5 h-5 text-teal-400" />
-              <h3 className="font-black text-sm text-white">
-                تعديل جماعي لتكلفة ومعدل النقاط لمنطقة جغرافية بالكامل
-              </h3>
+          <div className="bg-gradient-to-r from-teal-900 via-slate-900 to-teal-950 text-white p-5 sm:p-6 rounded-3xl border border-teal-700/50 shadow-md space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <BadgePercent className="w-5 h-5 text-teal-400" />
+                <div>
+                  <h3 className="font-black text-sm text-white">
+                    تعديل واعتماد تكلفة نقطة الولاء وتعميمها على كامل المنظومة
+                  </h3>
+                  <p className="text-[11px] text-teal-200 mt-0.5">
+                    القرار المالي المعتمد يغير تلقائياً نقاط كافة الهدايا (100+ هدية) واستوديو الأفكار بالذكاء الاصطناعي وحاسبة النقاط
+                  </p>
+                </div>
+              </div>
+              <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-1 rounded-full shrink-0">
+                اعتماد الإدارة المالية المباشر 💼
+              </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-4 items-end">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
               <div>
                 <label className="text-[11px] text-teal-200 font-bold block mb-1">
                   المنطقة المستهدفة:
@@ -1561,7 +1626,7 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
                   onChange={(e) => setBulkRegion(e.target.value)}
                   className="w-full text-xs bg-slate-800 border border-teal-500/40 rounded-xl px-3 py-2 text-white font-bold outline-none"
                 >
-                  <option value="all">🌟 جميع المحطات والجمهورية بالكامل (تطبيق على الكل)</option>
+                  <option value="all">🌟 جميع المحطات والجمهورية بالكامل (تطبيق وتعميم على الكل)</option>
                   {regions.map((reg) => (
                     <option key={reg} value={reg}>
                       منطقة: {reg}
@@ -1623,21 +1688,57 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
                   <Check className="w-4 h-4" />
                   <span>
                     {bulkRegion === 'all'
-                      ? 'تطبيق وتعميم على كافة المحطات ⚡'
+                      ? 'اعتماد وتعميم على المنظومة بالكامل ⚡'
                       : 'تطبيق على محطات المنطقة'}
                   </span>
                 </button>
               </div>
             </div>
 
+            {/* Live Financial Dynamic Impact Preview */}
+            <div className="bg-slate-950/70 rounded-2xl p-3 border border-teal-500/30 text-xs">
+              <span className="text-[10px] font-black text-teal-300 block mb-2">
+                📊 الأثر المالي اللحظي لتكلفة النقطة المقترحة ({Number(bulkCostPerPoint || 0.15).toFixed(2)} ج/نقطة) على كامل التطبيق:
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                  <span className="text-slate-400 block text-[10px]">جركن زيت 4L (520 ج):</span>
+                  <span className="font-mono font-black text-amber-300">
+                    {Math.round(520 / (Number(bulkCostPerPoint) || 0.15))} نقطة
+                  </span>
+                </div>
+                <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                  <span className="text-slate-400 block text-[10px]">فحص أسطوانة (350 ج):</span>
+                  <span className="font-mono font-black text-cyan-300">
+                    {Math.round(350 / (Number(bulkCostPerPoint) || 0.15))} نقطة
+                  </span>
+                </div>
+                <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                  <span className="text-slate-400 block text-[10px]">استوديو الأفكار (50 ج موازنة):</span>
+                  <span className="font-mono font-black text-emerald-300">
+                    {Math.round(50 / (Number(bulkCostPerPoint) || 0.15))} نقطة مكافأة
+                  </span>
+                </div>
+                <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                  <span className="text-slate-400 block text-[10px]">حاسبة ومعادلة النقاط:</span>
+                  <span className="font-mono font-black text-teal-300">
+                    {Number(bulkCostPerPoint || 0.15).toFixed(2)} ج/نقطة استبدال
+                  </span>
+                </div>
+              </div>
+            </div>
+
             {isBulkSuccess && (
-              <div className="mt-3 p-3 bg-emerald-500/25 text-emerald-200 rounded-xl text-xs font-bold border border-emerald-400/50 flex items-center gap-2 animate-in fade-in">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>
-                  {bulkRegion === 'all'
-                    ? `✅ تم تطبيق تكلفة النقطة (${bulkCostPerPoint} ج) ومعدل المنح بنجاح على جميع محطات الجمهورية بالكامل دفعة واحدة! ويمكنك تعديل أي محطة منفردة أدناه حسب رغبتك.`
-                    : `✅ تم تحديث تكلفة النقاط ومعدل المنح بنجاح لجميع محطات منطقة (${bulkRegion})، ويمكنك تعديل أي محطة منفردة أدناه.`}
-                </span>
+              <div className="mt-3 p-3.5 bg-emerald-500/25 text-emerald-100 rounded-2xl text-xs font-bold border border-emerald-400/60 flex items-start gap-2.5 animate-in fade-in">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <span className="block font-black text-white">
+                    ✅ تم اعتماد وتعميم تكلفة النقطة ({bulkCostPerPoint} ج) بنجاح على مستوى المنظومة بالكامل!
+                  </span>
+                  <p className="text-[11px] text-emerald-200 leading-relaxed font-normal">
+                    تم التحديث اللحظي لـ: بنك الهدايا والمكافآت (100+ هدية تغيرت نقاطها ديناميكياً)، استوديو توليد الأفكار بالذكاء الاصطناعي، حاسبة ومعادلة النقاط، وجميع عروض ومسابقات السائقين.
+                  </p>
+                </div>
               </div>
             )}
           </div>
@@ -1683,7 +1784,7 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
                   {filteredStations.map((st) => {
-                    const costPerPoint = st.costPerPointEgp ?? 0.35;
+                    const costPerPoint = st.costPerPointEgp ?? defaultCost;
                     const awardRate = st.pointsAwardRatePerMeter ?? 1.0;
                     const isActive = st.isLoyaltyProgramActive !== false;
                     const isApproved = Boolean(st.financialApprovedByAdmin);
@@ -1716,12 +1817,26 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
                               value={costPerPoint}
                               onChange={(e) =>
                                 handleUpdateStationFinancial(st.id, {
-                                  costPerPointEgp: parseFloat(e.target.value) || 0.35,
+                                  costPerPointEgp: parseFloat(e.target.value) || defaultCost,
                                 })
                               }
                               className="w-18 text-center bg-slate-50 border border-slate-300 focus:border-emerald-500 rounded-lg px-1.5 py-1 text-xs font-mono font-bold text-slate-900 outline-none"
                             />
                             <span className="text-[10px] text-slate-500 font-bold">ج</span>
+                            <button
+                              type="button"
+                              title="اعتماد وتعميم تكلفة هذه المحطة على بنك الهدايا واستوديو الأفكار وكامل المنظومة"
+                              onClick={() => {
+                                setBulkCostPerPoint(costPerPoint);
+                                const { config: syncedCfg } = recalculateSystemForFinancialPointCost(costPerPoint);
+                                onUpdateConfig(syncedCfg);
+                                setIsBulkSuccess(true);
+                                setTimeout(() => setIsBulkSuccess(false), 5000);
+                              }}
+                              className="p-1 rounded-md text-teal-600 hover:bg-teal-100 hover:text-teal-800 transition"
+                            >
+                              <Sparkles className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </td>
 
@@ -2029,7 +2144,7 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {transactions.map((tx) => {
-                  const costPerPoint = tx.stationCostPerPointEgp ?? 0.35;
+                  const costPerPoint = tx.stationCostPerPointEgp ?? defaultCost;
                   const liabilityEgp = tx.financialLiabilityEgp ?? (tx.pointsEarned * costPerPoint);
 
                   return (
@@ -2112,6 +2227,17 @@ export const FinancialManagementPortal: React.FC<FinancialManagementPortalProps>
                     };
                     onUpdateConfig(updatedCfg);
                     saveAppConfig(updatedCfg);
+
+                    // مزامنة فورية في الخلفية لسياسة حوافز ونقاط ولاء العاملين في كود المشروع
+                    syncCurrentStateToCodebase({
+                      navStations: getStationLocations().map((s) => ({ ...s, cng: true })) as any,
+                      stationLocations: stationList,
+                      config: updatedCfg,
+                      crew: crewList,
+                      mapFilters: getMapFacilityFilters(),
+                      logoUrl: getMasterStationMapLogo() || config.stationLogoUrl,
+                    }).catch((err) => console.warn('Incentives codebase sync notice:', err));
+
                     setTimeout(() => {
                       setIsSavingIncentives(false);
                       setIncentiveSaveSuccess(true);

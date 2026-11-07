@@ -46,11 +46,11 @@ const DEFAULT_VARIABLES: FormulaVariable[] = [
     id: 'var-cost',
     key: 'cost_per_point',
     name: 'تكلفة النقطة الواحدة على الشركة',
-    value: 0.35,
+    value: 0.15,
     unit: 'جنية/نقطة',
     operation: 'divide',
     isCore: true,
-    description: 'القيمة المالية التقديرية للنقطة الواحدة المحملة على موازنة التسويق',
+    description: 'القيمة المالية المعتمدة من الإدارة المالية للنقطة الواحدة (0.15 ج/نقطة)',
   },
   {
     id: 'var-budget',
@@ -117,8 +117,8 @@ export const PromotionsFormulaManager: React.FC = () => {
     } catch {}
     return {
       formulaName: 'معادلة كارجاس القياسية لتوزيع الموازنة ومكافآت النقاط',
-      formulaDescription: 'المعادلة الرئيسية لحساب عدد نقاط الولاء الممنوحة للسائق والقيمة المالية المعادلة بالجنية بناءً على الموازنة وتكلفة النقطة.',
-      costPerPointEgp: 0.35,
+      formulaDescription: 'المعادلة الرئيسية لحساب عدد نقاط الولاء الممنوحة للسائق والقيمة المالية المعادلة بالجنية بناءً على الموازنة وتكلفة النقطة (0.15 ج).',
+      costPerPointEgp: 0.15,
       roundingMode: 'round',
       minPointsThreshold: 20,
       variables: DEFAULT_VARIABLES,
@@ -281,7 +281,7 @@ export const PromotionsFormulaManager: React.FC = () => {
 
   // Live Simulator Calculation
   const simulationResult = useMemo(() => {
-    const cost = formulaData.costPerPointEgp > 0 ? formulaData.costPerPointEgp : 0.35;
+    const cost = formulaData.costPerPointEgp > 0 ? formulaData.costPerPointEgp : 0.15;
     const drivers = simDrivers > 0 ? simDrivers : 1;
     const perDriverCash = simBudget / drivers;
     const afterMulCash = perDriverCash * simMultiplier;
@@ -382,13 +382,13 @@ export const PromotionsFormulaManager: React.FC = () => {
                 min="0.01"
                 max="10"
                 value={costPerPoint}
-                onChange={(e) => handleCostPerPointChange(parseFloat(e.target.value) || 0.35)}
+                onChange={(e) => handleCostPerPointChange(parseFloat(e.target.value) || 0.15)}
                 className="w-full p-3 bg-slate-50 border-2 border-emerald-500 rounded-2xl font-mono font-black text-xl text-slate-900 outline-none focus:bg-white"
               />
               <span className="text-sm font-bold text-slate-700 whitespace-nowrap">جنية / نقطة</span>
             </div>
             <p className="text-[11px] text-slate-400">
-              يمكنك كتابة أي رقم مثل 0.25 أو 0.35 أو 0.50 أو 1.00
+              يمكنك كتابة أي رقم مثل 0.15 أو 0.20 أو 0.25 أو 0.35 أو 0.50
             </p>
           </div>
 
@@ -399,11 +399,11 @@ export const PromotionsFormulaManager: React.FC = () => {
             </label>
             <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
               {[
+                { label: '0.15 ج', val: 0.15, desc: 'معتمد المالية' },
                 { label: '0.20 ج', val: 0.20, desc: 'اقتصادي' },
                 { label: '0.25 ج', val: 0.25, desc: 'تحفيزي' },
-                { label: '0.35 ج', val: 0.35, desc: 'القياسي' },
+                { label: '0.35 ج', val: 0.35, desc: 'مرن' },
                 { label: '0.50 ج', val: 0.50, desc: 'مضاعف' },
-                { label: '1.00 ج', val: 1.00, desc: 'شراكات VIP' },
               ].map((p) => (
                 <button
                   key={p.val}

@@ -21,6 +21,7 @@ import {
   Mic,
   MicOff,
   Volume2,
+  VolumeX,
   AlertTriangle,
   Car,
 } from 'lucide-react';
@@ -31,6 +32,13 @@ import {
   getMasterStationMapLogo,
   MASTER_MAP_LOGO_EVENT,
 } from '../services/storageService';
+import {
+  playNavigationVoice,
+  generateVoiceGuidanceSpeech,
+  stopNavigationVoice,
+  NAVIGATION_VOICES,
+  NavigationVoiceId,
+} from '../services/voiceNavigationService';
 
 // Helper to detect Egyptian Governorate for a station
 export function detectGovernorate(name: string = '', address: string = '', city: string = ''): string {
@@ -118,6 +126,10 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
   const [isListening, setIsListening] = useState(false);
   const [voiceNotice, setVoiceNotice] = useState<string>('');
   const [isSpeakingAnswer, setIsSpeakingAnswer] = useState(false);
+  // Active Navigation Voice (شاكر المصري / حامد العربي / وضاح)
+  const [activeVoiceId, setActiveVoiceId] = useState<NavigationVoiceId>(
+    (config.wasalnyConfig?.voiceGuidance as NavigationVoiceId) || 'shakir_egyptian'
+  );
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -311,31 +323,25 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
     if (onSelectStation) onSelectStation(st);
   };
 
-  // Egyptian Wadah Voice Guidance (صوت وضاح المصري الأصيل والمجاني)
+  // Egyptian & Arabic Human Voice Guidance (شاكر المصري / حامد العربي / وضاح)
   const speakWadahVoice = (text: string) => {
-    if (!('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'ar-EG';
-    const voices = window.speechSynthesis.getVoices();
-    const arEgVoice =
-      voices.find((v) => v.lang.includes('ar-EG') || v.lang.includes('ar_EG')) ||
-      voices.find((v) => v.lang.startsWith('ar'));
-    if (arEgVoice) utterance.voice = arEgVoice;
-    utterance.rate = 1.0;
-    utterance.pitch = 0.95;
-    utterance.onstart = () => setIsSpeakingAnswer(true);
-    utterance.onend = () => setIsSpeakingAnswer(false);
-    utterance.onerror = () => setIsSpeakingAnswer(false);
-    window.speechSynthesis.speak(utterance);
+    if (activeVoiceId === 'silent') return;
+    playNavigationVoice(text, activeVoiceId, {
+      onStart: () => setIsSpeakingAnswer(true),
+      onEnd: () => setIsSpeakingAnswer(false),
+      onError: () => setIsSpeakingAnswer(false),
+    });
   };
 
   const handlePlayWadahGuidance = (st?: CargasStationLocation | null) => {
+    if (isSpeakingAnswer) {
+      stopNavigationVoice();
+      setIsSpeakingAnswer(false);
+      return;
+    }
     const target = st || nearestStation || selectedStation || sortedStations[0];
     if (!target) return;
-    const distanceStr = target.distanceFromUserKm !== undefined ? `على بُعد ${target.distanceFromUserKm} كيلو منك، ` : '';
-    const crowdStr = target.crowdLevel ? `وحالة المحطة دلوقتي ${target.crowdLevel}، ` : 'والمحطة رايقة وسريعة، ';
-    const speech = `يا هلا بيك يا باشا! أنا وضاح، معاك في الطريق خطوة بخطوة... أقرب محطة كارجاس ليك هي محطة ${target.name}، ${distanceStr}${crowdStr}طريقك سالك وضغط الغاز ممتاز، دوس على اللوجو أو زرار وصّلني ويلا بينا نتحرك سوا على خرائط جوجل!`;
+    const speech = generateVoiceGuidanceSpeech(target, activeVoiceId);
     setVoiceNotice(speech);
     speakWadahVoice(speech);
   };
@@ -510,14 +516,20 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
 
   // Auto-play voice guidance on open if enabled in wasalnyConfig
   useEffect(() => {
-    if (config.wasalnyConfig?.autoVoiceOnOpen && config.wasalnyConfig?.voiceGuidance !== 'silent') {
-      const welcome = config.wasalnyConfig.customWelcomeMessage || 'أهلاً بيك يا باشا في تطبيق وصّلني كارجاس! معاك وضاح، جاري توجيهك لأقرب محطة غاز طبيعي.';
+    if (config.wasalnyConfig?.autoVoiceOnOpen && config.wasalnyConfig?.voiceGuidance !== 'silent' && activeVoiceId !== 'silent') {
+      const defaultMsg =
+        activeVoiceId === 'shakir_egyptian'
+          ? 'أهلاً بحضرتك يا فندم في تطبيق وصّلني كارجاس! معاك شاكر، جاري توجيهك لأقرب محطة غاز طبيعي.'
+          : activeVoiceId === 'hamed_arabic'
+          ? 'مرحباً بك في تطبيق وصّلني كارجاس. معك حامد، جاري توجيهك لأقرب محطة غاز طبيعي.'
+          : 'أهلاً بيك يا باشا في تطبيق وصّلني كارجاس! معاك وضاح، جاري توجيهك لأقرب محطة غاز طبيعي.';
+      const welcome = config.wasalnyConfig.customWelcomeMessage || defaultMsg;
       const timer = setTimeout(() => {
         speakWadahVoice(welcome);
       }, 700);
       return () => clearTimeout(timer);
     }
-  }, []);
+  }, [activeVoiceId]);
 
   // Initialize Leaflet Map once with proper cleanup and size invalidation
   useEffect(() => {
@@ -711,77 +723,31 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
         </div>
       )}
 
-      {/* Voice Assistant / Voice Search Command Bar */}
-      <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white rounded-3xl p-4 sm:p-5 shadow-lg border border-emerald-800/40 space-y-3">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={toggleListening}
-              className={`w-12 h-12 rounded-2xl flex items-center justify-center transition shadow-lg shrink-0 ${
-                isListening
-                  ? 'bg-rose-600 text-white animate-bounce ring-4 ring-rose-400/50'
-                  : 'bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 hover:scale-105 active:scale-95'
-              }`}
-              title={isListening ? 'جارٍ الاستماع...' : 'تحدث بالصوت: قل "أقرب محطة كارجاس"'}
-            >
-              {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
-            </button>
-            <div>
-              <div className="flex items-center gap-2">
-                <h4 className="font-black text-sm text-white">
-                  المساعد الصوتي الملاحي: "وصّلني كارجاس" 🎙️
-                </h4>
-                <span className="text-[10px] bg-emerald-500/30 text-emerald-300 font-bold px-2 py-0.5 rounded-full border border-emerald-400/30">
-                  صوت ذكي
-                </span>
-              </div>
-              <p className="text-xs text-slate-300 font-light mt-0.5">
-                تحدث واطلب: <span className="text-emerald-300 font-bold">"أقرب محطة كارجاس"</span> أو <span className="text-emerald-300 font-bold">"أقرب مركز تحويل"</span> أو <span className="text-emerald-300 font-bold">"مركز زيوت"</span>
-              </p>
-            </div>
+      {/* Direct GPS Quick Bar */}
+      <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white rounded-3xl p-4 sm:p-5 shadow-lg border border-emerald-800/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-emerald-600/30 border border-emerald-500/50 flex items-center justify-center text-emerald-300 font-black text-lg">
+            📍
           </div>
-
-          {/* GPS Locate Button */}
-          <button
-            onClick={locateUser}
-            disabled={isLocating}
-            className="w-full sm:w-auto bg-white/10 hover:bg-white/20 text-white text-xs font-black px-4 py-2.5 rounded-2xl transition border border-white/20 backdrop-blur-md flex items-center justify-center gap-2"
-          >
-            <Compass className={`w-4 h-4 text-emerald-300 ${isLocating ? 'animate-spin' : ''}`} />
-            <span>{isLocating ? 'جارٍ فحص الـ GPS...' : '📍 تحديد موقعي الآن'}</span>
-          </button>
+          <div>
+            <h4 className="font-black text-sm text-white">
+              نظام الملاحة الذكي لأقرب محطة كارجاس
+            </h4>
+            <p className="text-xs text-slate-300 font-light mt-0.5">
+              تحديد فوري لأقرب محطة غاز طبيعي وتوجيه مباشر عبر خرائط جوجل (Google Maps)
+            </p>
+          </div>
         </div>
 
-        {/* Quick Voice Prompt Pills */}
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          <span className="text-[10px] text-slate-400 font-medium py-1">أوامر سريعة:</span>
-          {[
-            'أقرب محطة كارجاس',
-            'أقرب مركز تحويل سيارات',
-            'أقرب مركز زيوت كارجاس',
-            'فحص واختبار أسطوانات',
-            'محطة في شبرا',
-            'محطة في سموحة',
-          ].map((prompt, i) => (
-            <button
-              key={i}
-              onClick={() => handleVoiceCommand(prompt)}
-              className="bg-white/10 hover:bg-white/20 text-emerald-200 text-[11px] font-bold px-3 py-1 rounded-full border border-white/10 transition active:scale-95"
-            >
-              "{prompt}"
-            </button>
-          ))}
-        </div>
-
-        {/* Voice Feedback Banner */}
-        {voiceNotice && (
-          <div className="bg-emerald-900/80 border border-emerald-400/40 rounded-2xl p-3 text-xs text-emerald-100 flex items-start gap-2.5 animate-in fade-in">
-            <Volume2 className="w-4 h-4 text-emerald-300 shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <p className="leading-relaxed">{voiceNotice}</p>
-            </div>
-          </div>
-        )}
+        {/* GPS Locate Button */}
+        <button
+          onClick={locateUser}
+          disabled={isLocating}
+          className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black px-4 py-2.5 rounded-2xl transition shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+        >
+          <Compass className={`w-4 h-4 text-amber-300 ${isLocating ? 'animate-spin' : ''}`} />
+          <span>{isLocating ? 'جارٍ فحص الـ GPS...' : '📍 تحديد موقعي الحالي بالـ GPS'}</span>
+        </button>
       </div>
 
       {/* Nearest Station Highlight Alert Card if found */}
@@ -824,15 +790,55 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-            {/* Egyptian Wadah Voice Guidance Button */}
-            <button
-              onClick={() => handlePlayWadahGuidance(nearestStation)}
-              className="flex-1 sm:flex-initial bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black px-3.5 py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm active:scale-95 whitespace-nowrap"
-              title="استمع للإرشاد الصوتي المصري بصوت وضاح"
-            >
-              <Volume2 className="w-4 h-4 text-slate-950" />
-              <span>صوت وضاح المصري 🔊</span>
-            </button>
+            {/* Egyptian & Arabic Human Voice Guidance with Live Selector */}
+            <div className="flex items-center gap-1 bg-amber-50 p-1 rounded-2xl border border-amber-300 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => handlePlayWadahGuidance(nearestStation)}
+                className={`flex-1 sm:flex-initial text-xs font-black px-3.5 py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm active:scale-95 whitespace-nowrap cursor-pointer ${
+                  isSpeakingAnswer
+                    ? 'bg-rose-500 hover:bg-rose-600 text-white animate-pulse'
+                    : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
+                }`}
+                title={isSpeakingAnswer ? 'إيقاف الصوت ⏹️' : `استمع للإرشاد الصوتي بصوت ${NAVIGATION_VOICES[activeVoiceId]?.shortName || 'شاكر'}`}
+              >
+                {isSpeakingAnswer ? <VolumeX className="w-4 h-4 text-white" /> : <Volume2 className="w-4 h-4 text-slate-950" />}
+                <span>{isSpeakingAnswer ? 'إيقاف الصوت ⏹️' : `${NAVIGATION_VOICES[activeVoiceId]?.shortName || 'شاكر المصري'} 🔊`}</span>
+              </button>
+
+              <select
+                value={activeVoiceId}
+                onChange={(e) => {
+                  const newVoice = e.target.value as NavigationVoiceId;
+                  setActiveVoiceId(newVoice);
+                  if (newVoice !== 'silent') {
+                    const sample =
+                      newVoice === 'shakir_egyptian'
+                        ? 'أهلاً بحضرتك يا فندم، أنا شاكر معاك على الطريق.'
+                        : newVoice === 'hamed_arabic'
+                        ? 'مرحباً بك، معك حامد مرشدك الذكي.'
+                        : 'يا هلا بيك يا باشا، معاك وضاح في كارجاس!';
+                    setVoiceNotice(sample);
+                    playNavigationVoice(sample, newVoice, {
+                      onStart: () => setIsSpeakingAnswer(true),
+                      onEnd: () => setIsSpeakingAnswer(false),
+                      onError: () => setIsSpeakingAnswer(false),
+                    });
+                  } else {
+                    stopNavigationVoice();
+                    setIsSpeakingAnswer(false);
+                  }
+                }}
+                className="bg-white text-slate-800 text-[11px] font-bold py-2 px-2 rounded-xl border border-amber-200 outline-hidden cursor-pointer"
+                title="تغيير نبرة الصوت البشري (شاكر المصري / حامد العربي / وضاح)"
+              >
+                <option value="shakir_egyptian">🎙️ شاكر (مصري بشري)</option>
+                <option value="hamed_arabic">🔊 حامد (عربي فصيح)</option>
+                <option value="wadah_egyptian">📢 وضاح (مصري شعبي)</option>
+                <option value="moen_advisor">🤖 مُعِين (استشاري)</option>
+                <option value="silent">🔇 كتم الصوت</option>
+              </select>
+            </div>
 
             <button
               onClick={() => focusStationOnMap(nearestStation)}
@@ -1091,18 +1097,6 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
                           </span>
 
                           <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handlePlayWadahGuidance(st);
-                              }}
-                              className="p-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 transition"
-                              title="استمع للإرشاد الصوتي بصوت وضاح"
-                            >
-                              <Volume2 className="w-3.5 h-3.5" />
-                            </button>
-
                             <a
                               href={navUrl}
                               target="_blank"
@@ -1238,18 +1232,6 @@ export const CargasStationsMap: React.FC<CargasStationsMapProps> = ({
                       )}
 
                       <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handlePlayWadahGuidance(st);
-                          }}
-                          className="p-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 transition"
-                          title="استمع للإرشاد الصوتي بصوت وضاح"
-                        >
-                          <Volume2 className="w-3.5 h-3.5" />
-                        </button>
-
                         <a
                           href={navUrl}
                           target="_blank"

@@ -1,10 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavigationState } from '../types';
-import { speechService } from '../services/speechService';
 import { getCongestionBadge } from '../utils/companyAssets';
 import { 
-  Volume2, 
-  VolumeX, 
   X, 
   CornerUpRight, 
   CornerUpLeft, 
@@ -47,13 +44,6 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
     setEtaTime(now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }));
   }, [remainingDurationMin]);
 
-  // Voice announcement when current step changes
-  useEffect(() => {
-    if (currentStep && !isMuted) {
-      speechService.playChime(currentStep.maneuver.includes('arrive') ? 'arrive' : 'turn');
-      speechService.speak(currentStep.instruction, { priority: true });
-    }
-  }, [currentStepIndex, isMuted]);
 
   if (!targetStation) return null;
 
@@ -68,7 +58,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   };
 
   return (
-    <div className="fixed inset-x-0 top-0 bottom-0 pointer-events-none z-[1000] flex flex-col justify-between p-3 md:p-6">
+    <div className="absolute inset-0 pointer-events-none z-[1000] flex flex-col justify-between p-3 md:p-6 overflow-hidden">
       {/* Top Banner: Turn-by-Turn Instruction Card (Google Maps Style) */}
       <div className="pointer-events-auto max-w-xl mx-auto w-full bg-slate-900/95 border border-emerald-500/40 rounded-2xl shadow-2xl backdrop-blur-xl p-4 text-white animate-in slide-in-from-top-6 duration-300">
         <div className="flex items-start justify-between gap-3">
@@ -90,24 +80,6 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
                 بعد {Math.round(currentStep?.distance || 150)} متر تقريباً
               </div>
             </div>
-          </div>
-
-          {/* Quick Voice Controls */}
-          <div className="flex flex-col items-center gap-1.5 shrink-0">
-            <button
-              onClick={onToggleMute}
-              title={isMuted ? 'تفعيل الإرشاد الصوتي' : 'كتم الصوت'}
-              className={`p-3 rounded-xl border transition-all shadow-lg cursor-pointer ${
-                isMuted
-                  ? 'bg-rose-500/20 text-rose-400 border-rose-500/50 hover:bg-rose-500/30'
-                  : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 hover:bg-emerald-500/30 animate-pulse'
-              }`}
-            >
-              {isMuted ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
-            </button>
-            <span className="text-[10px] font-bold text-slate-300">
-              {isMuted ? 'الصوت مكتوم' : 'الصوت يعمل'}
-            </span>
           </div>
         </div>
 
