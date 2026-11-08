@@ -100,7 +100,7 @@ export function CargasNavApp({
       const saved = localStorage.getItem('cargas_stations_v2') || localStorage.getItem('cargas_stations_v2_backup');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed) && parsed.length >= INITIAL_CARGAS_STATIONS.length) {
           return parsed.map((s: any) => ({
             ...s,
             company: s.company || 'كارجاس'

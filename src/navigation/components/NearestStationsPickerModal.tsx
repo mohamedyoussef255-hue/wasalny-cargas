@@ -219,19 +219,34 @@ export const NearestStationsPickerModal: React.FC<NearestStationsPickerModalProp
                     </span>
                   </div>
 
-                  {/* Actions: Direct Google Maps Navigation (Primary) & Show on App Map */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onNavigateToGoogleMaps(station);
-                      }}
-                      className="w-full py-2.5 px-4 bg-gradient-to-r from-emerald-600 via-emerald-700 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-xs md:text-sm rounded-xl shadow-lg shadow-emerald-950/60 flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 border border-emerald-400"
-                    >
-                      <Navigation className="w-4 h-4 text-amber-300 fill-amber-300" />
-                      <span>الملاحة عبر خرائط جوجل (Google Maps) 🚀</span>
-                    </button>
+                  {/* Actions: Direct Deep Linking to Google Maps or Waze (0 API cost) & Show on Leaflet Map */}
+                  <div className="space-y-2 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onNavigateToGoogleMaps(station);
+                        }}
+                        className="py-2.5 px-3 bg-gradient-to-r from-emerald-600 via-emerald-700 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-xs md:text-sm rounded-xl shadow-lg shadow-emerald-950/60 flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 border border-emerald-400"
+                        title="فتح المسار وبدء التوجيه في تطبيق Google Maps المثبت على هاتفك (Deep Linking مجاني)"
+                      >
+                        <Navigation className="w-4 h-4 text-amber-300 fill-amber-300 shrink-0" />
+                        <span>بدء التوجيه (Google Maps) 🚀</span>
+                      </button>
+
+                      <a
+                        href={`https://waze.com/ul?ll=${station.lat},${station.lng}&navigate=yes`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => onClose()}
+                        className="py-2.5 px-3 bg-gradient-to-r from-cyan-600 to-blue-700 hover:from-cyan-500 hover:to-blue-600 text-white font-black text-xs md:text-sm rounded-xl shadow-lg flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 border border-cyan-400"
+                        title="فتح المسار وبدء التوجيه في تطبيق Waze المثبت على هاتفك"
+                      >
+                        <span className="text-base">🚗</span>
+                        <span>بدء التوجيه (تطبيق Waze)</span>
+                      </a>
+                    </div>
 
                     <button
                       type="button"
@@ -239,10 +254,10 @@ export const NearestStationsPickerModal: React.FC<NearestStationsPickerModalProp
                         onClose();
                         onSelectStationOnMap(station);
                       }}
-                      className="w-full py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95"
+                      className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95"
                     >
                       <MapPin className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>عرض وتكبير على خريطة التطبيق 🗺️</span>
+                      <span>عرض وتكبير الموقع على خريطة التطبيق (محرك Leaflet) 🗺️</span>
                     </button>
                   </div>
                 </div>
@@ -251,14 +266,22 @@ export const NearestStationsPickerModal: React.FC<NearestStationsPickerModalProp
           )}
         </div>
 
-        {/* Footer */}
-        <div className="p-3 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between text-xs text-slate-400">
-          <span className="text-[11px]">
-            شركة غاز السيارات (كارجاس) — طريقنا واحد 🇪🇬
-          </span>
+        {/* Technical Architecture Bar */}
+        <div className="px-4 py-2 bg-slate-950/95 border-t border-slate-800 text-[10px] text-slate-400 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 px-2 py-0.5 rounded-md font-bold">
+              🗺️ محرك Leaflet.js (&lt;40KB)
+            </span>
+            <span className="bg-teal-950/80 text-teal-300 border border-teal-700/60 px-2 py-0.5 rounded-md font-bold">
+              ⚡ قاعدة GeoJSON مدمجة (350+ محطة)
+            </span>
+            <span className="bg-blue-950/80 text-blue-300 border border-blue-700/60 px-2 py-0.5 rounded-md font-bold">
+              🔗 Deep Linking مجاني 100%
+            </span>
+          </div>
           <button
             onClick={onClose}
-            className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl font-bold transition text-xs"
+            className="px-4 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl font-bold transition text-xs cursor-pointer"
           >
             إغلاق
           </button>
